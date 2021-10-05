@@ -1,0 +1,83 @@
+site_name: Influenciae
+
+#google_analytics:
+#  - UA-132343476-2
+#  - auto
+
+nav:
+  - Home: index.md
+  - Attributions methods:
+      - Saliency: api/saliency.md
+      - Gradient Input: api/gradient_input.md
+      - Occlusion sensitivity: api/occlusion.md
+      - Rise: api/rise.md
+      - Integrated Gradient: api/integrated_gradients.md
+      - SmoothGrad: api/smoothgrad.md
+      - Grad-CAM: api/grad_cam.md
+      - Grad-CAM++: api/grad_cam_pp.md
+      - DeconvNet: api/deconvnet.md
+      - Guided Backprop: api/guided_backpropagation.md
+      - SquareGrad: api/square_grad.md
+      - VarGrad: api/vargrad.md
+      - Lime: api/lime.md
+      - KernelSHAP: api/kernel_shap.md
+  - Concept based:
+      - Cav: api/cav.md
+      - Tcav: api/tcav.md
+  - Feature visualization: api/feature_viz.md
+  - Attributions metrics:
+      - Deletion: api/deletion.md
+      - Insertion: api/insertion.md
+      - MuFidelity: api/mu_fidelity.md
+      - AverageStability: api/avg_stability.md
+  - Contributing: contributing.md
+
+theme:
+  name: "material"
+  logo: assets/x_logo.png
+  favicon: assets/x_logo.png
+  palette:
+    - scheme: default
+      primary: white
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+plugins:
+  - numkdoc
+  - search
+
+markdown_extensions:
+  - footnotes
+  - extra
+  - admonition
+  - pymdownx.arithmatex
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - codehilite
+  - toc:
+      permalink: true
+      toc_depth: 1-2
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+      clickable_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+
+extra_css:
+  - css/custom.css
+
+extra_javascript:
+  - https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js
+  - js/custom.js
+
+repo_name: "deel-ai/influenciae"
+repo_url: "https://github.com/deel-ai/influenciae"
