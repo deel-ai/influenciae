@@ -12,7 +12,7 @@ setup(
     author="DEEL Core Team",
     author_email="agustin-martin.picard@irt-saintexupery.com",
     license="MIT",
-    install_requires=['tensorflow>=2.1.0', 'numpy'],
+    install_requires=['tensorflow>=2.3.0', 'numpy'],
     extras_require={
         "tests": ["pytest", "pylint"],
         "docs": ["mkdocs", "mkdocs-material", "numkdoc"],
