@@ -30,7 +30,33 @@ class IHVPCalculator(Enum):
         return IHVPCalculator.Cgd
 
 
+
 class BaseInfluenceCalculator(ABC):
+    """
+    A base class for objets that calculate the different quantities related to the influence
+    functions.
+
+    The methods currently implemented are available to evaluate one or a group of point(s):
+    - Influence function vectors: the weights difference when removing point(s)
+    - Influence values/Cook's distance: a measure of reliance of the model on the individual
+      point(s)
+
+    Parameters
+    ----------
+    model
+        The TF2.X model implementing the InfluenceModel interface.
+    dataset
+        A batched TF dataset containing the training dataset over which we will estimate the
+        inverse-hessian-vector product.
+    ihvp_calculator
+        Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
+        object or an InverseHessianVectorProduct object.
+    n_samples_for_hessian
+        An integer indicating the amount of samples to take from the provided train dataset.
+    shuffle_buffer_size
+        An integer indicating the buffer size of the train dataset's shuffle operation -- when
+        choosing the amount of samples for the hessian.
+    """
     def __init__(
             self,
             model: InfluenceModel,
@@ -39,32 +65,12 @@ class BaseInfluenceCalculator(ABC):
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
     ):
-        """
-        A base class for objets that calculate the different quantities related to the influence
-        functions.
-
-        The methods currently implemented are available to evaluate one or a group of point(s):
-        - Influence function vectors: the weights difference when removing point(s)
-        - Influence values/Cook's distance: a measure of reliance of the model on the individual
-          point(s)
-
-        Parameters
-        ----------
-        model
-            The TF2.X model implementing the InfluenceModel interface.
-        dataset
-            A batched TF dataset containing the training dataset over which we will estimate the
-            inverse-hessian-vector product.
-        ihvp_calculator
-            Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
-            object or an InverseHessianVectorProduct object.
-        n_samples_for_hessian
-            An integer indicating the amount of samples to take from the provided train dataset.
-        shuffle_buffer_size
-            An integer indicating the buffer size of the train dataset's shuffle operation -- when
-            choosing the amount of samples for the hessian.
-        """
         self.model = model
+
+        if not is_dataset_batched(dataset):
+            raise ValueError("The dataset must be batched before performing this operation.")
+
+        self.train_size = dataset.cardinality().numpy() * dataset._batch_size
 
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
@@ -193,7 +199,6 @@ class BaseInfluenceCalculator(ABC):
             A tensor containing one influence value for the whole group.
         """
         raise NotImplementedError()
-
 
     @staticmethod
     def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset):
