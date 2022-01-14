@@ -38,6 +38,7 @@ class InfluenceModel:
 
         if target_layer is None:
             target_layer = self._find_last_weight_layer(model)
+        self.target_layer = target_layer
 
         self.model = model
         self.weights_layer = find_layer(model, target_layer)
@@ -59,6 +60,18 @@ class InfluenceModel:
             Outputs of the original model.
         """
         return self.model(x)
+
+    @property
+    def layers(self):
+        """
+        Access the layers of the original model
+
+        Returns
+        -------
+        layers
+            The layers of the original model
+        """
+        return self.model.layers
 
     def batch_loss(self, dataset: tf.data.Dataset) -> tf.Tensor:
         """
