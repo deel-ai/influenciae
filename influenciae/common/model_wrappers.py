@@ -64,7 +64,7 @@ class InfluenceModel:
     @property
     def layers(self):
         """
-        Access the layers of the original model.
+        Access the layers of the original model
 
         Returns
         -------
