@@ -158,7 +158,7 @@ class ExactIHVP(InverseHessianVectorProduct):
             hvp = tf.concat([tf.matmul(self.hessian, vector, transpose_b=True) for vector in group], axis=0)
 
         return hvp
-    
+
 
 class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) finish this implementation
     def __init__(
