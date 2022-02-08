@@ -13,65 +13,74 @@ class InverseHessianVectorProduct(ABC):
         """
         An interface for classes that perform hessian-vector products.
 
-        Args:
-            model: InfluenceModel
-                A TF model following the InfluenceModel interface whose weights we wish to use for the calculation of
-                these (inverse)-hessian-vector products
-            train_dataset:
-                A batched TF dataset containing the training dataset's point we wish to employ for the estimation of
-                the hessian matrix
+        Parameters
+        ----------
+        model
+            A TF model following the InfluenceModel interface whose weights we wish to use for the calculation of
+            these (inverse)-hessian-vector products.
+        train_dataset
+            A batched TF dataset containing the training dataset's point we wish to employ for the estimation of
+            the hessian matrix.
         """
         if not is_dataset_batched(train_dataset):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+
         self.model = model
         self.train_set = train_dataset
 
     @abstractmethod
     def compute_ihvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
-        pass
+        raise NotImplementedError()
 
     @abstractmethod
     def compute_hvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
-        pass
+        raise NotImplementedError()
 
 
 class ExactIHVP(InverseHessianVectorProduct):
     def __init__(self, model: InfluenceModel, train_dataset: tf.data.Dataset):
         """
-        A class that performs the *exact* computation of the inverse-hessian-vector product. As such, it will
-        calculate the hessian of the provided model's loss wrt its parameters, compute its Moore-Penrose pseudo-inverse
-        (for numerical stability) and the multiply it by the gradients.
+        A class that performs the 'exact' computation of the inverse-hessian-vector product.
+        As such, it will calculate the hessian of the provided model's loss wrt its parameters,
+        compute its Moore-Penrose pseudo-inverse (for numerical stability) and the multiply it
+        by the gradients.
 
         To speed up the algorithm, the hessian matrix is calculated once at instantiation.
 
-        For models with a considerable amount of weights, this implementation may be infeasible due to its O(n^2)
-        complexity for the hessian, plus the O(n^3) for its inversion. If its memory consumption is too high, you
-        should consider using the CGD approximation.
+        For models with a considerable amount of weights, this implementation may be infeasible
+        due to its O(n^2) complexity for the hessian, plus the O(n^3) for its inversion.
+        If its memory consumption is too high, you should consider using the CGD approximation.
 
-        Args:
-            model: InfluenceModel
-                The TF2.X model implementing the InfluenceModel interface
-            train_dataset: tf.data.Dataset
-                The TF dataset, already batched and containing only the samples we wish to use for the computation of
-                the hessian matrix
+        Parameters
+        ----------
+        model
+            The TF2.X model implementing the InfluenceModel interface.
+        train_dataset
+            The TF dataset, already batched and containing only the samples we wish to use for
+            the computation of the hessian matrix.
         """
         super(ExactIHVP, self).__init__(model, train_dataset)
+
         self.inv_hessian = self._compute_inv_hessian(self.train_set)
         self.hessian = None
 
     def _compute_inv_hessian(self, dataset: tf.data.Dataset) -> tf.Tensor:
         """
-        Compute the (pseudo)-inverse of the hessian matrix wrt to the model's parameters using backward-mode AD.
+        Compute the (pseudo)-inverse of the hessian matrix wrt to the model's parameters using
+        backward-mode AD.
 
-        Disclaimer: this implementation trades memory usage for speed, so it can be quite memory intensive, especially
-        when dealing with big models.
+        Disclaimer: this implementation trades memory usage for speed, so it can be quite
+        memory intensive, especially when dealing with big models.
 
-        Args:
-            dataset: tf.data.Dataset
-                A TF dataset containing the whole or part of the training dataset for the computation of the inverse
-                of the mean hessian matrix.
+        Parameters
+        ----------
+        dataset
+            A TF dataset containing the whole or part of the training dataset for the
+            computation of the inverse of the mean hessian matrix.
 
-        Returns:
+        Returns
+        ----------
+        inv_hessian
             A tf.Tensor with the resulting inverse hessian matrix
         """
         weights = self.model.weights
@@ -87,22 +96,26 @@ class ExactIHVP(InverseHessianVectorProduct):
 
     def compute_ihvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
         """
-        Computes the inverse-hessian-vector product of a group of points using the exact formulation
+        Computes the inverse-hessian-vector product of a group of points using the exact
+        formulation.
 
-        Args:
-            group: tf.data.Dataset
-                A TF dataset containing the group of points of which we wish to compute the inverse-hessian-vector
-                product
-            use_gradient: bool
-                A boolean indicating whether the IHVP is with the gradients wrt to the loss of the points in group or
-                with these vectors instead
+        Parameters
+        ----------
+        group
+            A TF dataset containing the group of points of which we wish to compute the
+            inverse-hessian-vector product.
+        use_gradient
+            A boolean indicating whether the IHVP is with the gradients wrt to the loss of the
+            points in group or with these vectors instead.
 
-        Returns:
-            ihvp: tf.Tensor
-                A tensor containing one rank-1 tensor per input point
+        Returns
+        -------
+        ihvp
+            A tensor containing one rank-1 tensor per input point
         """
         if not is_dataset_batched(group):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+
         if use_gradient:
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             ihvp = tf.matmul(self.inv_hessian, grads, transpose_b=True)
@@ -116,21 +129,26 @@ class ExactIHVP(InverseHessianVectorProduct):
         Computes the hessian-vector product of a group of points using the exact formulation
 
         Args:
-            group: tf.data.Dataset
-                A TF dataset containing the group of points of which we wish to compute the hessian-vector
-                product
-            use_gradient: bool
-                A boolean indicating whether the HVP is with the gradients wrt to the loss of the points in group or
-                with these vectors instead
+        Parameters
+        ----------
+        group
+            A TF dataset containing the group of points of which we wish to compute the
+            hessian-vector product.
+        use_gradient
+            A boolean indicating whether the hvp is with the gradients wrt to the loss of the
+            points in group or with these vectors instead.
 
-        Returns:
-            ihvp: tf.Tensor
-                A tensor containing one rank-1 tensor per input point
+        Returns
+        -------
+        hvp
+            A tensor containing one rank-1 tensor per input point
         """
         if not is_dataset_batched(group):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+
         if self.hessian is None:
-            self.hessian = tf.linalg.pinv(self.inv_hessian)  # TODO(agus) maybe compute the hessian again to avoid numerical error
+            self.hessian = tf.linalg.pinv(self.inv_hessian)
+
         if use_gradient:
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             hvp = tf.matmul(self.hessian, grads, transpose_b=True)
@@ -227,17 +245,19 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
 
     def compute_ihvp(self, group: tf.data.Dataset) -> tf.Tensor:
         """
-        Computes the inverse-hessian-vector product of a group of points approximately using the Conjugate Gradient
-        Descent formulation
+        Computes the inverse-hessian-vector product of a group of points approximately using
+        the Conjugate Gradient Descent formulation.
 
-        Args:
-            group: tf.data.Dataset
-                A TF dataset containing the group of points of which we wish to compute the inverse-hessian-vector
-                product
+        Parameters
+        ----------
+        group
+            A TF dataset containing the group of points of which we wish to compute the
+            inverse-hessian-vector product.
 
-        Returns:
-            ihvp: tf.Tensor
-                A tensor containing one rank-1 tensor per input point
+        Returns
+        -------
+        ihvp
+            A tensor containing one rank-1 tensor per input point.
         """
         if not is_dataset_batched(group):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
@@ -251,10 +271,11 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         grads = self.model.batch_jacobian(feature_maps)
         for x_influence_grad, label in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
+            # @todo watch for broadcast dynamic shape in the cgd function
             _, hessian_vect_product, _, _, _ = tf.linalg.experimental.conjugate_gradient(self, x_influence_grads,
                                                                                          preconditioner=None, x=None,
                                                                                          tol=1e-05,
-                                                                                         max_iter=self.n_cgd_iters)  # todo probably fix the broadcast dynamic shape in the cgd function
+                                                                                         max_iter=self.n_cgd_iters)
             ihvp_list.append(hessian_vect_product)
             if ihvp_shape is None:
                 ihvp_shape = hessian_vect_product.shape
@@ -272,15 +293,18 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         """
         Perform the hessian-vector product for a single feature map
 
-        Args:
-            x: tf.Tensor
-                The gradient vector to be multiplied by the hessian matrix
-            feature_maps_hessian_current: tf.Tensor
-                The current feature map for the hessian calculation
-            y_hessian_current: tf.Tensor
-                The label corresponding to the current feature map
+        Parameters
+        ----------
+        x
+            The gradient vector to be multiplied by the hessian matrix.
+        feature_maps_hessian_current
+            The current feature map for the hessian calculation.
+        y_hessian_current
+            The label corresponding to the current feature map.
 
-        Returns:
+        Returns
+        -------
+        hessian_product
             A tf.Tensor containing the result of the hessian-vector product for a given input point and one pair
             feature map-label.
         """
@@ -302,11 +326,13 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         """
         Computes the mean hessian-vector product for a given feature map over a set of points
 
-        Args:
-            x_initial: tf.Tensor
-                The point of the dataset over which this product will be computed
+        Parameters
+        ----------
+        x_initial
+            The point of the dataset over which this product will be computed
 
-        Returns:
+        Returns
+        -------
             Tensor with the hessian-vector product
         """
         x = tf.reshape(x_initial, tf.shape(self.weights))
