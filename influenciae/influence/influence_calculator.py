@@ -1,3 +1,7 @@
+"""
+Abstract Influence module
+"""
+
 from abc import ABC, abstractmethod
 from enum import Enum
 import tensorflow as tf
