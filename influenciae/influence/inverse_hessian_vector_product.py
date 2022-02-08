@@ -5,7 +5,8 @@ from tensorflow.keras import Model
 from influenciae.common.model_wrappers import InfluenceModel
 from influenciae.common.tf_operations import is_dataset_batched
 
-from typing import Optional
+from ..types import Optional
+from ..common import assert_batched_dataset
 
 
 class InverseHessianVectorProduct(ABC):
@@ -22,8 +23,7 @@ class InverseHessianVectorProduct(ABC):
             A batched TF dataset containing the training dataset's point we wish to employ for the estimation of
             the hessian matrix.
         """
-        if not is_dataset_batched(train_dataset):
-            raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+        assert_batched_dataset(train_dataset)
 
         self.model = model
         self.train_set = train_dataset
@@ -113,8 +113,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         ihvp
             A tensor containing one rank-1 tensor per input point
         """
-        if not is_dataset_batched(group):
-            raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+        assert_batched_dataset(group)
 
         if use_gradient:
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
@@ -143,8 +142,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         hvp
             A tensor containing one rank-1 tensor per input point
         """
-        if not is_dataset_batched(group):
-            raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+        assert_batched_dataset(group)
 
         if self.hessian is None:
             self.hessian = tf.linalg.pinv(self.inv_hessian)

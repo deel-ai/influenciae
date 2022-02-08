@@ -4,6 +4,7 @@ from influenciae.influence.influence_calculator import BaseInfluenceCalculator
 from influenciae.common.tf_operations import is_dataset_batched
 
 from ..types import Optional
+from ..common import assert_batched_dataset
 
 
 class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
@@ -50,8 +51,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             A tensor containing one vector per input point
 
         """
-        if not is_dataset_batched(dataset):
-            raise ValueError("The dataset must be batched before performing this operation.")
+        assert_batched_dataset(dataset)
 
         influence_vectors = self.ihvp_calculator.compute_ihvp(dataset)
         influence_vectors = tf.transpose(influence_vectors)
@@ -93,8 +93,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             dataset_to_evaluate = dataset_train
 
-        if not is_dataset_batched(dataset_train) or not is_dataset_batched(dataset_to_evaluate):
-            raise ValueError("Both datasets must be batched before performing this operation.")
+        assert_batched_dataset(dataset_train)
+        assert_batched_dataset(dataset_to_evaluate)
+
         if dataset_train.cardinality().numpy() * dataset_train._batch_size != dataset_to_evaluate.cardinality().numpy() * dataset_to_evaluate._batch_size:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
 
@@ -127,8 +128,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         influence_group
             A tensor containing one vector for the whole group.
         """
-        if not is_dataset_batched(group):
-            raise ValueError("The dataset must be batched before performing this operation.")
+        assert_batched_dataset(group)
 
         ihvp = self.ihvp_calculator.compute_ihvp(group)
         reduced_ihvp = tf.reduce_sum(ihvp, axis=1)
@@ -171,8 +171,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             group_to_evaluate = group_train
 
-        if not is_dataset_batched(group_train) or not is_dataset_batched(group_to_evaluate):
-            raise ValueError("Both datasets must be batched before performing this operation.")
+        assert_batched_dataset(group_train)
+        assert_batched_dataset(group_to_evaluate)
+
         if group_train.cardinality().numpy() * group_train._batch_size != group_to_evaluate.cardinality().numpy() * group_to_evaluate._batch_size:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
 

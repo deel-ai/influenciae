@@ -48,3 +48,16 @@ def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
         return dataset._batch_size # pylint: disable=W0212
 
     return False
+
+
+def assert_batched_dataset(dataset: tf.data.Dataset):
+    """
+    Throw an error if the dataset is not batched.
+
+    Parameters
+    ----------
+    dataset
+        Tensorflow dataset to check.
+    """
+    if not is_dataset_batched(dataset):
+        raise ValueError("The dataset must be batched before performing this operation.")
