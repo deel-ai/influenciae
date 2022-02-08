@@ -5,7 +5,7 @@ Custom wrappers for tensorflow model
 import tensorflow as tf
 from tensorflow.keras.losses import Reduction # pylint: disable=E0611
 
-from .tf_operations import find_layer, is_dataset_batched
+from .tf_operations import find_layer, assert_batched_dataset
 from ..types import Callable, Optional, Union
 
 
@@ -87,8 +87,7 @@ class InfluenceModel:
         loss_values
             Loss values for each of the points in the dataset.
         """
-        if not is_dataset_batched(dataset):
-            raise ValueError('The dataset is not batched.')
+        assert_batched_dataset(dataset)
 
         loss_values = tf.concat([
             InfluenceModel._loss(self.model, self.loss_function, batch_x, batch_y)
@@ -113,8 +112,7 @@ class InfluenceModel:
             Matrix of the first-order partial derivative of the loss function wrt the
             target_layer weights.
         """
-        if not is_dataset_batched(dataset):
-            raise ValueError('The dataset is not batched.')
+        assert_batched_dataset(dataset)
 
         jacobians = tf.concat([
             InfluenceModel._jacobian(self.model, self.weights, self.loss_function,
@@ -139,8 +137,7 @@ class InfluenceModel:
         gradients
             Gradient values of the loss function wrt the target_layer's weights.
         """
-        if not is_dataset_batched(dataset):
-            raise ValueError('The dataset is not batched.')
+        assert_batched_dataset(dataset)
 
         gradients = tf.concat([
             InfluenceModel._gradient(self.model, self.weights, self.loss_function,
