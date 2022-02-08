@@ -61,3 +61,23 @@ def assert_batched_dataset(dataset: tf.data.Dataset):
     """
     if not is_dataset_batched(dataset):
         raise ValueError("The dataset must be batched before performing this operation.")
+
+
+def dataset_size(dataset: tf.data.Dataset):
+    """
+    Compute the size of a batched tensorflow dataset: batch_size * number of batchs
+
+    Parameters
+    ----------
+    dataset
+        Tensorflow dataset to check.
+
+    Returns
+    -------
+    size
+        Number of points in the dataset
+    """
+    assert_batched_dataset(dataset)
+
+    size = dataset.cardinality().numpy() * dataset._batch_size
+    return size

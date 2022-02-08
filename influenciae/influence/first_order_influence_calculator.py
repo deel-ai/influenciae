@@ -5,7 +5,6 @@ First order Influence module
 import tensorflow as tf
 
 from .influence_calculator import BaseInfluenceCalculator
-from ..common.tf_operations import is_dataset_batched
 
 from ..types import Optional
 from ..common import assert_batched_dataset
@@ -97,11 +96,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             dataset_to_evaluate = dataset_train
 
-        assert_batched_dataset(dataset_train)
-        assert_batched_dataset(dataset_to_evaluate)
-
-        if dataset_train.cardinality().numpy() * dataset_train._batch_size != dataset_to_evaluate.cardinality().numpy() * dataset_to_evaluate._batch_size:
-            raise ValueError("The amount of points in the train and evaluation groups must match.")
+        self.assert_compatible_datasets(dataset_train, dataset_to_evaluate)
 
         grads = self.model.batch_jacobian(dataset_to_evaluate)
         grads = tf.reshape(grads, (dataset_train.cardinality().numpy() * dataset_train._batch_size, -1))
@@ -175,11 +170,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             group_to_evaluate = group_train
 
-        assert_batched_dataset(group_train)
-        assert_batched_dataset(group_to_evaluate)
-
-        if group_train.cardinality().numpy() * group_train._batch_size != group_to_evaluate.cardinality().numpy() * group_to_evaluate._batch_size:
-            raise ValueError("The amount of points in the train and evaluation groups must match.")
+        self.assert_compatible_datasets(group_train, group_to_evaluate)
 
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
                                       (group_train.cardinality().numpy() * group_train._batch_size, -1)),
