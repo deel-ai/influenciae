@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from enum import Enum
 import tensorflow as tf
 
-from ..common import InfluenceModel, is_dataset_batched
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
     ExactIHVP,
@@ -14,7 +13,7 @@ from .inverse_hessian_vector_product import (
 )
 
 from ..types import Optional, Union
-from ..common import assert_batched_dataset
+from ..common import InfluenceModel, dataset_size
 
 
 class IHVPCalculator(Enum):
@@ -67,9 +66,7 @@ class BaseInfluenceCalculator(ABC):
     ):
         self.model = model
 
-        assert_batched_dataset(dataset)
-
-        self.train_size = dataset.cardinality().numpy() * dataset._batch_size
+        self.train_size = dataset_size(dataset)
 
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
@@ -197,3 +194,30 @@ class BaseInfluenceCalculator(ABC):
             A tensor containing one influence value for the whole group.
         """
         raise NotImplementedError()
+
+
+    @staticmethod
+    def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset):
+        """
+        Assert that the datasets are compatible: that they contain the same number of points. Else,
+        throw an error.
+
+        Parameters
+        ----------
+        dataset_a
+            First tensorflow dataset to check.
+        dataset_b
+            Second tensorflow dataset to check.
+
+        Returns
+        -------
+        size
+            The size of the dataset.
+        """
+        size_a = dataset_size(dataset_a)
+        size_b = dataset_size(dataset_b)
+
+        if size_a != size_b:
+            raise ValueError("The amount of points in the train and evaluation groups must match.")
+
+        return size_a
