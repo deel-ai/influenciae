@@ -305,6 +305,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         grads = self.model.batch_jacobian(feature_maps)
         for x_influence_grad, label in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
+            # @todo watch for broadcast dynamic shape in the cgd function
             _, hessian_vect_product, _, _, _ = tf.linalg.experimental.conjugate_gradient(self, x_influence_grads,
                                                                                          preconditioner=None, x=None,
                                                                                          tol=1e-05,
