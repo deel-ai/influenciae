@@ -16,10 +16,27 @@ from ..common import InfluenceModel, dataset_size
 
 
 class IHVPCalculator(Enum):
+    """
+    Inverse Hessian Vector Product Calculator interface.
+    """
     Exact = ExactIHVP
 
     @staticmethod
     def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
+        """
+        Restore an IHVPCalculator from string.
+
+        Parameters
+        ----------
+        ivhp_calculator
+            String indicated the method use to compute the inverse hessian vector product,
+            e.g 'exact' or 'cgd'.
+
+        Returns
+        -------
+        ivhp_calculator
+            IHVPCalculator object.
+        """
         assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
                                                     "vector product calculators are supported."
         return IHVPCalculator.Exact
