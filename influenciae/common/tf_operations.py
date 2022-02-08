@@ -79,5 +79,5 @@ def dataset_size(dataset: tf.data.Dataset):
     """
     assert_batched_dataset(dataset)
 
-    size = dataset.cardinality().numpy() * dataset._batch_size
+    size = dataset.cardinality().numpy() * dataset._batch_size # pylint: disable=W0212
     return size

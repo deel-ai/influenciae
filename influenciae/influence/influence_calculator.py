@@ -13,7 +13,7 @@ from .inverse_hessian_vector_product import (
 )
 
 from ..types import Optional, Union
-from ..common import InfluenceModel, dataset_size, assert_batched_dataset
+from ..common import InfluenceModel, dataset_size
 
 
 class IHVPCalculator(Enum):
@@ -66,9 +66,7 @@ class BaseInfluenceCalculator(ABC):
     ):
         self.model = model
 
-        assert_batched_dataset(dataset)
-
-        self.train_size = dataset.cardinality().numpy() * dataset._batch_size
+        self.train_size = dataset_size(dataset)
 
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
@@ -77,7 +75,6 @@ class BaseInfluenceCalculator(ABC):
                 .take(n_samples_for_hessian).batch(dataset._batch_size)
 
         self.train_set = dataset_to_estimate_hessian
-        self.train_size = dataset_size(self.train_set)
 
         # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
         if isinstance(ihvp_calculator, str):
@@ -210,9 +207,16 @@ class BaseInfluenceCalculator(ABC):
             First tensorflow dataset to check.
         dataset_b
             Second tensorflow dataset to check.
+
+        Returns
+        -------
+        size
+            The size of the dataset.
         """
         size_a = dataset_size(dataset_a)
         size_b = dataset_size(dataset_b)
 
         if size_a != size_b:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
+
+        return size_a

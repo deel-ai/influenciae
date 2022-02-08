@@ -5,7 +5,6 @@ First order Influence module
 import tensorflow as tf
 
 from .influence_calculator import BaseInfluenceCalculator
-from ..common.tf_operations import is_dataset_batched
 
 from ..types import Optional
 from ..common import assert_batched_dataset
@@ -97,10 +96,10 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             dataset_to_evaluate = dataset_train
 
-        self.assert_compatible_datasets(dataset_train, dataset_to_evaluate)
+        dataset_size = self.assert_compatible_datasets(dataset_train, dataset_to_evaluate)
 
         grads = self.model.batch_jacobian(dataset_to_evaluate)
-        grads = tf.reshape(grads, (dataset_train.cardinality().numpy() * dataset_train._batch_size, -1))
+        grads = tf.reshape(grads, (dataset_size, -1))
 
         ihvp = self.ihvp_calculator.compute_ihvp(dataset_train)
 
@@ -171,11 +170,10 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             # default to self influence
             group_to_evaluate = group_train
 
-        self.assert_compatible_datasets(group_train, group_to_evaluate)
+        dataset_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
 
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
-                                      (group_train.cardinality().numpy() * group_train._batch_size, -1)),
-                                      axis=0, keepdims=True)
+                                      (dataset_size, -1)), axis=0, keepdims=True)
 
         reduced_ihvp = tf.reduce_sum(self.ihvp_calculator.compute_ihvp(group_train), axis=1, keepdims=True)
 
