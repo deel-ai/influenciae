@@ -279,17 +279,19 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
 
     def compute_ihvp(self, group: tf.data.Dataset) -> tf.Tensor:
         """
-        Computes the inverse-hessian-vector product of a group of points approximately using the Conjugate Gradient
-        Descent formulation
+        Computes the inverse-hessian-vector product of a group of points approximately using
+        the Conjugate Gradient Descent formulation.
 
-        Args:
-            group: tf.data.Dataset
-                A TF dataset containing the group of points of which we wish to compute the inverse-hessian-vector
-                product
+        Parameters
+        ----------
+        group
+            A TF dataset containing the group of points of which we wish to compute the
+            inverse-hessian-vector product.
 
-        Returns:
-            ihvp: tf.Tensor
-                A tensor containing one rank-1 tensor per input point
+        Returns
+        -------
+        ihvp
+            A tensor containing one rank-1 tensor per input point.
         """
         if not is_dataset_batched(group):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
@@ -306,7 +308,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
             _, hessian_vect_product, _, _, _ = tf.linalg.experimental.conjugate_gradient(self, x_influence_grads,
                                                                                          preconditioner=None, x=None,
                                                                                          tol=1e-05,
-                                                                                         max_iter=self.n_cgd_iters)  # todo probably fix the broadcast dynamic shape in the cgd function
+                                                                                         max_iter=self.n_cgd_iters)
             ihvp_list.append(hessian_vect_product)
             if ihvp_shape is None:
                 ihvp_shape = hessian_vect_product.shape
@@ -324,15 +326,18 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         """
         Perform the hessian-vector product for a single feature map
 
-        Args:
-            x: tf.Tensor
-                The gradient vector to be multiplied by the hessian matrix
-            feature_maps_hessian_current: tf.Tensor
-                The current feature map for the hessian calculation
-            y_hessian_current: tf.Tensor
-                The label corresponding to the current feature map
+        Parameters
+        ----------
+        x
+            The gradient vector to be multiplied by the hessian matrix.
+        feature_maps_hessian_current
+            The current feature map for the hessian calculation.
+        y_hessian_current
+            The label corresponding to the current feature map.
 
-        Returns:
+        Returns
+        -------
+        hessian_product
             A tf.Tensor containing the result of the hessian-vector product for a given input point and one pair
             feature map-label.
         """
@@ -354,11 +359,13 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         """
         Computes the mean hessian-vector product for a given feature map over a set of points
 
-        Args:
-            x_initial: tf.Tensor
-                The point of the dataset over which this product will be computed
+        Parameters
+        ----------
+        x_initial
+            The point of the dataset over which this product will be computed
 
-        Returns:
+        Returns
+        -------
             Tensor with the hessian-vector product
         """
         x = tf.reshape(x_initial, tf.shape(self.weights))
