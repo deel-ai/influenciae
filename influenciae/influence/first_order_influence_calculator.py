@@ -114,7 +114,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
     ) -> tf.Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
-        removing the points -- of the whole group of point.
+        removing the points -- of the whole group of points.
 
         Parameters
         ----------

@@ -159,7 +159,7 @@ class BaseInfluenceCalculator(ABC):
     ) -> tf.Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
-        removing the points -- of the whole group of point.
+        removing the points -- of the whole group of points.
 
         Parameters
         ----------
@@ -216,9 +216,9 @@ class BaseInfluenceCalculator(ABC):
         Parameters
         ----------
         dataset_a
-            First tensorflow dataset to check.
+            First batched tensorflow dataset to check.
         dataset_b
-            Second tensorflow dataset to check.
+            Second batched tensorflow dataset to check.
 
         Returns
         -------
