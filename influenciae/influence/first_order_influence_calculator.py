@@ -1,3 +1,7 @@
+"""
+First order Influence module
+"""
+
 import tensorflow as tf
 
 from .influence_calculator import BaseInfluenceCalculator

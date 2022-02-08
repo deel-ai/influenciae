@@ -1,3 +1,7 @@
+"""
+Inverse Hessian Vector Product (ivhp) module
+"""
+
 from abc import ABC, abstractmethod
 
 import tensorflow as tf
