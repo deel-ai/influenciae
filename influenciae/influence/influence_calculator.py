@@ -2,9 +2,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 import tensorflow as tf
 
-from influenciae.common.model_wrappers import InfluenceModel
-from influenciae.common.tf_operations import is_dataset_batched
-from influenciae.influence.inverse_hessian_vector_product import (
+from ..common import InfluenceModel, is_dataset_batched
+from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
     ExactIHVP,
     ConjugateGradientDescentIHVP
@@ -26,7 +25,6 @@ class IHVPCalculator(Enum):
             return IHVPCalculator.Exact
 
         return IHVPCalculator.Cgd
-
 
 
 class BaseInfluenceCalculator(ABC):
