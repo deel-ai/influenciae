@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
+
 import tensorflow as tf
 from tensorflow.keras import Model
 
-from influenciae.common.model_wrappers import InfluenceModel
-from influenciae.common.tf_operations import is_dataset_batched
+from ..common import InfluenceModel, is_dataset_batched
 
 from ..types import Optional
 from ..common import assert_batched_dataset
