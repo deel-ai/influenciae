@@ -8,8 +8,7 @@ import tensorflow as tf
 
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
-    ExactIHVP,
-    ConjugateGradientDescentIHVP
+    ExactIHVP
 )
 
 from ..types import Optional, Union
@@ -18,16 +17,12 @@ from ..common import InfluenceModel, dataset_size
 
 class IHVPCalculator(Enum):
     Exact = ExactIHVP
-    Cgd = ConjugateGradientDescentIHVP
 
     @staticmethod
     def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
         assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
                                                     "vector product calculators are supported."
-        if ihvp_calculator == 'exact':
-            return IHVPCalculator.Exact
-
-        return IHVPCalculator.Cgd
+        return IHVPCalculator.Exact
 
 
 class BaseInfluenceCalculator(ABC):
