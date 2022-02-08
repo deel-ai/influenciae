@@ -1,14 +1,54 @@
 import pytest
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten, Lambda
+from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.losses import (MeanAbsoluteError, CategoricalCrossentropy, Reduction,
-                                     MeanSquaredError, CosineSimilarity)
+from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
 from influenciae.common import InfluenceModel
-from influenciae.influence.inverse_hessian_vector_product import ExactIHVP, ConjugateGradientDescentIHVP
+from influenciae.influence.inverse_hessian_vector_product import ExactIHVP
 
-from ..utils import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils import almost_equal
+
+
+def jacobian_ground_truth(input_vector, kernel_matrix, target):
+    """Symbolically calculates the jacobian for the small 2 layer network in the tests"""
+    # input_vector = [A0, A1, A2]
+    # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
+    # target = y
+    j1 = 2. * tf.square(input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                        input_vector[2] * kernel_matrix[4]) * kernel_matrix[6] + \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * (
+                     input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                     input_vector[2] * kernel_matrix[5]) * kernel_matrix[7] - \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * target
+    j2 = 2. * tf.square(input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                        input_vector[2] * kernel_matrix[5]) * kernel_matrix[7] + \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * kernel_matrix[6] * \
+         (input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] + input_vector[2] * kernel_matrix[
+             5]) - \
+         2. * (input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+               input_vector[2] * kernel_matrix[5]) * target
+
+    return tf.convert_to_tensor([j1, j2], dtype=tf.float32)
+
+
+def hessian_ground_truth(input_vector, kernel_matrix):
+    """Symbolically calculates the hessian for the small 2 layer network in the tests"""
+    # input_vector = [A0, A1, A2]
+    # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
+    h1 = 2. * tf.square(input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                        input_vector[2] * kernel_matrix[4])
+    h23 = 2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                input_vector[2] * kernel_matrix[4]) * (input_vector[0] * kernel_matrix[1] +
+                                                       input_vector[1] * kernel_matrix[3] +
+                                                       input_vector[2] * kernel_matrix[5])
+    h4 = 2. * tf.square(input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                        input_vector[2] * kernel_matrix[5])
+
+    return tf.convert_to_tensor([[h1, h23], [h23, h4]], dtype=tf.float32)
 
 
 def test_exact_hessian():

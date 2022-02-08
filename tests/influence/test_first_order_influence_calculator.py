@@ -2,12 +2,51 @@ import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSquaredError
-
 from influenciae.common import InfluenceModel
 from influenciae.influence.inverse_hessian_vector_product import ExactIHVP
 from influenciae.influence.first_order_influence_calculator import FirstOrderInfluenceCalculator
 
-from ..utils import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils import almost_equal
+
+def jacobian_ground_truth(input_vector, kernel_matrix, target):
+    """Symbolically calculates the jacobian for the small 2 layer network in the tests"""
+    # input_vector = [A0, A1, A2]
+    # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
+    # target = y
+    j1 = 2. * tf.square(input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                        input_vector[2] * kernel_matrix[4]) * kernel_matrix[6] + \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * (
+                     input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                     input_vector[2] * kernel_matrix[5]) * kernel_matrix[7] - \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * target
+    j2 = 2. * tf.square(input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                        input_vector[2] * kernel_matrix[5]) * kernel_matrix[7] + \
+         2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+               input_vector[2] * kernel_matrix[4]) * kernel_matrix[6] * \
+         (input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] + input_vector[2] * kernel_matrix[
+             5]) - \
+         2. * (input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+               input_vector[2] * kernel_matrix[5]) * target
+
+    return tf.convert_to_tensor([j1, j2], dtype=tf.float32)
+
+
+def hessian_ground_truth(input_vector, kernel_matrix):
+    """Symbolically calculates the hessian for the small 2 layer network in the tests"""
+    # input_vector = [A0, A1, A2]
+    # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
+    h1 = 2. * tf.square(input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                        input_vector[2] * kernel_matrix[4])
+    h23 = 2. * (input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
+                input_vector[2] * kernel_matrix[4]) * (input_vector[0] * kernel_matrix[1] +
+                                                       input_vector[1] * kernel_matrix[3] +
+                                                       input_vector[2] * kernel_matrix[5])
+    h4 = 2. * tf.square(input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
+                        input_vector[2] * kernel_matrix[5])
+
+    return tf.convert_to_tensor([[h1, h23], [h23, h4]], dtype=tf.float32)
 
 
 def test_exact_influence():
@@ -35,7 +74,7 @@ def test_exact_influence():
     ground_truth_inv_hessian = tf.linalg.pinv(tf.reduce_mean(hessian_list, axis=0))
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_influence = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
-    assert almost_equal(influence, tf.transpose(ground_truth_influence), epsilon=1e-4)  # I was forced to increase from 1e-6
+    assert almost_equal(influence, tf.transpose(ground_truth_influence), epsilon=1e-4)
 
 
 def test_exact_influence_values():
@@ -70,7 +109,7 @@ def test_exact_influence_values():
                                          for inp, y in zip(inputs_test, targets_test)], axis=1)
     ground_truth_influence_values = tf.keras.backend.batch_dot(tf.transpose(ground_truth_grads_test),
                                      tf.transpose(tf.matmul(ground_truth_inv_hessian, ground_truth_grads_train)))
-    assert almost_equal(influence, ground_truth_influence_values, epsilon=1e-4)  # I was forced to increase from 1e-6
+    assert almost_equal(influence, ground_truth_influence_values, epsilon=1e-4)
 
 
 def test_exact_influence_group():
@@ -100,7 +139,7 @@ def test_exact_influence_group():
                                           for inp, y in zip(inputs_train, targets_train)], axis=1)
     reduced_ground_truth_grads = tf.reduce_sum(ground_truth_grads_train, axis=1, keepdims=True)
     ground_truth_influence_group = tf.matmul(ground_truth_inv_hessian, reduced_ground_truth_grads)
-    assert almost_equal(influence_group, tf.transpose(ground_truth_influence_group), epsilon=1e-4)  # I was forced to increase from 1e-6
+    assert almost_equal(influence_group, tf.transpose(ground_truth_influence_group), epsilon=1e-4)
 
 
 def test_exact_influence_values_group():  # FIXME
@@ -138,7 +177,7 @@ def test_exact_influence_values_group():  # FIXME
     ground_truth_influence_values_group = tf.matmul(ground_truth_grads_test,
                                                     tf.matmul(ground_truth_inv_hessian, ground_truth_grads_train),
                                                     transpose_a=True)
-    assert almost_equal(influence, ground_truth_influence_values_group, epsilon=1e-5)  # I was forced to increase from 1e-6
+    assert almost_equal(influence, ground_truth_influence_values_group, epsilon=1e-4)
 
 
 def test_exact_cnn_shapes():
