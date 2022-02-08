@@ -31,7 +31,6 @@ class IHVPCalculator(Enum):
         return IHVPCalculator.Cgd
 
 
-
 class BaseInfluenceCalculator(ABC):
     """
     A base class for objets that calculate the different quantities related to the influence
