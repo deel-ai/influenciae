@@ -9,8 +9,11 @@ disable=
     E1123, # issues between pylint and tensorflow since 2.2.0
     E1120, # see https://github.com/PyCQA/pylint/issues/3613
 
+    W0511, # allow todos
+    W0221, # allow arguments override
+
 [FORMAT]
-max-line-length=100
+max-line-length=120
 max-args=8
 
 [SIMILARITIES]
