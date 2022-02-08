@@ -67,8 +67,7 @@ class BaseInfluenceCalculator(ABC):
     ):
         self.model = model
 
-        if not is_dataset_batched(dataset):
-            raise ValueError("The dataset must be batched before performing this operation.")
+        assert_batched_dataset(dataset)
 
         self.train_size = dataset.cardinality().numpy() * dataset._batch_size
 
