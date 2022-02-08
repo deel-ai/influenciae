@@ -67,8 +67,6 @@ class BaseInfluenceCalculator(ABC):
     ):
         self.model = model
 
-        self.train_size = dataset_size(dataset)
-
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
         else:
@@ -76,6 +74,7 @@ class BaseInfluenceCalculator(ABC):
                 .take(n_samples_for_hessian).batch(dataset._batch_size)
 
         self.train_set = dataset_to_estimate_hessian
+        self.train_size = dataset_size(self.train_set)
 
         # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
         if isinstance(ihvp_calculator, str):
