@@ -1,5 +1,5 @@
 """
-Inverse Hessian Vector Product (ivhp) module
+Inverse Hessian Vector Product (ihvp) module
 """
 
 from abc import ABC, abstractmethod
