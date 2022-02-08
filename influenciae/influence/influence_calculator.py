@@ -13,7 +13,7 @@ from .inverse_hessian_vector_product import (
 )
 
 from ..types import Optional, Union
-from ..common import InfluenceModel, dataset_size
+from ..common import InfluenceModel, dataset_size, assert_batched_dataset
 
 
 class IHVPCalculator(Enum):
@@ -28,7 +28,6 @@ class IHVPCalculator(Enum):
             return IHVPCalculator.Exact
 
         return IHVPCalculator.Cgd
-
 
 
 class BaseInfluenceCalculator(ABC):

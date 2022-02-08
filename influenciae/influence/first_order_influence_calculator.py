@@ -5,6 +5,7 @@ First order Influence module
 import tensorflow as tf
 
 from .influence_calculator import BaseInfluenceCalculator
+from ..common.tf_operations import is_dataset_batched
 
 from ..types import Optional
 from ..common import assert_batched_dataset
