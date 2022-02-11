@@ -5,6 +5,7 @@ disable=
 
     C0103, # allow variable name such as `x` and `y`
 
+    E0401, # pending issue with pylint see pylint#2603
     E1123, # issues between pylint and tensorflow since 2.2.0
     E1120, # see https://github.com/PyCQA/pylint/issues/3613
 
