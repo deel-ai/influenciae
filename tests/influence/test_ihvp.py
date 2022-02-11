@@ -6,7 +6,7 @@ from tensorflow.keras.losses import (MeanAbsoluteError, CategoricalCrossentropy,
                                      MeanSquaredError, CosineSimilarity)
 
 from influenciae.common import InfluenceModel
-from influenciae.influence.inverse_hessian_vector_product import ExactIHVP, ConjugateGradientDescentIHVP
+from influenciae.influence.inverse_hessian_vector_product import ExactIHVP
 
 from ..utils import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
@@ -63,4 +63,4 @@ def test_exact_ihvp():
     ground_truth_inv_hessian = tf.linalg.pinv(tf.reduce_mean(hessian_list, axis=0))
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
-    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-5)  # I was forced to increase from 1e-6
+    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-3)
