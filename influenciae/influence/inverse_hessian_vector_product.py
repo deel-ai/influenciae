@@ -280,9 +280,12 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        group
+        group: tf.data.Dataset
             A TF dataset containing the group of points of which we wish to compute the
             inverse-hessian-vector product.
+        use_gradient: bool
+            A boolean indicating whether the IHVP is with the gradients wrt to the loss of the
+            points in group or with these vectors instead.
 
         Returns
         -------
@@ -317,9 +320,12 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        group
+        group: tf.data.Dataset
             A TF dataset containing the group of points of which we wish to compute the
             inverse-hessian-vector product.
+        use_gradient: bool
+            A boolean indicating whether the HVP is with the gradients wrt to the loss of the
+            points in group or with these vectors instead.
 
         Returns
         -------
@@ -358,16 +364,16 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        x
+        x: tf.Tensor
             The gradient vector to be multiplied by the hessian matrix.
-        feature_maps_hessian_current
+        feature_maps_hessian_current: tf.Tensor
             The current feature map for the hessian calculation.
-        y_hessian_current
+        y_hessian_current: tf.Tensor
             The label corresponding to the current feature map.
 
         Returns
         -------
-        hessian_product
+        hessian_vector_product: tf.Tensor
             A tf.Tensor containing the result of the hessian-vector product for a given input point and one pair
             feature map-label.
         """
@@ -393,23 +399,22 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        x_initial
+        x_initial: tf.Tensor
             The point of the dataset over which this product will be computed
 
         Returns
         -------
+        hessian_vector_product: tf.Tensor
             Tensor with the hessian-vector product
         """
         x = tf.reshape(x_initial, tf.shape(self.weights))
 
-        hessian_product = tf.zeros_like(x)
-        iter = 0
+        hessian_vector_product = tf.zeros_like(x)
         for features_block, labels_block in self.train_set:
             for f, l in zip(tf.unstack(features_block), tf.unstack(labels_block)):
-                iter += 1
                 hessian_product_current = self.__sub_call(x, tf.expand_dims(f, axis=0),
                                                           tf.expand_dims(l, axis=0))
-                hessian_product += hessian_product_current
-        hessian_product = tf.reshape(hessian_product, tf.shape(x_initial))
+                hessian_vector_product += hessian_product_current
+        hessian_vector_product = tf.reshape(hessian_vector_product, tf.shape(x_initial))
 
-        return hessian_product
+        return hessian_vector_product
