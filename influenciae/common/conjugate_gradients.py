@@ -13,7 +13,7 @@ def conjugate_gradients_solve(operator, b, x0=None, *, maxiter, tol=1e-3, atol=1
 
     def cond_fun(value):
         _, r, gamma, _, k = value
-        rs = gamma if M is _identity else tf.reduce_sum(tf.matmul(r, r, transpose_b=True))
+        rs = gamma if M is _identity else tf.reduce_sum(tf.matmul(r, r, transpose_a=True))
         return (rs > atol2) & (k < maxiter)
 
     def body_fun(value):
