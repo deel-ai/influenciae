@@ -1,10 +1,51 @@
+"""
+Conjugate Gradients solver based on jax.scipy's implementation and wikipedia
+https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.cg.html
+https://en.wikipedia.org/wiki/Conjugate_gradient_method
+"""
 import tensorflow as tf
+
+from ..types import Callable, Optional
 
 
 def _identity(x): return x
 
 
-def conjugate_gradients_solve(operator, b, x0=None, *, maxiter, tol=1e-3, atol=1e-5, M=_identity):
+def conjugate_gradients_solve(
+        operator: Callable,
+        b: tf.Tensor,
+        x0: Optional[tf.Tensor] = None,
+        *,
+        maxiter: int,
+        tol: float = 1e-3,
+        atol: float = 1e-5,
+        M: Callable = _identity
+):
+    """
+    A simple Conjugate Gradients solver based on jax.scipy
+
+    Parameters
+    ----------
+    operator: Callable
+        The operator that calculates the linear map A(x). It is assumed to be hermitian and positive definite
+    b: tf.Tensor
+        The right hand side of the linear system, represented by a single vector.
+    x0: Optional
+        A tensor with the same shape as b and the output that servers as a first guess for the solution
+    maxiter: int
+        The maximum amount of iterations
+    tol: float
+        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
+    atol: float
+        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
+    M: Callable
+        A preconditioner approximating the inverse of A.
+
+    Returns
+    -------
+    x_final: tf.Tensor
+        A tensor with the solution found by the solver
+    """
     if x0 is None:
         x0 = tf.zeros_like(b)
 
