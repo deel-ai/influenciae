@@ -18,7 +18,7 @@ def test_exact_influence():
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
     target = tf.random.normal((25, 1))
-    train_set = tf.data.Dataset.from_tensors((inputs, target))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
 
     # Compute the influence vector using auto-diff and check shapes
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
@@ -48,8 +48,8 @@ def test_exact_influence_values():
     inputs_test = tf.random.normal((25, 1, 3))
     targets_train = tf.random.normal((25, 1))
     targets_test = tf.random.normal((25, 1))
-    train_set = tf.data.Dataset.from_tensors((inputs_train, targets_train))
-    test_set = tf.data.Dataset.from_tensors((inputs_test, targets_test))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
+    test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test))
 
     # Compute the influence vector using auto-diff and check shapes
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
@@ -81,7 +81,7 @@ def test_exact_influence_group():
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs_train = tf.random.normal((25, 1, 3))
     targets_train = tf.random.normal((25, 1))
-    train_set = tf.data.Dataset.from_tensors((inputs_train, targets_train))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
 
     # Compute the influence vector using auto-diff and check shapes
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
@@ -113,8 +113,8 @@ def test_exact_influence_values_group():
     inputs_test = tf.random.normal((25, 1, 3))
     targets_train = tf.random.normal((25, 1))
     targets_test = tf.random.normal((25, 1))
-    train_set = tf.data.Dataset.from_tensors((inputs_train, targets_train))
-    test_set = tf.data.Dataset.from_tensors((inputs_test, targets_test))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
+    test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test))
 
     # Compute the influence vector using auto-diff and check shapes
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))

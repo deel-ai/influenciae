@@ -5,12 +5,12 @@ Inverse Hessian Vector Product (ihvp) module
 from abc import ABC, abstractmethod
 
 import tensorflow as tf
+from tensorflow.keras import Model
 
-from ..common import InfluenceModel, assert_batched_dataset
-from ..common import InfluenceModel, is_dataset_batched, conjugate_gradients_solve
+from ..common import InfluenceModel, conjugate_gradients_solve
 
 from ..types import Optional
-from ..common import assert_batched_dataset
+from ..common import assert_batched_dataset, dataset_size
 
 
 class InverseHessianVectorProduct(ABC):
@@ -221,12 +221,11 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
             train_dataset: tf.data.Dataset,
             n_cgd_iters: Optional[int] = 100
     ):
-        if not is_dataset_batched(train_dataset):
-            raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
         super(ConjugateGradientDescentIHVP, self).__init__(model, train_dataset)
         self.n_cgd_iters = n_cgd_iters
         self.feature_extractor = None
         self._batch_shape_tensor = None
+        self.n_hessian = dataset_size(train_dataset)
         self.train_set = self._compute_feature_map_dataset(self.train_set)  # extract the train set's features
         self.model = InfluenceModel(
             # Model(inputs=model.layers[model.target_layer].input, outputs=model.layers[-1].output),
@@ -235,11 +234,6 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
             loss_function=model.loss_function
         )  # model that predicts based on the extracted feature maps
         self.weights = self.model.weights
-        self.n_hessian = train_dataset.cardinality().numpy() * train_dataset._batch_size
-        if self.n_hessian == tf.data.INFINITE_CARDINALITY:
-            raise ValueError("The training dataset is infinite. Please make sure that this is not the case.")
-        if self.n_hessian == tf.data.UNKNOWN_CARDINALITY:
-            raise ValueError("Impossible to compute the amount of data-points in the training dataset.")
 
     def batch_shape_tensor(self):
         return self._batch_shape_tensor
