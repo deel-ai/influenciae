@@ -7,6 +7,10 @@ from abc import ABC, abstractmethod
 import tensorflow as tf
 
 from ..common import InfluenceModel, assert_batched_dataset
+from ..common import InfluenceModel, is_dataset_batched, conjugate_gradients_solve
+
+from ..types import Optional
+from ..common import assert_batched_dataset
 
 
 class InverseHessianVectorProduct(ABC):
@@ -192,31 +196,31 @@ class ExactIHVP(InverseHessianVectorProduct):
         return hvp
 
 
-class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) finish this implementation
+class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
+    """
+    A class that approximately computes inverse-hessian-vector products leveraging forward-over-backward
+    automatic differentiation and Conjugate Gradient Descent to estimate the product directly, without needing to
+    calculate the hessian matrix or invert it.
+
+    It is ideal for models containing a considerable amount of parameters. It does however trade memory for
+    speed, as the calculations for estimating the inverse hessian operator are repeated for each sample.
+
+    Attributes
+    ----------
+    model: InfluenceModel
+        The TF2.X model implementing the InfluenceModel interface
+    train_dataset: tf.data.Dataset
+        The TF dataset, already batched and containing only the samples we wish to use for the computation of the
+        hessian matrix
+    n_cgd_iters: Optional[int]
+        The maximum amount of CGD iterations to perform when estimating the inverse-hessian
+    """
     def __init__(
             self,
             model: InfluenceModel,
             train_dataset: tf.data.Dataset,
             n_cgd_iters: Optional[int] = 100
     ):
-        """
-        A class that approximately computes inverse-hessian-vector products leveraging forward-over-backward
-        automatic differentiation and Conjugate Gradient Descent to estimate the product directly, without needing to
-        calculate the hessian matrix or invert it.
-
-        It is ideal for models containing a considerable amount of parameters. It does however trade memory for
-        speed, as the calculations for estimating the inverse hessian operator are repeated for each sample.
-
-        Attributes
-        ----------
-        model: InfluenceModel
-            The TF2.X model implementing the InfluenceModel interface
-        train_dataset: tf.data.Dataset
-            The TF dataset, already batched and containing only the samples we wish to use for the computation of the
-            hessian matrix
-        n_cgd_iters: Optional[int]
-            The maximum amount of CGD iterations to perform when estimating the inverse-hessian
-        """
         if not is_dataset_batched(train_dataset):
             raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
         super(ConjugateGradientDescentIHVP, self).__init__(model, train_dataset)
@@ -236,14 +240,6 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
             raise ValueError("The training dataset is infinite. Please make sure that this is not the case.")
         if self.n_hessian == tf.data.UNKNOWN_CARDINALITY:
             raise ValueError("Impossible to compute the amount of data-points in the training dataset.")
-
-    @property
-    def is_positive_definite(self):
-        return True
-
-    @property
-    def is_self_adjoint(self):
-        return True
 
     def batch_shape_tensor(self):
         return self._batch_shape_tensor
@@ -277,7 +273,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
 
         return feature_map_dataset
 
-    def compute_ihvp(self, group: tf.data.Dataset) -> tf.Tensor:
+    def compute_ihvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
         """
         Computes the inverse-hessian-vector product of a group of points approximately using
         the Conjugate Gradient Descent formulation.
@@ -293,8 +289,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         ihvp
             A tensor containing one rank-1 tensor per input point.
         """
-        if not is_dataset_batched(group):
-            raise ValueError('The dataset has not been batched yet. This module requires one that has already been batched.')
+        assert_batched_dataset(group)
 
         # Transform the dataset into a set of feature maps-labels
         feature_maps = self._compute_feature_map_dataset(group)
@@ -302,20 +297,54 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
         # Compute the IHVP for each pair feature map-label
         ihvp_list = []
         ihvp_shape = None
-        grads = self.model.batch_jacobian(feature_maps)
+        grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
         for x_influence_grad, label in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
-            # @todo watch for broadcast dynamic shape in the cgd function
-            _, hessian_vect_product, _, _, _ = tf.linalg.experimental.conjugate_gradient(self, x_influence_grads,
-                                                                                         preconditioner=None, x=None,
-                                                                                         tol=1e-05,
-                                                                                         max_iter=self.n_cgd_iters)
-            ihvp_list.append(hessian_vect_product)
+            inv_hessian_vect_product = conjugate_gradients_solve(self, x_influence_grads, x0=None,
+                                                                 maxiter=self.n_cgd_iters)
+            ihvp_list.append(inv_hessian_vect_product)
             if ihvp_shape is None:
-                ihvp_shape = hessian_vect_product.shape
-        ihvp_list = tf.reshape(tf.stack(ihvp_list), (-1, ihvp_shape))
+                ihvp_shape = inv_hessian_vect_product.shape
+        ihvp_list = tf.stack(ihvp_list, axis=0)
+        ihvp_list = tf.transpose(ihvp_list) if ihvp_list.shape[-1] != 1 else tf.transpose(tf.squeeze(ihvp_list, axis=-1))
 
         return ihvp_list
+
+    def compute_hvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
+        """
+        Computes the hessian-vector product of a group of points approximately using forward-over-backward
+        auto-differentiation.
+
+        Parameters
+        ----------
+        group
+            A TF dataset containing the group of points of which we wish to compute the
+            inverse-hessian-vector product.
+
+        Returns
+        -------
+        ihvp
+            A tensor containing one rank-1 tensor per input point.
+        """
+        assert_batched_dataset(group)
+
+        # Transform the dataset into a set of feature maps-labels
+        feature_maps = self._compute_feature_map_dataset(group)
+
+        # Compute the IHVP for each pair feature map-label
+        hvp_list = []
+        hvp_shape = None
+        grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
+        for x_influence_grad, label in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
+            x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
+            hessian_vect_product = self(x_influence_grads)
+            hvp_list.append(hessian_vect_product)
+            if hvp_shape is None:
+                hvp_shape = hessian_vect_product.shape
+        hvp_list = tf.stack(hvp_list, axis=0)
+        hvp_list = tf.transpose(hvp_list) if hvp_list.shape[-1] != 1 else tf.transpose(tf.squeeze(hvp_list, axis=-1))
+
+        return hvp_list
 
     @tf.function
     def __sub_call(
@@ -346,15 +375,17 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):  # TODO(agus) f
                 self.weights,
                 # The "vector" in Hessian-vector product.
                 x) as acc:
-            backward = self.model.batch_gradient(
-                tf.data.Dataset.from_tensor_slices((feature_maps_hessian_current, y_hessian_current)).batch(1)
-            )
-        hessian_product = acc.jvp(backward)
+            with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+                tape.watch(self.weights)
+                loss = self.model.loss_function(y_hessian_current, self.model(feature_maps_hessian_current))
+            backward = tape.jacobian(loss, self.weights)
+        hessian_vector_product = acc.jvp(backward)
 
-        weight = tf.cast(tf.shape(feature_maps_hessian_current)[0], dtype=tf.float32) / self.n_hessian
-        hessian_product = hessian_product * weight
+        weight = tf.cast(tf.shape(feature_maps_hessian_current)[0], dtype=tf.float32) / \
+                 tf.cast(self.n_hessian, dtype=tf.float32)
+        hessian_vector_product = hessian_vector_product * weight
 
-        return hessian_product
+        return hessian_vector_product
 
     def __call__(self, x_initial: tf.Tensor) -> tf.Tensor:
         """
