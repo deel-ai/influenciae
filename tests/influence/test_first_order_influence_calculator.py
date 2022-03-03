@@ -175,7 +175,6 @@ def test_exact_cnn_shapes():
     influence_values = influence_calculator.compute_influence_values_group(train_set.batch(5), test_set.batch(5))
     assert influence_values.shape == (1, 1)
 
-
 def test_cgd_influence():
     # Make sure that the influence vector is calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])

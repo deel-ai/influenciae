@@ -71,5 +71,5 @@ def hessian_ground_truth(input_vector, kernel_matrix):
                                                        input_vector[2] * kernel_matrix[5])
     h4 = 2. * tf.square(input_vector[0] * kernel_matrix[1] + input_vector[1] * kernel_matrix[3] +
                         input_vector[2] * kernel_matrix[5])
-
+    
     return tf.convert_to_tensor([[h1, h23], [h23, h4]], dtype=tf.float32)
