@@ -62,10 +62,23 @@ def test_exact_ihvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
     assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-3)
-
+    
 
 def test_exact_hvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
+    # Do the same for when the vector is directly provided
+    vectors = tf.random.normal((25, 1, 2))
+    ihvp_vectors = ihvp_calculator.compute_ihvp(
+        group=tf.data.Dataset.from_tensor_slices(vectors).batch(5),
+        use_gradient=False
+    )
+    assert ihvp_vectors.shape == (25, 2, 1)
+    ground_truth_ihvp_vector = tf.matmul(ground_truth_inv_hessian, tf.reshape(vectors, (25, 2, 1)))
+    assert almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=1e-5)
+
+
+def test_exact_hvp():
+    # Make sure that the shapes are right and that the exact hvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
