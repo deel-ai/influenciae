@@ -8,7 +8,8 @@ import tensorflow as tf
 
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
-    ExactIHVP
+    ExactIHVP,
+    ConjugateGradientDescentIHVP
 )
 
 from ..types import Optional, Union
@@ -20,6 +21,7 @@ class IHVPCalculator(Enum):
     Inverse Hessian Vector Product Calculator interface.
     """
     Exact = ExactIHVP
+    Cgd = ConjugateGradientDescentIHVP
 
     @staticmethod
     def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
@@ -28,7 +30,7 @@ class IHVPCalculator(Enum):
 
         Parameters
         ----------
-        ivhp_calculator
+        ihvp_calculator
             String indicated the method use to compute the inverse hessian vector product,
             e.g 'exact' or 'cgd'.
 
@@ -39,7 +41,10 @@ class IHVPCalculator(Enum):
         """
         assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
                                                     "vector product calculators are supported."
-        return IHVPCalculator.Exact
+        if ihvp_calculator == 'exact':
+            return IHVPCalculator.Exact
+
+        return IHVPCalculator.Cgd
 
 
 class BaseInfluenceCalculator(ABC):
@@ -206,7 +211,6 @@ class BaseInfluenceCalculator(ABC):
             A tensor containing one influence value for the whole group.
         """
         raise NotImplementedError()
-
 
     @staticmethod
     def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset):
