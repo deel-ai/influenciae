@@ -8,7 +8,8 @@ import tensorflow as tf
 from ..types import Callable, Optional
 
 
-def _identity(x): return x
+def _identity(x): # pylint: disable=C0116
+    return x
 
 
 def conjugate_gradients_solve(
