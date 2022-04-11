@@ -59,10 +59,17 @@ def test_exact_ihvp():
     hessian_list = tf.concat([
         tf.expand_dims(hessian_ground_truth(tf.squeeze(inp), kernel), axis=0) for inp in inputs
     ], axis=0)
-    ground_truth_inv_hessian = tf.linalg.pinv(tf.reduce_mean(hessian_list, axis=0))
+    stochastic_hessian = tf.reduce_mean(hessian_list, axis=0)
+    ground_truth_inv_hessian = tf.linalg.pinv(stochastic_hessian)
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
-    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-3)
+    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-2)
+
+    # test with an initialization with the stochastic_hessian
+    ihvp_calculator2 = ExactIHVP(influence_model, train_hessian=stochastic_hessian)
+    ihvp2 = ihvp_calculator2.compute_ihvp(train_set.batch(5))
+    assert ihvp2.shape == (2, 5)  # 5 times (2, 1) stacked on the last axis
+    assert almost_equal(ihvp2, ground_truth_ihvp, epsilon=1e-2)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 1, 2))
@@ -99,6 +106,12 @@ def test_exact_hvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_hvp = tf.matmul(ground_truth_hessian, ground_truth_grads)
     assert almost_equal(hvp, ground_truth_hvp, epsilon=1e-4)  # I was forced to increase from 1e-6
+
+    # test with an initialization with the stochastic_hessian
+    ihvp_calculator2 = ExactIHVP(influence_model, train_hessian=ground_truth_hessian)
+    hvp2 = ihvp_calculator2.compute_hvp(train_set.batch(5))
+    assert hvp2.shape == (2, 5)  # 5 times (2, 1) stacked on the last axis
+    assert almost_equal(hvp2, ground_truth_hvp, epsilon=1e-4)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 1, 2))
