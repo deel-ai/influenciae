@@ -5,7 +5,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import (MeanAbsoluteError, CategoricalCrossentropy, Reduction,
                                      MeanSquaredError, CosineSimilarity)
 
-from influenciae.common import InfluenceModel
+from deel.influenciae.common import InfluenceModel
 
 from ..utils import generate_model, assert_tensor_equal, almost_equal
 

@@ -4,8 +4,8 @@ from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
-from influenciae.common import InfluenceModel
-from influenciae.common import compute_hessian_block
+from deel.influenciae.common import InfluenceModel
+from deel.influenciae.common import compute_hessian_block
 
 from ..utils import almost_equal, hessian_ground_truth
 

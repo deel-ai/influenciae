@@ -1,4 +1,5 @@
-from setuptools import setup, find_packages
+import setuptools
+from setuptools import setup
 
 with open("README.md", encoding="utf-8") as fh:
     README = fh.read()
@@ -17,7 +18,7 @@ setup(
         "tests": ["pytest", "pylint"],
         "docs": ["mkdocs", "mkdocs-material", "numkdoc"],
     },
-    packages=find_packages(),
+    packages=setuptools.find_namespace_packages(include=["deel.*"]),
     python_requires=">=3.6",
     classifiers=[
         "Development Status :: 4 - Beta",
