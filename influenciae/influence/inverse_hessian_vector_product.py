@@ -87,8 +87,8 @@ class ExactIHVP(InverseHessianVectorProduct):
 
     For models with a considerable amount of weights, this implementation may be infeasible
     due to its O(n^2) complexity for the hessian, plus the O(n^3) for its inversion.
-    If its memory consumption is too high, you should consider using the CGD approximation
-    or to compute the hessian aside and to initialize the ExactIHVP with the hessian while
+    If its memory consumption is too high, you should consider using the CGD approximation,
+    or computing the hessian separately and initializing the ExactIHVP with this hessian while
     setting train_dataset to None. To expect it to work the hessian should be computed for
     the training_set.
 
@@ -101,7 +101,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         the computation of the hessian matrix. Either train_hessian or train_dataset should
         not be None but not both.
     train_hessian
-        The stochastic hessian matrix of the model's loss wrt its parameters computed with
+        The estimated hessian matrix of the model's loss wrt its parameters computed with
         the samples used for the model's training. Either hessian or train_dataset should
         not be None but not both.
     """
@@ -317,7 +317,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         ihvp_list = []
         ihvp_shape = None
         grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
-        for x_influence_grad, _ in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
+        for x_influence_grad in grads:
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
             inv_hessian_vect_product = conjugate_gradients_solve(self, x_influence_grads, x0=None,
                                                                  maxiter=self.n_cgd_iters)
@@ -358,7 +358,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         hvp_list = []
         hvp_shape = None
         grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
-        for x_influence_grad, _ in zip(grads, feature_maps.map(lambda x, y: y).unbatch()):
+        for x_influence_grad in grads:
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
             hessian_vect_product = self(x_influence_grads)
             hvp_list.append(hessian_vect_product)
