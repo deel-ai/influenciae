@@ -10,7 +10,7 @@ with open("README.md", encoding="utf-8") as fh:
 
 setup(
     name="Influenciae",
-    version="0.0.1",
+    version="0.0.2",
     description="Influence Function toolbox for Tensorflow 2",
     long_description=README,
     long_description_content_type="text/markdown",
