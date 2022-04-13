@@ -1,3 +1,7 @@
+# Copyright IRT Antoine de Saint Exupéry et Université Paul Sabatier Toulouse III - All
+# rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
+# CRIAQ and ANITI - https://www.deel.ai/
+# =====================================================================================
 """
 Conjugate Gradients solver based on jax.scipy's implementation and wikipedia
 https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.cg.html
