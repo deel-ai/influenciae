@@ -10,7 +10,7 @@ The goal of Influenciae is to provide a simple interface to the various influenc
 techniques
 """
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 from . import influence
 from . import common
