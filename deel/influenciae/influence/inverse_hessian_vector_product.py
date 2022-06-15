@@ -80,6 +80,7 @@ class InverseHessianVectorProduct(ABC):
         """
         raise NotImplementedError()
 
+
 class ExactIHVP(InverseHessianVectorProduct):
     """
     A class that performs the 'exact' computation of the inverse-hessian-vector product.
@@ -182,7 +183,11 @@ class ExactIHVP(InverseHessianVectorProduct):
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             ihvp = tf.matmul(self.inv_hessian, grads, transpose_b=True)
         else:
-            ihvp = tf.concat([tf.matmul(self.inv_hessian, vector, transpose_b=True) for vector in group], axis=0)
+            ihvp = tf.concat(
+                [tf.matmul(self.inv_hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
+                 for vector in group],
+                axis=0
+            )
 
         return ihvp
 
@@ -214,7 +219,11 @@ class ExactIHVP(InverseHessianVectorProduct):
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             hvp = tf.matmul(self.hessian, grads, transpose_b=True)
         else:
-            hvp = tf.concat([tf.matmul(self.hessian, vector, transpose_b=True) for vector in group], axis=0)
+            hvp = tf.concat(
+                [tf.matmul(self.hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
+                 for vector in group],
+                axis=0
+            )
 
         return hvp
 
@@ -283,7 +292,10 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         if self.feature_extractor is None:
             self.feature_extractor = Model(inputs=self.model.layers[0].input,
                                            outputs=self.model.layers[self.model.target_layer - 1].output)
-        feature_maps = tf.concat([self.feature_extractor(x_batch) for x_batch, _ in dataset], axis=0)
+        if isinstance(dataset.element_spec, tuple):
+            feature_maps = tf.concat([self.feature_extractor(x_batch) for x_batch, _ in dataset], axis=0)
+        else:
+            feature_maps = tf.concat([self.feature_extractor(x_batch) for x_batch in dataset], axis=0)
         feature_maps = tf.squeeze(feature_maps, axis=0) if feature_maps.shape[0] == 1 else feature_maps
         feature_map_dataset = tf.data.Dataset.zip((tf.data.Dataset.from_tensor_slices(feature_maps),
                                                    dataset.unbatch().map(lambda x, y: y))).batch(dataset._batch_size) # pylint: disable=W0212
@@ -315,13 +327,19 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         assert_batched_dataset(group)
 
         # Transform the dataset into a set of feature maps-labels
-        feature_maps = self._compute_feature_map_dataset(group)
+        if use_gradient:
+            feature_maps = self._compute_feature_map_dataset(group)
+            grads = self.model.batch_jacobian(feature_maps)
+        else:
+            grads = group.map(lambda x, y: x).batch(1) if isinstance(group.element_spec, tuple) else group
 
         # Compute the IHVP for each pair feature map-label
         ihvp_list = []
         ihvp_shape = None
-        grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
         for x_influence_grad in grads:
+            # Squeeze when the grads have some weird shape
+            if len(x_influence_grad.shape) > 1:
+                x_influence_grad = tf.squeeze(x_influence_grad)
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
             inv_hessian_vect_product = conjugate_gradients_solve(self, x_influence_grads, x0=None,
                                                                  maxiter=self.n_cgd_iters)
@@ -356,19 +374,22 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         assert_batched_dataset(group)
 
         # Transform the dataset into a set of feature maps-labels
-        feature_maps = self._compute_feature_map_dataset(group)
+        if use_gradient:
+            feature_maps = self._compute_feature_map_dataset(group)
+            grads = self.model.batch_jacobian(feature_maps)
+        else:
+            grads = group.map(lambda x, y: x).batch(1) if isinstance(group.element_spec, tuple) else group
 
         # Compute the IHVP for each pair feature map-label
         hvp_list = []
         hvp_shape = None
-        grads = self.model.batch_jacobian(feature_maps) if use_gradient else group
         for x_influence_grad in grads:
             x_influence_grads = tf.reshape(x_influence_grad, (tf.shape(x_influence_grad)[0], -1))
             hessian_vect_product = self(x_influence_grads)
             hvp_list.append(hessian_vect_product)
             if hvp_shape is None:
                 hvp_shape = hessian_vect_product.shape
-        hvp_list = tf.stack(hvp_list, axis=0)
+        hvp_list = tf.stack(hvp_list, axis=0) if len(hvp_list) != 1 else hvp_list[0]
         hvp_list = tf.transpose(hvp_list) if hvp_list.shape[-1] != 1 else tf.transpose(tf.squeeze(hvp_list, axis=-1))
 
         return hvp_list
