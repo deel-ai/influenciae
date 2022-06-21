@@ -183,11 +183,18 @@ class ExactIHVP(InverseHessianVectorProduct):
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             ihvp = tf.matmul(self.inv_hessian, grads, transpose_b=True)
         else:
-            ihvp = tf.concat(
-                [tf.matmul(self.inv_hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
-                 for vector in group],
-                axis=0
-            )
+            if len(group.element_spec.shape) == 2:
+                ihvp = tf.concat(
+                    [tf.matmul(self.inv_hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
+                     for vector in group],
+                    axis=0
+                )
+            else:
+                ihvp = tf.concat(
+                    [tf.matmul(self.inv_hessian, vector, transpose_b=True)
+                     for vector in group],
+                    axis=0
+                )
 
         return ihvp
 
@@ -219,11 +226,17 @@ class ExactIHVP(InverseHessianVectorProduct):
             grads = tf.reshape(self.model.batch_jacobian(group), (-1, self.inv_hessian.shape[0]))
             hvp = tf.matmul(self.hessian, grads, transpose_b=True)
         else:
-            hvp = tf.concat(
-                [tf.matmul(self.hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
-                 for vector in group],
-                axis=0
-            )
+            if len(group.element_spec.shape) == 2:
+                hvp = tf.concat(
+                    [tf.matmul(self.hessian, tf.reshape(vector, (-1, self.inv_hessian.shape[0])), transpose_b=True)
+                     for vector in group],
+                    axis=0
+                )
+            else:
+                hvp = tf.concat(
+                    [tf.matmul(self.hessian, vector, transpose_b=True) for vector in group],
+                    axis=0
+                )
 
         return hvp
 

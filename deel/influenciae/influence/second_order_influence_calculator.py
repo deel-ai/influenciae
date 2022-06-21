@@ -159,12 +159,14 @@ class SecondOrderInfluenceCalculator(BaseInfluenceCalculator):
 
         interactions = self.ihvp_calculator.compute_ihvp(
             tf.data.Dataset.from_tensors(
-                local_ihvp.compute_hvp(
-                    tf.data.Dataset.from_tensors(
-                        tf.reduce_sum(self.ihvp_calculator.compute_ihvp(dataset), axis=1)
-                    ).batch(1),
-                    use_gradient=False),
-            ).batch(1), use_gradient=False
+                tf.squeeze(
+                    local_ihvp.compute_hvp(
+                        tf.data.Dataset.from_tensors(
+                            tf.reduce_sum(self.ihvp_calculator.compute_ihvp(dataset), axis=1)
+                        ).batch(1),
+                        use_gradient=False),
+                    axis=-1)
+                ).batch(1), use_gradient=False
         )
         interactions *= tf.cast(dataset_size(dataset), dtype=tf.float32)
         interactions = tf.expand_dims(interactions, axis=1) if len(interactions.shape) == 1 else interactions
