@@ -133,7 +133,7 @@ def biconjugate_gradient_stabilized_solve(
     atol2 = tf.reduce_max([tf.square(tol) * bs, tf.square(atol)])
 
     def cond_fun(value):
-        x, r, *_, k = value
+        _, r, *_, k = value
         rs = tf.reduce_sum(tf.matmul(r, r, transpose_a=True))
         return (rs > atol2) & (k < maxiter) & (k >= 0)
 
