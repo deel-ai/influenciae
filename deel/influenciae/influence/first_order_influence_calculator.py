@@ -8,10 +8,17 @@ First order Influence module
 
 import tensorflow as tf
 
-from .influence_calculator import BaseInfluenceCalculator
+from .influence_calculator import BaseInfluenceCalculator, IHVPCalculator
 
-from ..types import Optional
+from ..types import Optional, Union
 from ..common import assert_batched_dataset
+
+from .inverse_hessian_vector_product import (
+    InverseHessianVectorProduct,
+    ExactIHVP
+)
+
+from ..common import InfluenceModel
 
 
 class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
@@ -39,7 +46,23 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
     shuffle_buffer_size
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
+    normalize
+        Implement "RelatIF: Identifying Explanatory Training Examples via Relative Influence"
+        https://arxiv.org/pdf/2003.11630.pdf
+        if True, compute the relative influence by normalizing the influence function.
     """
+    def __init__(
+            self,
+            model: InfluenceModel,
+            dataset: tf.data.Dataset,
+            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = ExactIHVP,
+            n_samples_for_hessian: Optional[int] = None,
+            shuffle_buffer_size: Optional[int] = 10000,
+            normalize=False
+    ):
+        super(FirstOrderInfluenceCalculator, self).__init__(model, dataset, ihvp_calculator, n_samples_for_hessian,
+                                                            shuffle_buffer_size)
+        self.normalize = normalize
 
     def compute_influence(self, dataset: tf.data.Dataset) -> tf.Tensor:
         """
@@ -61,9 +84,22 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         assert_batched_dataset(dataset)
 
         influence_vectors = self.ihvp_calculator.compute_ihvp(dataset)
+
+        influence_vectors = self.__normalize_if_needed(influence_vectors)
+
         influence_vectors = tf.transpose(influence_vectors)
 
         return influence_vectors
+
+    def __normalize_if_needed(self, v):
+        """
+        Normalize the input vector if the normalize property is True. If False, do nothing
+        :param v: the vector to normalize of shape [Features_Space, Batch_Size]
+        :return: the normalized vector if the normalize property is True, otherwise the input vector
+        """
+        if self.normalize:
+            v = v / tf.norm(v, axis=0, keepdims=True)
+        return v
 
     def compute_influence_values(
             self,
@@ -85,7 +121,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         ----------
         dataset_train
             A batched TF dataset containing the points we wish to remove.
-        dataset_to_evaluate.
+        dataset_to_evaluate
             A batched TF dataset containing the points with respect to whom we wish to measure
             the influence of removing the training points. Default as dataset_train (self
             influence).
@@ -106,6 +142,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         grads = tf.reshape(grads, (dataset_size, -1))
 
         ihvp = self.ihvp_calculator.compute_ihvp(dataset_train)
+
+        ihvp = self.__normalize_if_needed(ihvp)
 
         influence_values = tf.reduce_sum(
             tf.math.multiply(grads, tf.transpose(ihvp)), axis=1, keepdims=True)
@@ -135,6 +173,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
 
         ihvp = self.ihvp_calculator.compute_ihvp(group)
         reduced_ihvp = tf.reduce_sum(ihvp, axis=1)
+
+        reduced_ihvp = self.__normalize_if_needed(reduced_ihvp)
 
         influence_group = tf.reshape(reduced_ihvp, (1, -1))
 
@@ -177,9 +217,11 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         dataset_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
 
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
-                                      (dataset_size, -1)), axis=0, keepdims=True)
+                                                 (dataset_size, -1)), axis=0, keepdims=True)
 
         reduced_ihvp = tf.reduce_sum(self.ihvp_calculator.compute_ihvp(group_train), axis=1, keepdims=True)
+
+        reduced_ihvp = self.__normalize_if_needed(reduced_ihvp)
 
         influence_values_group = tf.matmul(reduced_grads, reduced_ihvp)
 
