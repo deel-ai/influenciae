@@ -7,7 +7,7 @@ Custom wrappers for tensorflow model
 """
 
 import tensorflow as tf
-from tensorflow.keras.losses import Reduction # pylint: disable=E0611
+from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
 
 from .tf_operations import find_layer, assert_batched_dataset
 from ..types import Callable, Optional, Union
@@ -77,6 +77,25 @@ class InfluenceModel:
         """
         return self.model.layers
 
+    def batch_loss_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the model's loss on the batched tensor
+
+        Parameters
+        ----------
+        batch_x
+            Batch of inputs on which to compute the gradient.
+        batch_y
+            Batch of target used to compute the gradient.
+        Returns
+        -------
+        loss_values
+            Loss values for each of the points of the batch.
+        """
+        loss_values = InfluenceModel._loss(self.model, self.loss_function, batch_x, batch_y)
+
+        return loss_values
+
     def batch_loss(self, dataset: tf.data.Dataset) -> tf.Tensor:
         """
         Computes the model's loss on the whole batched dataset.
@@ -99,6 +118,30 @@ class InfluenceModel:
         ], axis=0)
 
         return loss_values
+
+    def batch_jacobian_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the jacobian of the loss wrt the weights of the target_layer on the whole
+        batched dataset.
+
+        Parameters
+        ----------
+        batch_x
+            Batch of inputs on which to compute the gradient.
+        batch_y
+            Batch of target used to compute the gradient.
+
+        Returns
+        -------
+        jacobians
+            Matrix of the first-order partial derivative of the loss function wrt the
+            target_layer weights.
+        """
+
+        jacobians = InfluenceModel._jacobian(self.model, self.weights, self.loss_function,
+                                             batch_x, batch_y)
+
+        return jacobians
 
     def batch_jacobian(self, dataset) -> tf.Tensor:
         """
@@ -125,6 +168,28 @@ class InfluenceModel:
         ], axis=0)
 
         return jacobians
+
+    def batch_gradient_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the gradient of the loss wrt the weights of the target_layer on the whole
+        batched dataset.
+
+        Parameters
+        ----------
+        batch_x
+            Batch of inputs on which to compute the gradient.
+        batch_y
+            Batch of target used to compute the gradient.
+
+        Returns
+        -------
+        gradients
+            Gradient values of the loss function wrt the target_layer's weights.
+        """
+        gradients = InfluenceModel._gradient(self.model, self.weights, self.loss_function,
+                                             batch_x, batch_y)
+
+        return gradients
 
     def batch_gradient(self, dataset) -> tf.Tensor:
         """
