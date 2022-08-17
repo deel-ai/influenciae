@@ -10,8 +10,9 @@ import tensorflow as tf
 
 from .influence_calculator import BaseInfluenceCalculator, IHVPCalculator
 
-from ..types import Optional, Union
+from ..types import Optional, Union, Tuple
 from ..common import assert_batched_dataset
+from deel.influenciae.common.sorted_dict import BatchedSortedDict
 
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
@@ -51,6 +52,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         https://arxiv.org/pdf/2003.11630.pdf
         if True, compute the relative influence by normalizing the influence function.
     """
+
     def __init__(
             self,
             model: InfluenceModel,
@@ -100,6 +102,51 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         if self.normalize:
             v = v / tf.norm(v, axis=0, keepdims=True)
         return v
+
+    def top_k(self,
+              sample_to_evaluate: Tuple[tf.Tensor, tf.Tensor],
+              dataset_train: tf.data.Dataset,
+              k: int = 5) -> Tuple[tf.Tensor, tf.Tensor]:
+        """
+        Find the top-k closest elements of the training dataset for each sample to evaluate
+
+        The Cook's distance is evaluate for each point(s) provided individually, giving measure of the
+        influence that each point carries on the model's weights.
+
+        Parameters
+        ----------
+        sample_to_evaluate
+            A batched tensor containing the samples which will be compare to the training dataset
+        dataset_train
+            A batched TF dataset containing the samples used during the training procedure
+        k
+            the number of most influence samples to retain in training datatse
+        Returns
+        -------
+        influence_values
+            Top-k influence values for each sample to evaluate.
+        training_samples
+            Top-k training sample for each sample to evaluate.
+        """
+        grads_to_evaluate = self.model.batch_jacobian_tensor(*sample_to_evaluate)
+        batch_size = tf.shape(grads_to_evaluate)[0]
+        grads_to_evaluate = tf.reshape(grads_to_evaluate, (batch_size, -1))
+
+        batched_sorted_dic = BatchedSortedDict(batch_size, k)
+        for batch in dataset_train:
+            # TODO - improve: API IHVP shall accept tensor
+            ihvp = self.ihvp_calculator.compute_ihvp(
+                tf.data.Dataset.from_tensor_slices(batch).batch(int(tf.shape(batch[0])[0])))
+
+            ihvp = self.__normalize_if_needed(ihvp)
+
+            influence_values = tf.matmul(grads_to_evaluate, ihvp)
+            batched_sorted_dic.add_all(influence_values,
+                                       tf.repeat(tf.expand_dims(batch[0], axis=0), batch_size, axis=0))
+
+        influences_values, training_samples = batched_sorted_dic.get()
+
+        return influences_values, training_samples
 
     def compute_influence_values(
             self,
