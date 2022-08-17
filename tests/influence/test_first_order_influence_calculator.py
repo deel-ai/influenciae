@@ -14,6 +14,82 @@ from deel.influenciae.influence.first_order_influence_calculator import FirstOrd
 from ..utils import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
 
+def test_exact_top_k():
+    # Test the shapes of the different quantities
+    model = Sequential()
+    model.add(Input(shape=(5, 5, 3)))
+    model.add(Conv2D(4, kernel_size=(2, 2),
+                     activation='relu'))
+    model.add(Flatten())
+    model.add(Dense(10))
+    model.add(Dense(10))
+    model.compile(loss=CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE), optimizer='sgd')
+
+    model(tf.random.normal((2, 5, 5, 3)))
+
+    influence_model = InfluenceModel(model,
+                                     loss_function=CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE))
+
+    x_train = tf.random.normal((50, 5, 5, 3))
+    y_train = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 50)), 10)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+
+    """
+    class MockIHVP():
+        def compute_ihvp(self,dataset):
+            result = None
+            for b in dataset:
+                if result != None:
+                    raise Exception()
+                else
+                    result = b
+            return result
+    ihvp_calculator = MockIHVP()
+    """
+
+    # Check the shapes
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                         n_samples_for_hessian=25,
+                                                         shuffle_buffer_size=25,
+                                                         normalize=True)
+    top_k = 7
+    expected_influences = []
+    expected_values = []
+
+    x_test_batch = []
+    y_test_batch = []
+
+    for _ in range(9):
+        x_test = tf.random.normal((1, 5, 5, 3))
+        y_test = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 1)), 10)
+        x_test_batch.append(x_test)
+        y_test_batch.append(y_test)
+
+        x_test = tf.repeat(x_test, 50, axis=0)
+        y_test = tf.repeat(y_test, 50, axis=0)
+
+        test_set = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        influence_values = influence_calculator.compute_influence_values(train_set.batch(5), test_set.batch(5))
+        indexes = tf.squeeze(tf.argsort(influence_values, axis=0), axis=-1).numpy()
+        k = tf.gather(influence_values, indexes)[::-1][:top_k]
+        v = tf.gather(x_train, indexes)[::-1][:top_k]
+        expected_influences.append(tf.expand_dims(k, axis=0))
+        expected_values.append(tf.expand_dims(v, axis=0))
+
+    expected_influences = tf.concat(expected_influences, axis=0)
+    expected_values = tf.concat(expected_values, axis=0)
+
+    x_test_batch = tf.concat(x_test_batch, axis=0)
+    y_test_batch = tf.concat(y_test_batch, axis=0)
+
+    computed_influences, computed_values = influence_calculator.top_k((x_test_batch, y_test_batch), train_set.batch(5),
+                                                                      top_k)
+    expected_influences = tf.squeeze(expected_influences, axis=-1)
+    assert tf.reduce_max(tf.abs(computed_influences - expected_influences)) < 1E-6
+    assert tf.reduce_max(tf.abs(computed_values - expected_values)) < 1E-6
+
+
 def test_exact_cnn_shapes_with_normalization_with_normalization():
     # Test the shapes of the different quantities
     model = Sequential()
