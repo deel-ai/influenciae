@@ -30,12 +30,19 @@ class RepresenterPointL2:
     lambda_regularization
         The coefficient for the regularization of the surrogate last layer that needs
         to be trained for this method
+    scaling_factor
+        A float with the scaling factor for the SGD backtracking line-search optimizer
+        for fitting the surrogate linear model
+    epochs
+        An integer for the amount of epochs to fit the linear model
     """
     def __init__(
             self,
             model: Model,
             train_set: tf.data.Dataset,
-            lambda_regularization: float
+            lambda_regularization: float,
+            scaling_factor: float = 0.1,
+            epochs: int = 100
     ):
         assert_batched_dataset(train_set)
         self.n_train = dataset_size(train_set)
@@ -43,6 +50,8 @@ class RepresenterPointL2:
         self.model = model
         self.train_set = train_set
         self.lambda_regularization = lambda_regularization
+        self.scaling_factor = scaling_factor
+        self.epochs = epochs
         self.linear_layer = None
         self.weight_matrix_ds = None
 
@@ -64,7 +73,7 @@ class RepresenterPointL2:
         """
         assert_batched_dataset(dataset_to_evaluate)
         if self.linear_layer is None:
-            self._train_last_layer()
+            self._train_last_layer(self.epochs)
         self.weight_matrix_ds = self._compute_gradients(dataset_to_evaluate).map(
             lambda x, y, g: (x, y, tf.divide(g, -2. * self.lambda_regularization * tf.cast(self.n_train, tf.float32)))
         )
@@ -87,11 +96,30 @@ class RepresenterPointL2:
         predictions
             A TF tensor with the predictions
         """
+        assert_batched_dataset(dataset_to_evaluate)
         if self.weight_matrix_ds is None:
-            self.compute_influence_values(dataset_to_evaluate)
-        return tf.concat([tf.matmul(f_batch, tf.matmul(f_batch, w_batch, transpose_a=True))
-                          for f_batch, w_batch in
-                          self.weight_matrix_ds.map(lambda x, y, w: (self.feature_extractor(x), w))], axis=0)
+            self.compute_influence_values(self.train_set)
+        predictions = []
+        for x_batch in dataset_to_evaluate:
+            if dataset_to_evaluate._batch_size == 1:
+                pred = tf.concat(
+                    [w_batch * tf.matmul(tf.expand_dims(f_batch, axis=0),
+                                         self.feature_extractor(tf.expand_dims(x_batch, axis=0)), transpose_a=True)
+                     for f_batch, w_batch in self.weight_matrix_ds.map(lambda x, y, w: (x, w))],
+                    axis=0
+                )
+                predictions.append(tf.reduce_sum(pred))
+            else:
+                for z in x_batch:
+                    pred = tf.concat(
+                        [w_batch * tf.matmul(tf.expand_dims(f_batch, axis=0),
+                                             self.feature_extractor(tf.expand_dims(z, axis=0)), transpose_a=True)
+                         for f_batch, w_batch in self.weight_matrix_ds.map(lambda x, y, w: (x, w))],
+                        axis=0
+                    )
+                    predictions.append(tf.reduce_sum(pred))
+
+        return tf.stack(predictions, axis=0)
 
     def _compute_gradients(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
         """
@@ -139,7 +167,7 @@ class RepresenterPointL2:
         """
         self.linear_layer = self._create_surrogate_model()
         optimizer = BacktrackingLineSearch(batches_per_epoch=self.n_train / self.train_set._batch_size,
-                                           c=0.1)  # the optimizer used in the paper's code
+                                           scaling_factor=self.scaling_factor)  # the optimizer used in the paper's code
         loss_function = self.model.compiled_loss._losses[0] if isinstance(self.model.compiled_loss._losses, list) \
             else self.model.compiled_loss
         mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
