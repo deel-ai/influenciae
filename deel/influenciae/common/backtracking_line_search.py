@@ -4,7 +4,7 @@
 # =====================================================================================
 """
 Backtracking Line Search optimizer algorithm with Stochastic Gradient Descent steps.
-This code was based on an implementation by Louis Bethune (ANITI).
+This code was based on an implementation by Louis Bethune (ANITI) -- https://github.com/Algue-Rythme
 """
 from dataclasses import dataclass
 
@@ -34,20 +34,20 @@ class BacktrackingLineSearch(Optimizer):
     Parameters
     ----------
     batches_per_epoch
-        An integer indicating the amount of batches that constitute a whole batch. This information is used for scaling
+        An integer indicating the amount of batches that constitute a whole epoch. This information is used for scaling
         the optimizer updates.
-    c
+    scaling_factor
         A scaling factor for the Wolfe condition
     """
     def __init__(
             self,
             batches_per_epoch: int,
-            c: float,
+            scaling_factor: float,
             **kwargs
     ):
         super(BacktrackingLineSearch, self).__init__(name="backtracking_line_search", **kwargs)
         self.optimizer = SGD()
-        self.c = c
+        self.scaling_factor = scaling_factor
         self.batches_per_epoch = int(batches_per_epoch)
         self.parameters = BTLSParameters(
             beta=0.9,
@@ -56,9 +56,8 @@ class BacktrackingLineSearch(Optimizer):
             max_eta=10.,
             min_eta=1e-6
         )
-        self.old_weights = None
 
-    def step(self, model, current_loss, x, labels, gradients):
+    def step(self, model, current_loss, x_inputs, labels, gradients):
         """
         Performs a step of the line-search optimizer by attempting stochastic gradient descents until the Wolfe
         condition is met.
@@ -69,7 +68,7 @@ class BacktrackingLineSearch(Optimizer):
             A compiled TF model with accessible weights
         current_loss
             A tensor with the current loss value for the batch
-        x
+        x_inputs
             The inputs for the batch
         labels
             The corresponding labels for the batch
@@ -81,7 +80,7 @@ class BacktrackingLineSearch(Optimizer):
 
         # Attempt a first direction
         norm = self.c_gradnorm(gradients)
-        closure = lambda: model.compiled_loss(labels, model(x, training=True))
+        closure = lambda: model.compiled_loss(labels, model(x_inputs, training=True))
         self.parameters.eta *= self.parameters.gamma
         direction = self.attempt_step(model, curr_weights, gradients, closure)
 
@@ -156,9 +155,9 @@ class BacktrackingLineSearch(Optimizer):
         Returns
         -------
         norm
-            A tensor with the norm of the loss function's gradients scaled by the parameter c
+            A tensor with the norm of the loss function's gradients scaled by the parameter scaling_factor
         """
-        return self.c * tf.linalg.global_norm(gradients) ** 2
+        return self.scaling_factor * tf.linalg.global_norm(gradients) ** 2
 
     def _resource_apply_dense(self, grad, handle, apply_state):
         pass
@@ -169,5 +168,5 @@ class BacktrackingLineSearch(Optimizer):
     def get_config(self):
         base_config = super(BacktrackingLineSearch, self).get_config()
         base_config["batches_per_epoch"] = self.batches_per_epoch
-        base_config["c"] = self.c
+        base_config["scaling_factor"] = self.scaling_factor
         return base_config
