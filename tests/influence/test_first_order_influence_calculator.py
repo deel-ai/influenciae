@@ -34,19 +34,6 @@ def test_exact_top_k():
     y_train = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 50)), 10)
     train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 
-    """
-    class MockIHVP():
-        def compute_ihvp(self,dataset):
-            result = None
-            for b in dataset:
-                if result != None:
-                    raise Exception()
-                else
-                    result = b
-            return result
-    ihvp_calculator = MockIHVP()
-    """
-
     # Check the shapes
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
     influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
