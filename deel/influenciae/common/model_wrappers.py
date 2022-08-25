@@ -87,6 +87,7 @@ class InfluenceModel:
             Batch of inputs on which to compute the gradient.
         batch_y
             Batch of target used to compute the gradient.
+
         Returns
         -------
         loss_values
@@ -121,8 +122,7 @@ class InfluenceModel:
 
     def batch_jacobian_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
         """
-        Computes the jacobian of the loss wrt the weights of the target_layer on the whole
-        batched dataset.
+        Computes the jacobian of the loss wrt the weights of the target_layer on a Tensor
 
         Parameters
         ----------
@@ -171,8 +171,7 @@ class InfluenceModel:
 
     def batch_gradient_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
         """
-        Computes the gradient of the loss wrt the weights of the target_layer on the whole
-        batched dataset.
+        Computes the gradient of the loss wrt the weights of the target_layer on a Tensor
 
         Parameters
         ----------

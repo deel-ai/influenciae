@@ -1,3 +1,7 @@
+# Copyright IRT Antoine de Saint Exupéry et Université Paul Sabatier Toulouse III - All
+# rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
+# CRIAQ and ANITI - https://www.deel.ai/
+# =====================================================================================
 from ..types import Optional, Union, List, Tuple
 from ..common import InfluenceModel
 import tensorflow as tf
@@ -5,20 +9,19 @@ import tensorflow as tf
 
 class TracIn:
     """
-        A class implementing an influence score based on Tracin method
-        https://arxiv.org/pdf/2002.08484.pdf
+    A class implementing an influence score based on Tracin method
+    https://arxiv.org/pdf/2002.08484.pdf
 
-        The method evaluates the influence values of samples over a set of training points
+    The method evaluates the influence values of samples over a set of training points
 
-        Parameters
-        ----------
-        models
-            A list of TF2.X models implementing the InfluenceModel interface at different step (epoch)
-            of the training
-        learning_rates: Learning rate or list of learning used during the training.
-            If learning_rates is a list, it shall be have the same size of the models argument
-        """
-
+    Parameters
+    ----------
+    models
+        A list of TF2.X models implementing the InfluenceModel interface at different step (epoch)
+        of the training
+    learning_rates: Learning rate or list of learning used during the training.
+        If learning_rates is a list, it shall be have the same size of the models argument
+    """
     def __init__(self, models: List[InfluenceModel], learning_rates: Union[float, List[float]]):
         self.models = models
 
@@ -35,9 +38,17 @@ class TracIn:
         Compute the influence score between training samples and a list of samples to evaluate
         batch_train and batch_to_evaluate shall have the same shape
         when batch_to_evaluate is None the influence will be evaluate on batch_train
-        :param batch_train: The training samples
-        :param batch_to_evaluate: the samples to evaluate
-        :return: the influence score by sample to evaluate
+
+        Parameters
+        ----------
+            batch_train
+                The training samples
+            batch_to_evaluate
+                The samples to evaluate
+
+        Returns
+        -------
+            the influence score by sample to evaluate
         """
         if batch_to_evaluate is None:
             batch_to_evaluate = batch_train
@@ -64,12 +75,20 @@ class TracIn:
         """
         Compute the influence score between training samples and a list of samples to evaluate
         If dataset_train and dataset_evaluate are datasets, they shall have the same batch_size (last batch of the
-        dataset include)
+        dataset included)
         If one of them is a tensor, the tensor shall have the same shape than the batch of the dataset
         If both of then are tensors, the tensors shall have the same shape
-        :param dataset_train: the training dataset
-        :param dataset_to_evaluate: the samples to evaluate. If None, dataset_to_evaluate will be equal to dataset_train
-        :return: the influence value for each sample of the dataset to evaluate regarding the training dataset
+
+        Parameters
+        ----------
+            dataset_train
+                the training dataset
+            dataset_to_evaluate
+                the samples to evaluate. If None, dataset_to_evaluate will be equal to dataset_train
+
+        Returns
+        -------
+            the influence value for each sample of the dataset to evaluate regarding the training dataset
         """
         if dataset_to_evaluate is None:
             dataset_to_evaluate = dataset_train

@@ -12,7 +12,7 @@ from .influence_calculator import BaseInfluenceCalculator, IHVPCalculator
 
 from ..types import Optional, Union, Tuple
 from ..common import assert_batched_dataset
-from deel.influenciae.common.sorted_dict import BatchedSortedDict
+from ..common.sorted_dict import BatchedSortedDict
 
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
@@ -120,7 +120,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
         dataset_train
             A batched TF dataset containing the samples used during the training procedure
         k
-            the number of most influence samples to retain in training datatse
+            the number of most influence samples to retain in training dataset
+
         Returns
         -------
         influence_values
