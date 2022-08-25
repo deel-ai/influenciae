@@ -8,7 +8,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSquaredError
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.influence.tracin import TracIn
+from deel.influenciae.tracein.tracin import TracIn
 
 
 def test_computation_train_tensor_test_dataset():

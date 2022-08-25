@@ -8,7 +8,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import Reduction, MeanSquaredError
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.influence.rps_lje import RPSLJE
+from deel.influenciae.rps.rps_lje import RPSLJE
 from deel.influenciae.influence.inverse_hessian_vector_product import ExactIHVP
 
 

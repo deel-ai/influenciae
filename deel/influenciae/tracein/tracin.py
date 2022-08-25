@@ -2,8 +2,8 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
-from ..types import Optional, Union, List, Tuple
-from ..common import InfluenceModel
+from deel.influenciae.types import Optional, Union, List, Tuple
+from deel.influenciae.common import InfluenceModel
 import tensorflow as tf
 
 

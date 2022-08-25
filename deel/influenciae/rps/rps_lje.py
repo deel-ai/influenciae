@@ -5,8 +5,8 @@
 import tensorflow as tf
 from typing import Tuple
 
-from .influence_calculator import InverseHessianVectorProduct
-from ..common import InfluenceModel
+from deel.influenciae.influence.influence_calculator import InverseHessianVectorProduct
+from deel.influenciae.common import InfluenceModel
 from tensorflow.keras.models import Sequential
 
 
