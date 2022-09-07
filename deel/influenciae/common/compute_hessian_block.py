@@ -90,16 +90,22 @@ def compute_hard_hessian(model, single_x, single_y, parallel_iter):
         The hessian matrix of the model's loss on single_x wrt its parameters
     """
     weights = model.weights
+    gradients = []
 
     with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape_hess:
         tape_hess.watch(weights)
         grads = InfluenceModel._gradient(model, weights, model.loss_function, single_x, single_y) # pylint: disable=W0212
+        gradients.append(grads)
+        gradients = tf.concat(grads, axis=0)
 
-    hess = tf.squeeze(
-        tape_hess.jacobian(
-            grads, weights, parallel_iterations=parallel_iter,
+    hess = tape_hess.jacobian(
+            gradients, weights,
+            parallel_iterations=parallel_iter,
             experimental_use_pfor=False
             )
-        )
-    hess = tf.reshape(hess, (-1, int(tf.reduce_prod(weights.shape)), int(tf.reduce_prod(weights.shape))))
-    return hess
+
+    hess = [tf.reshape(h, shape=(model.nb_params, -1)) for h in hess]
+
+    hessian = tf.concat(hess, axis=-1)
+
+    return hessian
