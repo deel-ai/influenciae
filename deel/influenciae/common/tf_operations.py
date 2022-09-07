@@ -33,6 +33,27 @@ def find_layer(model: tf.keras.Model, layer: Union[str, int]) -> tf.keras.layers
         return model.layers[layer]
     raise ValueError(f"Could not find any layer {layer}.")
 
+def from_layer_name_to_layer_idx(model: tf.keras.Model, layer_name: str) -> int:
+    """
+    Finds the layer index of the corresponding layer name for the model
+
+    Parameters
+    ----------
+    model
+        Model on which to search
+    layer_name
+        Layer name
+
+    Returns
+    -------
+    layer_idx
+        The idx of the corresponding layer
+    """
+    for layer_idx, layer in enumerate(model.layers):
+        if layer.name == layer_name:
+            return layer_idx
+    raise ValueError(f'No such layer: {layer_name}. Existing layers are: '
+                       f'{list(layer.name for layer in model.layers)}.')
 
 def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
     """

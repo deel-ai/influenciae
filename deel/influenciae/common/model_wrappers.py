@@ -4,27 +4,27 @@
 # =====================================================================================
 """
 Custom wrappers for tensorflow model
+TODO: Ask for unused functions
 """
+import itertools
 
 import tensorflow as tf
 from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
 
-from .tf_operations import find_layer, assert_batched_dataset
-from ..types import Callable, Optional, Union
+from .tf_operations import assert_batched_dataset, \
+    from_layer_name_to_layer_idx
+from ..types import Callable, Optional, Union, List
 
-
-class InfluenceModel:
+class BaseInfluenceModel:
     """
-    Tensorflow model wrapper for Influence functions.
+    A generic Tensorflow model wrapper for Influence functions.
 
     Parameters
     ----------
     model
         Model used for computing influence score.
-    target_layer
-        Layer to target for influence calculation (e.g. before logits). Can be an int (layer
-        index) or a string (layer_name). It is recommended to use the layer before logits.
-        Defaults to the last layer with weights.
+    weights_to_watch
+        List of the model weights to watch when computing gradients, jacobians & hessians
     loss_function
         Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
         apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
@@ -33,29 +33,32 @@ class InfluenceModel:
 
     def __init__(self,
                  model: tf.keras.Model,
-                 target_layer: Optional[Union[str, int]] = None,
+                 weights_to_watch: Optional[List[tf.Variable]] = None,
                  loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-                     from_logits=False, reduction=Reduction.NONE)):
+                    from_logits=False, reduction=Reduction.NONE),
+                 weights_processed: bool = False):
 
         if hasattr(loss_function, 'reduction') and loss_function.reduction is not Reduction.NONE:
             raise ValueError('The loss function must not have reduction.')
 
-        if target_layer is None:
-            target_layer = self._find_last_weight_layer(model)
-        self.target_layer = target_layer
-
         self.model = model
-        self.weights_layer = find_layer(model, target_layer)
-        self.weights = self.weights_layer.weights[0]
+        self.weights_processed = weights_processed
+        if weights_to_watch is None:
+            weights_to_watch =[layer.weights for layer in model.layers]
+            self.weights_processed = False
+        # "flatten" the list of weights and remove empty weights
+        self.weights = self.__process_weights_list(weights_to_watch)
+
+        self.nb_params = tf.reduce_sum([tf.size(w) for w in self.weights])
         self.loss_function = loss_function
 
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, inps: tf.Tensor) -> tf.Tensor:
         """
         Forward of the original model
 
         Parameters
         ----------
-        x
+        inps
             Inputs on which to make the inference.
 
         Returns
@@ -63,7 +66,17 @@ class InfluenceModel:
         y
             Outputs of the original model.
         """
-        return self.model(x)
+        return self.model(inps)
+
+    def __process_weights_list(self, weights_to_watch):
+        """
+        Ensure a proper formatting of the weights
+        TODO: Improve it, cause list(itertools.chain(*weights_to_watch)) is not idempotent
+        """
+        if self.weights_processed:
+            return weights_to_watch
+        else:
+            return list(itertools.chain(*weights_to_watch))
 
     @property
     def layers(self):
@@ -77,16 +90,109 @@ class InfluenceModel:
         """
         return self.model.layers
 
-    def batch_loss_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+    @staticmethod
+    @tf.function
+    def _loss(model: tf.keras.Model, loss_function: Callable,
+              batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the model's loss for a single batch of samples.
+
+        Parameters
+        ----------
+        model
+            Model used for computing influence score.
+        loss_function
+            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+        batch_x
+            One batch of inputs on which to compute the loss.
+        batch_y
+            One batch of targets used to compute the loss.
+        Returns
+        -------
+        loss_values
+            Loss values for each inputs (i.e not reduced).
+        """
+        return loss_function(batch_y, model(batch_x))
+
+    @staticmethod
+    @tf.function
+    def _jacobian(model: tf.keras.Model, weights: tf.Tensor, loss_function: Callable,
+                  batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the model's jacobian for a single batch of samples.
+
+        Parameters
+        ----------
+        model
+            Model used for computing influence score.
+        loss_function
+            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+        batch_x
+            One batch of inputs on which to compute the jacobian.
+        batch_y
+            One batch of targets used to compute the jacobian.
+
+        Returns
+        -------
+        jacobian
+            Jacobian matrix for the set of inputs.
+        """
+        batch_size = tf.shape(batch_y)[0]
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(weights)
+            y_pred = loss_function(batch_y, model(batch_x))
+
+        jacobian = tape.jacobian(y_pred, weights)
+
+        jacobian = [tf.reshape(j, (batch_size, -1,)) for j in jacobian]
+        jacobian = tf.concat(jacobian, axis=1)
+
+        return jacobian
+
+    @staticmethod
+    @tf.function
+    def _gradient(model: tf.keras.Model, weights: tf.Variable, loss_function: Callable,
+                  batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the model gradients for a single batch of sample.
+
+        Parameters
+        ----------
+        model
+            Model used for computing influence score.
+        loss_function
+            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+        batch_x
+            One batch of inputs on which to compute the gradient.
+        batch_y
+            One batch of targets used to compute the gradient.
+
+        Returns
+        -------
+        gradient
+            Gradient vector for the set of inputs.
+        """
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(weights)
+            y_pred = tf.expand_dims(loss_function(batch_y, model(batch_x)), axis=-1)
+
+        gradients = tape.gradient(y_pred, weights)
+        # note that it is the accumulated gradients for all inputs in the batch
+        gradients = [tf.reshape(g, (-1,)) for g in gradients]
+        gradients = tf.concat(gradients, axis=0)
+
+        return gradients
+
+    def _loss_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
         """
         Computes the model's loss on the batched tensor
 
         Parameters
         ----------
         batch_x
-            Batch of inputs on which to compute the gradient.
+            One batch of inputs on which to compute the gradient.
         batch_y
-            Batch of target used to compute the gradient.
+            One batch of target used to compute the gradient.
 
         Returns
         -------
@@ -114,7 +220,7 @@ class InfluenceModel:
         assert_batched_dataset(dataset)
 
         loss_values = tf.concat([
-            InfluenceModel._loss(self.model, self.loss_function, batch_x, batch_y)
+            BaseInfluenceModel._loss(self.model, self.loss_function, batch_x, batch_y)
             for batch_x, batch_y in dataset
         ], axis=0)
 
@@ -122,7 +228,7 @@ class InfluenceModel:
 
     def batch_jacobian_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
         """
-        Computes the jacobian of the loss wrt the weights of the target_layer on a Tensor
+        Computes the jacobian of the loss wrt the weights of the start_layer on a Tensor
 
         Parameters
         ----------
@@ -135,7 +241,7 @@ class InfluenceModel:
         -------
         jacobians
             Matrix of the first-order partial derivative of the loss function wrt the
-            target_layer weights.
+            start_layer weights.
         """
 
         jacobians = InfluenceModel._jacobian(self.model, self.weights, self.loss_function,
@@ -143,9 +249,9 @@ class InfluenceModel:
 
         return jacobians
 
-    def batch_jacobian(self, dataset) -> tf.Tensor:
+    def batch_jacobian(self, dataset: tf.data.Dataset) -> tf.Tensor:
         """
-        Computes the jacobian of the loss wrt the weights of the target_layer on the whole
+        Computes the jacobian of the loss wrt the weights of the start_layer on the whole
         batched dataset.
 
         Parameters
@@ -157,13 +263,13 @@ class InfluenceModel:
         -------
         jacobians
             Matrix of the first-order partial derivative of the loss function wrt the
-            target_layer weights.
+            start_layer weights.
         """
         assert_batched_dataset(dataset)
 
         jacobians = tf.concat([
-            InfluenceModel._jacobian(self.model, self.weights, self.loss_function,
-                                     batch_x, batch_y)
+            BaseInfluenceModel._jacobian(self.model, self.weights, self.loss_function,
+                                         batch_x, batch_y)
             for batch_x, batch_y in dataset
         ], axis=0)
 
@@ -171,7 +277,7 @@ class InfluenceModel:
 
     def batch_gradient_tensor(self, batch_x: tf.Tensor, batch_y: tf.Tensor) -> tf.Tensor:
         """
-        Computes the gradient of the loss wrt the weights of the target_layer on a Tensor
+        Computes the gradient of the loss wrt the weights of the start_layer on a Tensor
 
         Parameters
         ----------
@@ -183,7 +289,7 @@ class InfluenceModel:
         Returns
         -------
         gradients
-            Gradient values of the loss function wrt the target_layer's weights.
+            Gradient values of the loss function wrt the start_layer's weights.
         """
         gradients = InfluenceModel._gradient(self.model, self.weights, self.loss_function,
                                              batch_x, batch_y)
@@ -192,7 +298,7 @@ class InfluenceModel:
 
     def batch_gradient(self, dataset) -> tf.Tensor:
         """
-        Computes the gradient of the loss wrt the weights of the target_layer on the whole
+        Computes the gradient of the loss wrt the weights of the start_layer on the whole
         batched dataset.
 
         Parameters
@@ -203,22 +309,109 @@ class InfluenceModel:
         Returns
         -------
         gradients
-            Gradient values of the loss function wrt the target_layer's weights.
+            Gradient values of the loss function wrt the start_layer's weights.
         """
         assert_batched_dataset(dataset)
 
-        gradients = tf.concat([
-            InfluenceModel._gradient(self.model, self.weights, self.loss_function,
-                                     batch_x, batch_y)
+        gradients = tf.stack([
+            BaseInfluenceModel._gradient(self.model, self.weights, self.loss_function,
+                                         batch_x, batch_y)
             for batch_x, batch_y in dataset
-        ], axis=0)
+        ])
 
         return gradients
+
+class InfluenceModel(BaseInfluenceModel):
+    """
+    A Tensorflow model wrapper for Influence functions which only require the first layer
+    index or name from which we will watch the weights (e.g you ignore the feature extractor).
+
+    Parameters
+    ----------
+    model
+        Model used for computing influence score.
+    start_layer
+        Starting layer name or index for the weights and bias collection. If set to None,
+        will search for the last layer with weights before logits.
+    last_layer
+        Last layer name or index for the weights and biases collection.
+        If set to None, only the layer indicated in the start_layer parameter will be used.
+    loss_function
+        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
+        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
+        for example.
+    """
+    def __init__(self,
+                 model: tf.keras.Model,
+                 start_layer: Optional[Union[str, int]] = None,
+                 last_layer: Optional[Union[str, int]] = None,
+                 loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
+                     from_logits=False, reduction=Reduction.NONE)):
+
+        weights_to_watch = InfluenceModel._get_weights_of_interest(model, start_layer, last_layer)
+        super().__init__(model, weights_to_watch, loss_function, weights_processed=True)
+
+    @staticmethod
+    def _get_weights_of_interest(model: tf.keras.Model,
+                                 start_layer: Optional[Union[str, int]],
+                                 last_layer: Optional[Union[str, int]]) -> list:
+        """
+        Gets the list of trainable weights from layer 'start_layer' to layer 'last_layer' in model
+
+        Parameters
+        ----------
+        model
+            Model we want to get the weights from.
+        start_layer
+            Starting layer for the weights and bias collection. If set to None, will search for the
+            last layer with weights before logits.
+        last_layer
+            Last layer for the weights and biases collection used in hessian computation. If set to
+            None, only the layer indicated in the start_layer parameter will be used.
+
+        Returns
+        -------
+        weights
+            A flatten list of weights between the start_layer and the last_layer layers in model
+        """
+        # get an id value for the start_layer parameter
+        if start_layer is None:
+            start_layer = InfluenceModel._find_last_weight_layer(model)
+            start_layer = len(model.layers) + start_layer
+        elif isinstance(start_layer, str):
+            start_layer = from_layer_name_to_layer_idx(model, start_layer)
+        else:
+            assert(isinstance(start_layer, int)), "start_layer should be None, a string or an int"
+
+        # get the list of layers of interest
+        if last_layer is None:
+            layers_for_influence = [model.layers[start_layer]]
+        elif isinstance(last_layer, str):
+            last_layer = from_layer_name_to_layer_idx(model, last_layer)
+            assert last_layer >= start_layer, \
+                f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
+            layers_for_influence = model.layers[start_layer : last_layer+1]
+            start_layer = last_layer
+        else:
+            assert(isinstance(last_layer, int)), "last_layer should be None, a string or an int"
+            if last_layer < 0:
+                last_layer += len(model.layers)
+                assert last_layer >= start_layer, \
+                    f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
+            elif last_layer == 0:
+                assert last_layer == start_layer, \
+                    f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
+            layers_for_influence = model.layers[start_layer : last_layer+1]
+
+        # get the list of weights of interest
+        weights = [lay.weights for lay in layers_for_influence]
+        weights = list(itertools.chain(*weights))
+        return weights
 
     @staticmethod
     def _find_last_weight_layer(model: tf.keras.Model) -> int:
         """
-        Find and return the id of the last layer before the logits with weights.
+        Find and return the id of the last layer before logits with weights.
 
         Parameters
         ----------
@@ -235,92 +428,3 @@ class InfluenceModel:
             if hasattr(layer, 'weights') and layer.weights:
                 return -layer_id
         raise ValueError('No layers with weights found for the model.')
-
-    @staticmethod
-    @tf.function
-    def _loss(model: tf.keras.Model, loss_function: Callable,
-              x: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        """
-        Computes the model's loss for a batch of samples.
-
-        Parameters
-        ----------
-        model
-            Model used for computing influence score.
-        loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
-        x
-            Batch of inputs on which to compute the loss.
-        y
-            Batch of target used to compute the loss.
-
-        Returns
-        -------
-        loss_values
-            Loss values for each inputs.
-        """
-        return loss_function(y, model(x))
-
-    @staticmethod
-    @tf.function
-    def _jacobian(model: tf.keras.Model, weights: tf.Tensor, loss_function: Callable,
-                  x: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        """
-        Computes the model's jacobian for a batch of samples.
-
-        Parameters
-        ----------
-        model
-            Model used for computing influence score.
-        loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
-        x
-            Batch of inputs on which to compute the jacobian.
-        y
-            Batch of target used to compute the jacobian.
-
-        Returns
-        -------
-        jacobian
-            Jacobian matrix for the set of inputs.
-        """
-        with tf.GradientTape() as tape:
-            tape.watch(weights)
-            y_pred = loss_function(y, model(x))
-
-        jacobian = tape.jacobian(y_pred, weights)
-        jacobian = tf.reshape(jacobian, (len(jacobian), -1))
-
-        return jacobian
-
-    @staticmethod
-    @tf.function
-    def _gradient(model: tf.keras.Model, weights: tf.Variable, loss_function: Callable,
-                  x: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        """
-        Computes the model gradients for a batch of sample.
-
-        Parameters
-        ----------
-        model
-            Model used for computing influence score.
-        loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
-        x
-            Batch of inputs on which to compute the gradient.
-        y
-            Batch of target used to compute the gradient.
-
-        Returns
-        -------
-        gradient
-            Gradient vector for the set of inputs.
-        """
-        with tf.GradientTape() as tape:
-            tape.watch(weights)
-            y_pred = loss_function(y, model(x))
-
-        gradients = tape.gradient(y_pred, weights)
-        gradients = tf.reshape(gradients, (len(gradients), -1))
-
-        return gradients

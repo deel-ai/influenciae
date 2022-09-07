@@ -2,7 +2,6 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
-import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
@@ -18,7 +17,7 @@ def test_hessian_value_and_shape():
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
-    influence_model = InfluenceModel(model, target_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((5, 1, 3))
     target = tf.random.normal((5, 1))
@@ -43,7 +42,7 @@ def test_split_trainset():
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
-    influence_model = InfluenceModel(model, target_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((5, 1, 3))
     target = tf.random.normal((5, 1))
