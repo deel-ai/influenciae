@@ -8,10 +8,11 @@ First order Influence module
 
 import tensorflow as tf
 
-from .influence_calculator import BaseInfluenceCalculator, IHVPCalculator
+from .influence_calculator import IHVPCalculator
+from ..common.influence_abstract import VectorBasedInfluenceCalculator
 
 from ..types import Optional, Union, Tuple
-from ..common import assert_batched_dataset
+from ..common import assert_batched_dataset, dataset_size
 from ..common.sorted_dict import BatchedSortedDict
 
 from .inverse_hessian_vector_product import (
@@ -22,8 +23,9 @@ from .inverse_hessian_vector_product import (
 from ..common import InfluenceModel
 
 
-class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
+class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
     """
+    TODO: Improve documentation to be more specific
     A class implementing the necessary methods to compute the different influence quantities
     using the first-order approximation.
 
@@ -62,141 +64,123 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator):
             shuffle_buffer_size: Optional[int] = 10000,
             normalize=False
     ):
-        super(FirstOrderInfluenceCalculator, self).__init__(model, dataset, ihvp_calculator, n_samples_for_hessian,
-                                                            shuffle_buffer_size)
+        self.model = model
+
+        self.train_size = dataset_size(dataset)
+
+        if n_samples_for_hessian is None:
+            dataset_to_estimate_hessian = dataset
+        else:
+            dataset_to_estimate_hessian = dataset.unbatch().shuffle(shuffle_buffer_size)\
+                .take(n_samples_for_hessian).batch(dataset._batch_size)
+
+        self.train_set = dataset_to_estimate_hessian
+
+        # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
+        if isinstance(ihvp_calculator, str):
+            self.ihvp_calculator = IHVPCalculator.from_string(ihvp_calculator).value(self.model,
+                                                                                     self.train_set)
+        elif isinstance(ihvp_calculator, IHVPCalculator):
+            self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
+        elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
+            self.ihvp_calculator = ihvp_calculator
+
         self.normalize = normalize
-
-    def compute_influence(self, dataset: tf.data.Dataset) -> tf.Tensor:
-        """
-        Computes the influence function vector -- an estimation of the weights difference when
-        removing point(s) -- one vector for each point.
-
-        Parameters
-        ----------
-        dataset
-            A batched Tensorflow dataset containing the points from which we aim to compute the
-            influence of removal.
-
-        Returns
-        -------
-        influence_vectors
-            A tensor containing one vector per input point
-
-        """
-        assert_batched_dataset(dataset)
-
-        influence_vectors = self.ihvp_calculator.compute_ihvp(dataset)
-
-        influence_vectors = self.__normalize_if_needed(influence_vectors)
-
-        influence_vectors = tf.transpose(influence_vectors)
-
-        return influence_vectors
 
     def __normalize_if_needed(self, v):
         """
         Normalize the input vector if the normalize property is True. If False, do nothing
-        :param v: the vector to normalize of shape [Features_Space, Batch_Size]
-        :return: the normalized vector if the normalize property is True, otherwise the input vector
+
+        Parameters
+        ----------
+        v:
+            The vector to normalize of shape [Features_Space, Batch_Size]
+
+        Returns
+        -------
+        v:
+            The normalized vector if the normalize property is True, otherwise the input vector
         """
         if self.normalize:
             v = v / tf.norm(v, axis=0, keepdims=True)
         return v
 
-    def top_k(self,
-              sample_to_evaluate: Tuple[tf.Tensor, tf.Tensor],
-              dataset_train: tf.data.Dataset,
-              k: int = 5) -> Tuple[tf.Tensor, tf.Tensor]:
+    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        Find the top-k closest elements of the training dataset for each sample to evaluate
-
-        The Cook's distance is evaluate for each point(s) provided individually, giving measure of the
-        influence that each point carries on the model's weights.
+        Compute the influence vector for a training sample
 
         Parameters
         ----------
-        sample_to_evaluate
-            A batched tensor containing the samples which will be compare to the training dataset
-        dataset_train
-            A batched TF dataset containing the samples used during the training procedure
-        k
-            the number of most influence samples to retain in training dataset
-
+        train_samples
+            sample to evaluate
         Returns
         -------
-        influence_values
-            Top-k influence values for each sample to evaluate.
-        training_samples
-            Top-k training sample for each sample to evaluate.
+        The influence vector for the training sample
+        #TODO: is it train samples or train_y, train_target ? Should be consistent across the different API
+        #TODO: should return (batch, nb_params) or (nb_params, batch) ?
         """
-        grads_to_evaluate = self.model.batch_jacobian_tensor(*sample_to_evaluate)
-        batch_size = tf.shape(grads_to_evaluate)[0]
-        grads_to_evaluate = tf.reshape(grads_to_evaluate, (batch_size, -1))
+        influence_vector = self.ihvp_calculator.compute_ihvp_single_batch(train_samples)
+        influence_vector = self.__normalize_if_needed(influence_vector)
+        influence_vector = tf.transpose(influence_vector) #TODO: ensure it is what we want
+        return influence_vector
 
-        batched_sorted_dic = BatchedSortedDict(batch_size, k)
-        for batch in dataset_train:
-            # TODO - improve: API IHVP shall accept tensor
-            ihvp = self.ihvp_calculator.compute_ihvp(
-                tf.data.Dataset.from_tensor_slices(batch).batch(int(tf.shape(batch[0])[0])))
-
-            ihvp = self.__normalize_if_needed(ihvp)
-
-            influence_values = tf.matmul(grads_to_evaluate, ihvp)
-            batched_sorted_dic.add_all(influence_values,
-                                       tf.repeat(tf.expand_dims(batch[0], axis=0), batch_size, axis=0))
-
-        influences_values, training_samples = batched_sorted_dic.get()
-
-        return influences_values, training_samples
-
-    def compute_influence_values(
-            self,
-            dataset_train: tf.data.Dataset,
-            dataset_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
+    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        Computes Cook's distance of each point(s) provided individually, giving measure of the
-        influence that each point carries on the model's weights.
-
-        The dataset_train contains the points we will be removing and dataset_to_evaluate,
-        those with respect to whom we will be measuring the influence.
-        As we will be performing the same operation in batches, we consider that each point
-        from one dataset corresponds to one from the other. As such, both datasets must contain
-        the same amount of points. In case the dataset_to_evaluate is not given, use by default the
-        dataset_train: compute the self influence.
+        Preprocess a sample to evaluate
 
         Parameters
         ----------
-        dataset_train
-            A batched TF dataset containing the points we wish to remove.
-        dataset_to_evaluate
-            A batched TF dataset containing the points with respect to whom we wish to measure
-            the influence of removing the training points. Default as dataset_train (self
-            influence).
+        samples_to_evaluate
+            sample to evaluate
 
         Returns
         -------
-        influence_values
-            A tensor containing one influence value per pair of input values (one coming from
-            each dataset).
+        The preprocessed sample to evaluate
         """
-        if dataset_to_evaluate is None:
-            # default to self influence
-            dataset_to_evaluate = dataset_train
+        batch_data, batch_label = samples_to_evaluate
+        sample_evaluate_grads = self.model.batch_jacobian_tensor(batch_data, batch_label)
+        return sample_evaluate_grads
 
-        dataset_size = self.assert_compatible_datasets(dataset_train, dataset_to_evaluate)
 
-        grads = self.model.batch_jacobian(dataset_to_evaluate)
-        grads = tf.reshape(grads, (dataset_size, -1))
+    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate,
+                                                      influence_vector: tf.Tensor) -> tf.Tensor:
+        """
+        Compute the influence score for a preprocessed sample to evaluate and a training influence vector
 
-        ihvp = self.ihvp_calculator.compute_ihvp(dataset_train)
-
-        ihvp = self.__normalize_if_needed(ihvp)
-
-        influence_values = tf.reduce_sum(
-            tf.math.multiply(grads, tf.transpose(ihvp)), axis=1, keepdims=True)
-
+        Parameters
+        ----------
+        preproc_sample_to_evaluate
+            Preprocessed sample to evaluate
+        influence_vector
+            Training influence Vector
+        Returns
+        -------
+        The influence score
+        """
+        influence_values = tf.matmul(preproc_sample_to_evaluate, tf.transpose(influence_vector))
         return influence_values
+
+
+    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+        """
+        Compute the influence score for a training sample
+
+        Parameters
+        ----------
+        train_samples
+            Training sample
+        Returns
+        -------
+        The influence score
+        """
+        batched_inf_vect = self.compute_influence_vector(train_samples)
+        evaluate_vect = self.preprocess_sample_to_evaluate(train_samples)
+        influence_values = tf.reduce_sum(
+            tf.math.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
+        #TODO: improve IHVP to not compute 2 times the gradient
+        #TODO: Attention au normalize
+        return influence_values
+
 
     def compute_influence_group(
             self,
