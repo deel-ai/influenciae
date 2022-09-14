@@ -2,12 +2,15 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
-from deel.influenciae.types import Optional, Union, List, Tuple
-from deel.influenciae.common import InfluenceModel
+"""
+TODO: Insert short introduction
+"""
 import tensorflow as tf
 
+from ..common import InfluenceModel, VectorBasedInfluenceCalculator
+from ..types import Union, List, Tuple
 
-class TracIn:
+class TracIn(VectorBasedInfluenceCalculator):
     """
     A class implementing an influence score based on Tracin method
     https://arxiv.org/pdf/2002.08484.pdf
@@ -31,87 +34,75 @@ class TracIn:
         else:
             self.learning_rates = [learning_rates for _ in range(len(models))]
 
-    def compute_influence_values_from_tensor(self, batch_train: Tuple[tf.Tensor, tf.Tensor],
-                                             batch_to_evaluate: Optional[
-                                                 Tuple[tf.Tensor, tf.Tensor]] = None) -> tf.Tensor:
+
+    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        Compute the influence score between training samples and a list of samples to evaluate
-        batch_train and batch_to_evaluate shall have the same shape
-        when batch_to_evaluate is None the influence will be evaluate on batch_train
+        Compute the influence vector for a training sample
 
         Parameters
         ----------
-            batch_train
-                The training samples
-            batch_to_evaluate
-                The samples to evaluate
-
+        train_samples
+            sample to evaluate
         Returns
         -------
-            the influence score by sample to evaluate
+        The influence vector for the training sample
         """
-        if batch_to_evaluate is None:
-            batch_to_evaluate = batch_train
-        else:
-            assert tf.reduce_all(tf.equal(tf.shape(batch_train[0]), tf.shape(batch_to_evaluate[0])))
-            assert tf.reduce_all(tf.equal(tf.shape(batch_train[1]), tf.shape(batch_to_evaluate[1])))
-
-        values = []
+        influence_vectors = []
         for model, lr in zip(self.models, self.learning_rates):
-            g_train = model.batch_jacobian_tensor(*batch_train)
-            g_evaluate = model.batch_jacobian_tensor(*batch_to_evaluate)
-            v = tf.reduce_sum(g_train * g_evaluate, axis=1, keepdims=True)
-            v = v * lr
-            values.append(v)
-        values = tf.concat(values, axis=1)
-        values = tf.reduce_sum(values, axis=1, keepdims=True)
-        return values
+            g_train = model.batch_jacobian_tensor(*train_samples)
+            influence_vectors.append(g_train * tf.cast(tf.sqrt(lr), tf.float64))
+        influence_vectors = tf.concat(influence_vectors, axis=1)
 
-    def compute_influence_values(
-            self,
-            dataset_train: Union[tf.data.Dataset, Tuple[tf.Tensor, tf.Tensor]],
-            dataset_to_evaluate: Optional[Union[tf.data.Dataset, Tuple[tf.Tensor, tf.Tensor]]] = None
-    ) -> tf.Tensor:
+        return influence_vectors
+
+
+    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        Compute the influence score between training samples and a list of samples to evaluate
-        If dataset_train and dataset_evaluate are datasets, they shall have the same batch_size (last batch of the
-        dataset included)
-        If one of them is a tensor, the tensor shall have the same shape than the batch of the dataset
-        If both of then are tensors, the tensors shall have the same shape
+        Preprocess a sample to evaluate
 
         Parameters
         ----------
-            dataset_train
-                the training dataset
-            dataset_to_evaluate
-                the samples to evaluate. If None, dataset_to_evaluate will be equal to dataset_train
-
+        samples_to_evaluate
+            sample to evaluate
         Returns
         -------
-            the influence value for each sample of the dataset to evaluate regarding the training dataset
+        The preprocessed sample to evaluate
         """
-        if dataset_to_evaluate is None:
-            dataset_to_evaluate = dataset_train
+        evaluate_vect = self.compute_influence_vector(samples_to_evaluate)
+        return evaluate_vect
 
-        if isinstance(dataset_train, tf.data.Dataset):
-            values = []
-            if isinstance(dataset_to_evaluate, tf.data.Dataset):
-                for batch_train, batch_to_evaluate in zip(dataset_train, dataset_to_evaluate):
-                    v = self.compute_influence_values_from_tensor(batch_train, batch_to_evaluate)
-                    values.append(v)
-            else:
-                for batch_train in dataset_train:
-                    v = self.compute_influence_values_from_tensor(batch_train, dataset_to_evaluate)
-                    values.append(v)
-            values = tf.concat(values, axis=0)
-        else:
-            if isinstance(dataset_to_evaluate, tf.data.Dataset):
-                values = []
-                for batch_to_evaluate in dataset_to_evaluate:
-                    v = self.compute_influence_values_from_tensor(dataset_train, batch_to_evaluate)
-                    values.append(v)
-                values = tf.concat(values, axis=0)
-            else:
-                values = self.compute_influence_values_from_tensor(dataset_train, dataset_to_evaluate)
 
-        return values
+    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate,
+                                                      influence_vector: tf.Tensor) -> tf.Tensor:
+        """
+        Compute the influence score for a preprocessed sample to evaluate and a training influence vector
+
+        Parameters
+        ----------
+        preproc_sample_to_evaluate
+            Preprocessed sample to evaluate
+        influence_vector
+            Training influence Vvctor
+        Returns
+        -------
+        The influence score
+        """
+        influence_values = tf.matmul(preproc_sample_to_evaluate, tf.transpose(influence_vector))
+        return influence_values
+
+
+    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+        """
+        Compute the influence score for a training sample
+
+        Parameters
+        ----------
+        train_samples
+            Training sample
+        Returns
+        -------
+        The influence score
+        """
+        influence_vector = self.compute_influence_vector(train_samples)
+        influence_values = tf.reduce_sum(influence_vector * influence_vector, axis=1, keepdims=True)
+        return influence_values
