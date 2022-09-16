@@ -10,7 +10,7 @@ from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSqua
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.tracein.tracin import TracIn
 
-from ..utils import almost_equal
+from ..utils import almost_equal, assert_inheritance
 
 def test_compute_influence_vector():
     model_feature = Sequential()
@@ -86,11 +86,8 @@ def test_compute_influence_value_from_influence_vector():
         f_test = model_feature(inputs_test)
         g_test = 2 * (tf.reduce_sum(f_test, axis=1, keepdims=True) - targets_test) * f_test
         test_inf_vect = tf.concat([g_test * tf.cast(tf.sqrt(lr), tf.float64), g_test * tf.cast(tf.sqrt(2*lr), tf.float64)], axis=1)
-        print(f"g_test: {test_inf_vect.shape}")
-        # sum_lr = 3 * lr
-        # v = tf.matmul(g_test, tf.transpose(g_train)) * sum_lr
         v = tf.matmul(test_inf_vect, tf.transpose(inf_vect))
-        # v = tf.reduce_sum(g_train * g_test, axis=1, keepdims=True) * sum_lr
+
         expected_values.append(v)
 
     expected_values = tf.concat(expected_values, axis=0)
@@ -108,9 +105,6 @@ def test_compute_influence_value_from_influence_vector():
         computed_values.append(inf_values)
     computed_values = tf.concat(computed_values, axis=0)
     assert computed_values.shape == (50, 10)
-    # computed_values = tf.reduce_sum(computed_values, axis=1, keepdims=True)
-    print(f"computed_values: {computed_values.shape}")
-    print(f"expected_values: {expected_values.shape}")
     assert tf.reduce_max(tf.abs(computed_values - expected_values)) < 1E-6
 
 def test_compute_pairwise_influence_value():
@@ -147,3 +141,38 @@ def test_compute_pairwise_influence_value():
     pairwise_inf = tf.concat(pairwise_inf, axis=0)
     assert pairwise_inf.shape == (10, 1)
     assert almost_equal(expected_pairwise_inf_vect, pairwise_inf)
+
+def test_inheritance():
+    model_feature = Sequential()
+    model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
+    model_feature.add(Conv2D(4, kernel_size=(2, 2),
+                             activation='relu', dtype=tf.float64))
+    model_feature.add(Flatten(dtype=tf.float64))
+
+    model = Sequential(
+        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
+
+    model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
+
+    lr = 3.0
+    if_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+    tracin = TracIn([if_model, if_model], [lr, 2 * lr])
+
+
+    inputs_train = tf.random.normal((10, 5, 5, 3), dtype=tf.float64)
+    inputs_test = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
+    targets_train = tf.random.normal((10, 1), dtype=tf.float64)
+    targets_test = tf.random.normal((50, 1), dtype=tf.float64)
+
+    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
+    test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
+
+    method = tracin
+    nb_params = sum([ifmodel.nb_params for ifmodel in tracin.models])
+
+    assert_inheritance(
+        method,
+        nb_params,
+        train_set,
+        test_set
+    )

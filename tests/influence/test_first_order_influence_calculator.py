@@ -2,7 +2,10 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
-from operator import gt
+from json import load
+import os
+import shutil
+
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
@@ -118,6 +121,25 @@ def test_compute_influence_vector_dataset():
                 assert almost_equal(gt_x, batch_x, epsilon=1e-6)
                 assert almost_equal(gt_y, batch_y, epsilon=1e-6)
                 assert almost_equal(gt_inf_vec, batch_inf_vec, epsilon=1e-3)
+
+    # Test the save & load property
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+    if not os.path.exists("test_temp"):
+        os.mkdir("test_temp")    
+    inf_vector_ds = influence_calculator.compute_influence_vector_dataset(
+        train_set.batch(5),
+        save_influence_vector_ds_path="test_temp/inf_vector_ds"
+    )
+    assert os.path.exists("test_temp/inf_vector_ds")
+    inf_vector_ds = influence_calculator.load_dataset("test_temp/inf_vector_ds")
+    gt_dataset = tf.data.Dataset.from_tensor_slices(((inputs, target), tf.transpose(ground_truth_influence))).batch(5)
+    for ((gt_x, gt_y), gt_inf_vec), ((batch_x, batch_y), batch_inf_vec) in zip(gt_dataset, inf_vector_ds):
+        assert almost_equal(gt_x, batch_x, epsilon=1e-6)
+        assert almost_equal(gt_y, batch_y, epsilon=1e-6)
+        assert almost_equal(gt_inf_vec, batch_inf_vec, epsilon=1e-3)
+    shutil.rmtree("test_temp/")
 
 
 def test_preprocess_sample_to_evaluate():
@@ -376,6 +398,36 @@ def test_compute_influence_values_dataset():
                 assert almost_equal(gt_inf_val, batch_inf_val, epsilon=1e-3)
 
 
+def test_compute_influence_values():
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+
+    # buimd the influence model
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    # get the exact kernel
+    kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
+
+    # build a fake datasets in order to have batched samples
+    inputs = tf.random.normal((25, 1, 3))
+    targets = tf.random.normal((25, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, targets))
+  
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+    inf_values_ds = influence_calculator.compute_influence_values_dataset(train_set.batch(5))
+    expected_inf_values = []
+    for _, batch_inf_val in inf_values_ds: # since asserted previous test
+        expected_inf_values.append(batch_inf_val)
+    expected_inf_values = tf.concat(expected_inf_values, axis=0)
+    computed_inf_values = influence_calculator.compute_influence_values(
+        train_set.batch(5)
+    )
+    assert almost_equal(expected_inf_values, computed_inf_values, epsilon=1E-4)
+
+
 def test_compute_influence_values_from_tensor():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
@@ -436,7 +488,8 @@ def test_compute_influence_values_from_tensor():
             assert influences_values.shape == (25, 25)
             # check first order get the right results
             gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
-            assert almost_equal(gt_inf_values, influences_values, epsilon=1e-3)
+            # assert almost_equal(gt_inf_values, influences_values, epsilon=1e-3)
+            assert tf.reduce_max(tf.abs(gt_inf_values - influences_values)) < 5E-4
 
 
 def test_compute_inf_values_with_inf_vect_dataset():
@@ -489,7 +542,7 @@ def test_compute_inf_values_with_inf_vect_dataset():
                                                          normalize=normalize)
             influence_values = []
             for samples_to_evaluate in test_set.batch(5):
-                samples_inf_values_ds = influence_calculator._compute_inf_values_with_inf_vect_dataset(gt_ihvp_dataset, samples_to_evaluate)
+                _, samples_inf_values_ds = influence_calculator._compute_inf_values_with_inf_vect_dataset(gt_ihvp_dataset, samples_to_evaluate)
                 samples_inf_values = []
                 for _, inf_values in samples_inf_values_ds:
                     assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
@@ -499,7 +552,8 @@ def test_compute_inf_values_with_inf_vect_dataset():
                 influence_values.append(samples_inf_values)
             influence_values = tf.concat(influence_values, axis=0)
             assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
-            assert almost_equal(gt_inf_values, influence_values, epsilon=1e-3)
+            # assert almost_equal(gt_inf_values, influence_values, epsilon=1e-3)
+            assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-4
 
 
 def test_compute_influence_values_for_sample_to_evaluate():
@@ -551,7 +605,7 @@ def test_compute_influence_values_for_sample_to_evaluate():
                                                          normalize=normalize)
             influence_values = []
             for samples_to_evaluate in test_set.batch(5):
-                samples_inf_values_ds = influence_calculator.compute_influence_values_for_sample_to_evaluate(train_set.batch(5), samples_to_evaluate)
+                _, samples_inf_values_ds = influence_calculator.compute_influence_values_for_sample_to_evaluate(train_set.batch(5), samples_to_evaluate)
                 samples_inf_values = []
                 for _, inf_values in samples_inf_values_ds:
                     assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
@@ -561,7 +615,8 @@ def test_compute_influence_values_for_sample_to_evaluate():
                 influence_values.append(samples_inf_values)
             influence_values = tf.concat(influence_values, axis=0)
             assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
-            assert almost_equal(gt_inf_values, influence_values, epsilon=1e-3)
+            # assert almost_equal(gt_inf_values, influence_values, epsilon=1e-3)
+            assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 5E-4
 
 
 def test_compute_influence_values_for_dataset_to_evaluate():
@@ -617,7 +672,7 @@ def test_compute_influence_values_for_dataset_to_evaluate():
             )
 
             influence_values = []
-            for samples_inf_ds in eval_inf_ds:
+            for _, samples_inf_ds in eval_inf_ds:
                 samples_inf_values = []
                 for _, inf_values in samples_inf_ds:
                     assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
@@ -627,7 +682,55 @@ def test_compute_influence_values_for_dataset_to_evaluate():
                 influence_values.append(samples_inf_values)
             influence_values = tf.concat(influence_values, axis=0)
             assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
-            assert almost_equal(gt_inf_values, influence_values, epsilon=1e-3)
+            assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
+    
+    # Test save and load functionnality
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+    gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), gt_inf_vec)
+
+    # if not os.path.exists("test_temp"):
+    #     os.mkdir("test_temp")
+    # ds = influence_calculator.compute_influence_values_for_dataset_to_evaluate(
+    #             test_set.batch(5),
+    #             train_set.batch(5),
+    #             save_influence_vector_path="test_temp/influence_vector_ds",
+    #             save_influence_value_path="test_temp/influence_values_ds"
+    #         )
+    # assert os.path.exists("test_temp/influence_values_ds")
+    # load_ds = influence_calculator.load_dataset("test_temp/influence_values_ds")
+    # influence_values = []
+    # for _, samples_inf_ds in load_ds:
+    #     samples_inf_values = []
+    #     for _, inf_values in samples_inf_ds:
+    #         assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
+    #         samples_inf_values.append(inf_values)
+    #     samples_inf_values = tf.concat(samples_inf_values, axis=1)
+    #     assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
+    #     influence_values.append(samples_inf_values)
+    # influence_values = tf.concat(influence_values, axis=0)
+    # assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
+    # assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
+    # other_ds = influence_calculator.compute_influence_values_for_dataset_to_evaluate(
+    #             test_set.batch(5),
+    #             train_set.batch(5),
+    #             load_influence_vector_path="test_temp/influence_vector_ds"
+    #         )    
+    # influence_values = []
+    # for _, samples_inf_ds in other_ds:
+    #     samples_inf_values = []
+    #     for _, inf_values in samples_inf_ds:
+    #         assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
+    #         samples_inf_values.append(inf_values)
+    #     samples_inf_values = tf.concat(samples_inf_values, axis=1)
+    #     assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
+    #     influence_values.append(samples_inf_values)
+    # influence_values = tf.concat(influence_values, axis=0)
+    # assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
+    # assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
+    # shutil.rmtree("test_temp/")
 
 
 def test_top_k():
@@ -691,10 +794,11 @@ def test_top_k():
                 top_k_samples.append(samples_top_k_samples)
             top_k_influences = tf.concat(top_k_influences, axis=0)
             top_k_samples = tf.concat(top_k_samples, axis=0)
+
             assert top_k_influences.shape == (25, 5)
             assert top_k_samples.shape == (25, 5, 1, 3)
-            print(f"res: {tf.reduce_sum(tf.abs(gt_top_k_influences - top_k_influences))}")
-            assert almost_equal(gt_top_k_influences, top_k_influences, epsilon=1E-3)
+
+            assert tf.reduce_max(tf.abs(gt_top_k_influences - top_k_influences)) < 5E-4
             assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1E-6)
 
 
@@ -702,7 +806,7 @@ def test_top_k_dataset():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
 
-    # buimd the influence model
+    # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     # get the exact kernel
@@ -741,9 +845,9 @@ def test_top_k_dataset():
                 ground_truth = gt_inf_vec
             gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
 
-            gt_top_k_influences = tf.math.top_k(gt_inf_values, k=5) # (nb_samples_to_evaluate, 5)
+            gt_top_k_influences = tf.math.top_k(gt_inf_values, k=3) # (nb_samples_to_evaluate, 3)
             gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices) # (nb_samples_to_evaluate, single_input_shape)
-            gt_top_k_influences = gt_top_k_influences.values # (nb_samples_to_evaluate, 5)
+            gt_top_k_influences = gt_top_k_influences.values # (nb_samples_to_evaluate, 3)
 
             influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
                                                          n_samples_for_hessian=25,
@@ -751,19 +855,73 @@ def test_top_k_dataset():
                                                          normalize=normalize)
 
             top_dataset_ds = influence_calculator.top_k_dataset(
-                test_set.batch(5), train_set.batch(5), k=5
+                test_set.batch(5), train_set.batch(5), k=3
             )
+
             top_k_influences, top_k_samples = [], []
             for _, influences_values, training_samples in top_dataset_ds:
                 top_k_influences.append(influences_values)
                 top_k_samples.append(training_samples)
             top_k_influences = tf.concat(top_k_influences, axis=0)
             top_k_samples = tf.concat(top_k_samples, axis=0)
-            assert top_k_influences.shape == (25, 5)
-            assert top_k_samples.shape == (25, 5, 1, 3)
-            print(f"res: {tf.reduce_sum(tf.abs(gt_top_k_influences - top_k_influences))}")
-            assert almost_equal(gt_top_k_influences, top_k_influences, epsilon=1E-3)
-            assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1E-6)
+            assert top_k_influences.shape == (25, 3)
+            assert top_k_samples.shape == (25, 3, 1, 3)
 
-def test_save_dataset():
-    pass
+            assert tf.reduce_max(tf.abs(gt_top_k_influences - top_k_influences)) < 5E-4
+            assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1E-6)
+    
+    # Test save & load functionnalities
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+
+    gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), gt_inf_vec)
+
+    gt_top_k_influences = tf.math.top_k(gt_inf_values, k=3) # (nb_samples_to_evaluate, 3)
+    gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices) # (nb_samples_to_evaluate, single_input_shape)
+    gt_top_k_influences = gt_top_k_influences.values # (nb_samples_to_evaluate, 3)
+
+    if not os.path.exists("test_temp"):
+        os.mkdir("test_temp")
+    ds = influence_calculator.top_k_dataset(
+                test_set.batch(5),
+                train_set.batch(5),
+                k=3,
+                save_influence_vector_ds_path="test_temp/influence_vector_ds",
+                save_top_k_ds_path="test_temp/top_k_ds"
+            )
+    assert os.path.exists("test_temp/influence_vector_ds")
+    assert os.path.exists("test_temp/top_k_ds")
+
+    load_ds = influence_calculator.load_dataset("test_temp/top_k_ds")
+    top_k_influences, top_k_samples = [], []
+    for _, influences_values, training_samples in load_ds:
+        top_k_influences.append(influences_values)
+        top_k_samples.append(training_samples)
+    top_k_influences = tf.concat(top_k_influences, axis=0)
+    top_k_samples = tf.concat(top_k_samples, axis=0)
+    assert top_k_influences.shape == (25, 3)
+    assert top_k_samples.shape == (25, 3, 1, 3)
+
+    assert tf.reduce_max(tf.abs(gt_top_k_influences - top_k_influences)) < 5E-4
+    assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1E-6)
+
+    other_load_ds = influence_calculator.top_k_dataset(
+                test_set.batch(5),
+                train_set.batch(5),
+                k=3,
+                load_influence_vector_ds_path="test_temp/influence_vector_ds",
+            )
+    top_k_influences, top_k_samples = [], []
+    for _, influences_values, training_samples in other_load_ds:
+        top_k_influences.append(influences_values)
+        top_k_samples.append(training_samples)
+    top_k_influences = tf.concat(top_k_influences, axis=0)
+    top_k_samples = tf.concat(top_k_samples, axis=0)
+    assert top_k_influences.shape == (25, 3)
+    assert top_k_samples.shape == (25, 3, 1, 3)
+
+    assert tf.reduce_max(tf.abs(gt_top_k_influences - top_k_influences)) < 5E-4
+    assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1E-6)
+    shutil.rmtree("test_temp/")
