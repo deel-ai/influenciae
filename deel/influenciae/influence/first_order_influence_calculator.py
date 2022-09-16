@@ -13,7 +13,6 @@ from ..common.influence_abstract import VectorBasedInfluenceCalculator
 
 from ..types import Optional, Union, Tuple
 from ..common import assert_batched_dataset, dataset_size
-from ..common.sorted_dict import BatchedSortedDict
 
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
@@ -59,7 +58,7 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
             self,
             model: InfluenceModel,
             dataset: tf.data.Dataset,
-            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = ExactIHVP,
+            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000,
             normalize=False
@@ -84,6 +83,8 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
             self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
         elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
             self.ihvp_calculator = ihvp_calculator
+        else:
+            raise AttributeError("ihvp_calculator should belong to ['str, IHVPCalculator', 'InverseHessianVectorProduct']")
 
         self.normalize = normalize
 
