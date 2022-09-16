@@ -5,6 +5,7 @@
 from sortedcontainers import SortedDict
 from operator import neg
 import tensorflow as tf
+import numpy as np
 from typing import Sequence, Tuple
 
 
@@ -127,3 +128,30 @@ class BatchedSortedDict:
         batch_keys = tf.concat(batch_keys, axis=0)
         batch_values = tf.concat(batch_values, axis=0)
         return batch_keys, batch_values
+
+class BatchSort:
+    #TODO: Add documentation
+    def __init__(self, batch_shape, k_shape, dtype=tf.float32):
+        self.k = k_shape[1]
+        shape = tf.concat((k_shape, batch_shape), axis=0)
+        self.best_batch = tf.Variable(tf.zeros(shape, dtype=dtype), trainable=False)
+        self.best_values = tf.Variable(tf.ones(k_shape, dtype=dtype) * (-np.inf), trainable=False)
+
+    def add_all(self, batch_key: tf.Tensor, batch_values: tf.Tensor) -> None:
+        current_score = tf.concat([self.best_values, batch_values], axis=1)
+        current_batch = tf.concat([self.best_batch, batch_key], axis=1)
+        indexes = tf.argsort(current_score,axis=1,direction='DESCENDING')
+        indexes = indexes[:, :self.k]
+
+        current_best_score = tf.gather(current_score, indexes,batch_dims=1)
+        current_best_samples = tf.gather(current_batch, indexes,batch_dims=1)
+
+        self.best_values.assign(current_best_score)
+        self.best_batch.assign(current_best_samples)
+
+    def get(self):
+        return self.best_batch, self.best_values
+    
+    def reset(self):
+        self.best_batch.assign(tf.zeros_like(self.best_batch))
+        self.best_values.assign((-np.inf) * tf.ones_like(self.best_values))

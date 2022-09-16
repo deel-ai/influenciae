@@ -8,14 +8,15 @@ TODO: Insert insightful description
 from abc import abstractmethod
 from os import path
 from warnings import warn
+from xml.dom import NotFoundErr
 
 import numpy as np
 import tensorflow as tf
 
-from sorted_dict import MaximumSortedDict
-from nearest_neighbors import BaseNearestNeighbor, LinearNearestNeighbor
+from .sorted_dict import MaximumSortedDict
+from .nearest_neighbors import BaseNearestNeighbor, LinearNearestNeighbor
 
-from . import assert_batched_dataset
+from .tf_operations import assert_batched_dataset
 from ..types import Optional, Tuple
 
 class BaseInfluenceCalculator:
@@ -100,8 +101,13 @@ class BaseInfluenceCalculator:
             The influence score
         """
         influences_values = self.compute_influence_values_dataset(dataset_train)
-        influences_values = list(influences_values.as_numpy_iterator())
-        return influences_values
+        influences_values = influences_values.map(
+            lambda _, inf_val: inf_val
+        )
+        inf_val = None
+        for batch_inf in influences_values:
+            inf_val = batch_inf if inf_val is None else tf.concat([inf_val, batch_inf], axis=0)
+        return inf_val
 
 
     def compute_top_k_from_training_dataset(self, dataset_train: tf.data.Dataset, k: int) -> Tuple[
@@ -233,6 +239,7 @@ class BaseInfluenceCalculator:
               dataset_train: tf.data.Dataset,
               k: int = 5,
               nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
+              d_type: tf.DType = tf.float32,
               load_or_save_train_influence_vector_path=None) -> Tuple[tf.Tensor, tf.Tensor]:
         """
         #TODO: It is like the substep of the following function ?
@@ -265,6 +272,7 @@ class BaseInfluenceCalculator:
     def top_k_dataset(self, dataset_to_evaluate: tf.data.Dataset, dataset_train: tf.data.Dataset,
                       k: int = 5,
                       nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
+                      d_type: tf.DType = tf.float32,
                       vector_influence_in_cache: bool = True,
                       load_or_save_train_influence_vector_path: str = None,
                       load_or_save_top_k_path: str = None) -> tf.data.Dataset:
@@ -305,7 +313,7 @@ class BaseInfluenceCalculator:
         raise NotImplementedError()
 
 
-    def __save_dataset(self, dataset: tf.data.Dataset, load_or_save_path: str) -> None:
+    def save_dataset(self, dataset: tf.data.Dataset, load_or_save_path: str) -> None:
         """
         Save a dataset in the specified path
 
@@ -320,6 +328,13 @@ class BaseInfluenceCalculator:
         None
         """
         tf.data.experimental.save(dataset, load_or_save_path)
+
+    def load_dataset(self, dataset_path):
+        if path.exists(dataset_path):
+            dataset = tf.data.experimental.load(dataset_path)
+        else:
+            raise NotFoundErr("The dataset path was not found")
+        return dataset
 
 class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     """
@@ -387,8 +402,10 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         raise NotImplementedError()
 
 
-    def compute_influence_vector_dataset(self, dataset_train: tf.data.Dataset,
-                                         load_or_save_train_influence_vector_path: str = None) -> tf.data.Dataset:
+    def compute_influence_vector_dataset(
+        self, 
+        dataset_train: tf.data.Dataset,
+        save_influence_vector_ds_path: str = None) -> tf.data.Dataset:
         """
         Compute the influence vector for each sample of the training dataset
 
@@ -396,8 +413,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         ----------
         dataset_train
             The training dataset
-        load_or_save_train_influence_vector_path
-            The path to save or load the influence vector of the training dataset. If specify, load the dataset
+        save_influence_vector_ds_path
+            The path to save influence vector of the training dataset. If specify, load the dataset
             if already computed or compute the influence vector and then saved in the specific path
         Returns
         -------
@@ -405,15 +422,11 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             batch of the training dataset
             influence vector
         """
-
-        if load_or_save_train_influence_vector_path is not None and path.exists(
-                load_or_save_train_influence_vector_path):
-            dataset_train = tf.data.experimental.load(load_or_save_train_influence_vector_path)
-        else:
-            dataset_train = dataset_train.map(lambda x, y: ((x, y), self.compute_influence_vector((x, y))))
-            if load_or_save_train_influence_vector_path is not None:
-                self.__save_dataset(dataset_train, load_or_save_train_influence_vector_path)
-        return dataset_train
+        #TODO: Improve by saving only the influence vector
+        inf_vect_ds = dataset_train.map(lambda x, y: ((x, y), self.compute_influence_vector((x, y))))
+        if save_influence_vector_ds_path is not None:
+            self.save_dataset(inf_vect_ds, save_influence_vector_ds_path)
+        return inf_vect_ds
 
 
     def compute_influence_values_dataset(self, dataset_train: tf.data.Dataset) -> tf.data.Dataset:
@@ -466,7 +479,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             self,
             dataset_train: tf.data.Dataset,
             samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor],
-            load_or_save_train_influence_vector_path=None) -> tf.data.Dataset:
+            load_influence_vector_ds_path: str = None,
+            save_influence_vector_ds_path: str = None) -> tf.data.Dataset:
         """
         Compute the influence score between samples to evaluate and training dataset
 
@@ -485,10 +499,14 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             batch of the training dataset
             influence score
         """
+        if load_influence_vector_ds_path is not None:
+            inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+            if save_influence_vector_ds_path is not None:
+                warn("Since you loaded the inf_vect_ds we ignore the saving option (useless)")
+        else:
+            inf_vect_ds = self.compute_influence_vector_dataset(dataset_train, save_influence_vector_ds_path)
 
-        dataset_train = self.compute_influence_vector_dataset(dataset_train, load_or_save_train_influence_vector_path)
-
-        return self._compute_inf_values_with_inf_vect_dataset(dataset_train, samples_to_evaluate)
+        return self._compute_inf_values_with_inf_vect_dataset(inf_vect_ds, samples_to_evaluate)
 
 
     def _compute_inf_values_with_inf_vect_dataset(
@@ -515,7 +533,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
                                      self._compute_influence_values_from_influence_vector(samples_to_evaluate, inf_vect)
                                     )
         )
-        return samples_inf_val_dataset
+        return samples_to_evaluate, samples_inf_val_dataset
 
 
     def _compute_influence_values_from_influence_vector(
@@ -546,8 +564,9 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     def compute_influence_values_for_dataset_to_evaluate(self, dataset_to_evaluate: tf.data.Dataset,
                                                          dataset_train: tf.data.Dataset,
                                                          vector_influence_in_cache: bool = True,
-                                                         load_or_save_train_influence_vector_path: str = None,
-                                                         load_or_save_influence_value_path: str = None
+                                                         load_influence_vector_path: str = None,
+                                                         save_influence_vector_path: str = None,
+                                                         save_influence_value_path: str = None
                                                          ) -> tf.data.Dataset:
         """
         Compute the influence score between a dataset of samples to evaluate and the training dataset
@@ -574,27 +593,32 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
                 batch of the training dataset
                 influence score
         """
-
-        if not vector_influence_in_cache and load_or_save_train_influence_vector_path is None:
-            warn("Warning: The computation is not efficience thinks to use cache or disk save")
-
-        if vector_influence_in_cache:
-            load_or_save_train_influence_vector_path = None
-
-        dataset_train = self.compute_influence_vector_dataset(dataset_train,
-                                                              load_or_save_train_influence_vector_path)
+ 
+        if not vector_influence_in_cache and load_influence_vector_path is None:
+            warn("Warning: The computation is not efficient, thinks to use cache or disk save")
 
         if vector_influence_in_cache:
-            dataset_train = dataset_train.cache()
+            # TODO: Question the intended behavior here, is it save or load ?
+            load_influence_vector_path = None
+        
+        if load_influence_vector_path is not None:
+            inf_vect_ds = self.load_dataset(load_influence_vector_path)
+        else:
+            inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
+                                                              save_influence_vector_path)
+
+        if vector_influence_in_cache:
+            inf_vect_ds = inf_vect_ds.cache()
 
         influence_value_dataset = dataset_to_evaluate.map(
             lambda x_evaluate, y_evaluate: self._compute_inf_values_with_inf_vect_dataset(
-                dataset_train, (x_evaluate, y_evaluate)
+                inf_vect_ds, (x_evaluate, y_evaluate)
                 )
         )
 
-        if load_or_save_influence_value_path is not None:
-            self.__save_dataset(influence_value_dataset, load_or_save_influence_value_path)
+        # TODO: Find a workaround
+        # if save_influence_value_path is not None:
+        #     self.save_dataset(influence_value_dataset, save_influence_value_path)
 
         return influence_value_dataset
 
@@ -604,7 +628,9 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
               dataset_train: tf.data.Dataset,
               k: int = 5,
               nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
-              load_or_save_train_influence_vector_path=None) -> Tuple[
+              d_type: tf.DType = tf.float32,
+              load_influence_vector_ds_path=None,
+              save_influence_vector_ds_path=None) -> Tuple[
                 Tuple[tf.Tensor, tf.Tensor], tf.Tensor, Tuple[tf.Tensor, tf.Tensor]]:
         """
         Find the top-k closest elements of the training dataset for each sample to evaluate
@@ -631,20 +657,31 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         training_samples
             Top-k training sample for each sample to evaluate.
         """
+        if load_influence_vector_ds_path is not None:
+            inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+        else:
+            inf_vect_ds = self.compute_influence_vector_dataset(dataset_train, save_influence_vector_ds_path)
+        batch_size_eval = int(tf.shape(sample_to_evaluate[0])[0])
 
-        dataset_train = self.compute_influence_vector_dataset(dataset_train, load_or_save_train_influence_vector_path)
+        nearest_neighbor.build(
+            inf_vect_ds,
+            self.compute_influence_value_from_influence_vector,
+            k,
+            query_batch_size=batch_size_eval,
+            d_type = d_type
+        )
 
-        nearest_neighbor.build(dataset_train, self.compute_influence_value_from_influence_vector)
-
-        return self.__top_k_with_inf_vect_dataset_train(sample_to_evaluate, nearest_neighbor, k)
+        return self.__top_k_with_inf_vect_dataset_train(sample_to_evaluate, nearest_neighbor, batch_size_eval)
 
 
     def top_k_dataset(self, dataset_to_evaluate: tf.data.Dataset, dataset_train: tf.data.Dataset,
                             k: int = 5,
                             nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
+                            d_type: tf.DType = tf.float32,
                             vector_influence_in_cache: bool = True,
-                            load_or_save_train_influence_vector_path: str = None,
-                            load_or_save_top_k_path: str = None) -> tf.data.Dataset:
+                            load_influence_vector_ds_path: str = None,
+                            save_influence_vector_ds_path: str = None,
+                            save_top_k_ds_path: str = None) -> tf.data.Dataset:
         """
         Find the top-k closest elements for each element of dataset to evaluate in the training dataset
         The method will return a dataset containing a tuple of:
@@ -678,37 +715,45 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             training_samples
                 Top-k training sample for each sample to evaluate.
         """
-        if not vector_influence_in_cache and load_or_save_train_influence_vector_path is None:
+        if not vector_influence_in_cache and load_influence_vector_ds_path is None:
             warn("Warning: The computation is not efficience thinks to use cache or disk save")
 
         if vector_influence_in_cache:
-            load_or_save_train_influence_vector_path = None
-
-        dataset_train = self.compute_influence_vector_dataset(dataset_train,
-                                                              load_or_save_train_influence_vector_path)
+            # TODO: Question the intended behavior here, is it save or load ?
+            load_influence_vector_path = None
+        
+        if load_influence_vector_path is not None:
+            inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+        else:
+            inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
+                                                              save_influence_vector_ds_path)
 
         if vector_influence_in_cache:
-            dataset_train = dataset_train.cache()
+            inf_vect_ds = inf_vect_ds.cache()
 
-        nearest_neighbor.build(dataset_train, self.compute_influence_value_from_influence_vector)
         batch_size_eval = int(dataset_to_evaluate._batch_size)
-        top_k_dataset = dataset_to_evaluate.map(
-            lambda x_evaluate, y_evaluate: tf.py_function(
-                func=self.__top_k_with_inf_vect_dataset_train,
-                inp=[(x_evaluate, y_evaluate), nearest_neighbor, k, batch_size_eval],
-                Tout= tf.float32
-                )
-            # lambda x_evaluate, y_evaluate: self.top_k((x_evaluate, y_evaluate), dataset_train, k)
+        nearest_neighbor.build(
+            inf_vect_ds,
+            self.compute_influence_value_from_influence_vector,
+            k,
+            query_batch_size=batch_size_eval,
+            d_type = d_type
         )
-        if load_or_save_top_k_path is not None:
-            self.__save_dataset(top_k_dataset, load_or_save_top_k_path)
+
+        top_k_dataset = dataset_to_evaluate.map(
+            lambda x_evaluate, y_evaluate: self.__top_k_with_inf_vect_dataset_train(
+                (x_evaluate, y_evaluate), nearest_neighbor, batch_size_eval
+            )
+        )
+
+        if save_top_k_ds_path is not None:
+            self.save_dataset(top_k_dataset, save_top_k_ds_path)
 
         return top_k_dataset
 
     def __top_k_with_inf_vect_dataset_train(self,
                                         sample_to_evaluate: Tuple[tf.Tensor, tf.Tensor],
                                         nearest_neighbor: BaseNearestNeighbor,
-                                        k: int = 5,
                                         batch_size_eval: Optional[int] = None) -> Tuple[
                                                 Tuple[tf.Tensor, tf.Tensor], tf.Tensor, Tuple[tf.Tensor, tf.Tensor]]:
         """
@@ -734,8 +779,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         v_to_evaluate = self.preprocess_sample_to_evaluate(sample_to_evaluate)
 
         if batch_size_eval is None:
-            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate, k)
+            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)
         else:
-            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate, k, batch_size_eval)
+            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate, batch_size_eval)
 
         return sample_to_evaluate, influences_values, training_samples

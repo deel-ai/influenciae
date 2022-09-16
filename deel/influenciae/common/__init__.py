@@ -6,8 +6,10 @@
 Utility classes and functions
 """
 
-from .tf_operations import find_layer, is_dataset_batched, assert_batched_dataset, dataset_size
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
+from .influence_abstract import BaseInfluenceCalculator, VectorBasedInfluenceCalculator
 from .conjugate_gradients import conjugate_gradients_solve
 from .compute_hessian_block import compute_hessian_block
 from .backtracking_line_search import BacktrackingLineSearch
+from .tf_operations import find_layer, from_layer_name_to_layer_idx, is_dataset_batched, \
+     assert_batched_dataset, dataset_size

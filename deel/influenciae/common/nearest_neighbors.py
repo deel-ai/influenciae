@@ -9,16 +9,24 @@ from abc import abstractmethod
 
 import tensorflow as tf
 
-from sorted_dict import BatchedSortedDict
+from .sorted_dict import BatchSort
 from ..types import Callable, Optional
 
+#TODO: Update documentation
 class BaseNearestNeighbor:
     """
     Nearest Neighbor abstract to search over a dataset
     """
 
     @abstractmethod
-    def build(self, dataset: tf.data.Dataset, dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor]) -> None:
+    def build(
+        self,
+        dataset: tf.data.Dataset,
+        dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
+        k: int,
+        query_batch_size: int,
+        d_type: tf.DType = tf.float32         
+    ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
 
@@ -35,7 +43,7 @@ class BaseNearestNeighbor:
         raise NotImplementedError()
 
     @abstractmethod
-    def query(self, vector_to_find: tf.Tensor, k: int):
+    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None):
         """
         Find the k closest points to the dataset
 
@@ -61,8 +69,16 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
     def __init__(self):
         self.dataset = None
         self.dot_product_fun = None
+        self.batched_sorted_dic = None
 
-    def build(self, dataset: tf.data.Dataset, dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor]) -> None:
+    def build(
+        self,
+        dataset: tf.data.Dataset,
+        dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
+        k: int,
+        query_batch_size: int,
+        d_type: tf.DType = tf.float32 
+        ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
 
@@ -78,8 +94,10 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         """
         self.dataset = dataset
         self.dot_product_fun = dot_product_fun
+        batch_shape = self.dataset.element_spec[0][0].shape[1:]
+        self.batched_sorted_dic = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type)
 
-    def query(self, vector_to_find: tf.Tensor, k: int, batch_size: Optional[int] = None):
+    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None):
         """
         Find the k closest points to the dataset
 
@@ -96,13 +114,27 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         """
         if batch_size is None:
             batch_size = tf.shape(vector_to_find)[0]
-        batched_sorted_dic = BatchedSortedDict(batch_size, k)
 
-        for (x, _), ihvp in self.dataset:
+        dataset_iterator = iter(self.dataset)
+        self.batched_sorted_dic.reset()
+
+        def body_func(i):
+            batch, ihvp = next(dataset_iterator)
             influence_values = self.dot_product_fun(vector_to_find, ihvp)
-            batched_sorted_dic.add_all(influence_values,
-                                       tf.repeat(tf.expand_dims(x, axis=0), batch_size, axis=0))
 
-        influences_values, training_samples = batched_sorted_dic.get()
+            self.batched_sorted_dic.add_all(
+                tf.repeat(tf.expand_dims(batch[0], axis=0), batch_size, axis=0),
+                influence_values
+            )
+
+            return (i+1, )
+
+        tf.while_loop(
+            cond=lambda i: i < self.dataset.cardinality(),
+            body=body_func,
+            loop_vars=[tf.constant(0, dtype=tf.int64)]
+        )
+
+        training_samples, influences_values = self.batched_sorted_dic.get()
 
         return influences_values, training_samples
