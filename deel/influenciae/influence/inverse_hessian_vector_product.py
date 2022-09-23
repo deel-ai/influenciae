@@ -156,18 +156,73 @@ class ExactIHVP(InverseHessianVectorProduct):
         weights = self.model.weights
 
         if self.parallel_iter is None:
-            with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape_hess:
-                tape_hess.watch(weights)
-                grads = self.model.batch_gradient(dataset) if dataset._batch_size == 1 \
-                    else self.model.batch_jacobian(dataset) # pylint: disable=W0212
+            # with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape_hess:
+            #     tape_hess.watch(weights)
+            #     grads = self.model.batch_gradient(dataset) if dataset._batch_size == 1 \
+            #         else self.model.batch_jacobian(dataset) # pylint: disable=W0212
 
-            hess = tape_hess.jacobian(grads, weights)
+            # hess = tape_hess.jacobian(grads, weights)
+
+            ## Workaround1
+            hess = tf.zeros((self.model.nb_params, self.model.nb_params), dtype=dataset.element_spec[0].dtype)
+            nb_elt = tf.constant(0, dtype=tf.int32)
+            for batched_samples in dataset:
+                batch_size = tf.shape(batched_samples[0])[0]
+                nb_elt += batch_size
+                with tf.GradientTape(persistent=True, watch_accessed_variables=False) as tape_hess:
+                    tape_hess.watch(weights)
+                    grads = self.model.batch_jacobian_tensor(batched_samples[0], batched_samples[1]) # pylint: disable=W0212
+
+                curr_hess = tape_hess.jacobian(
+                        grads, weights
+                        )
+
+                curr_hess = [tf.reshape(h, shape=(len(grads), self.model.nb_params, -1)) for h in curr_hess]
+                curr_hess = tf.concat(curr_hess, axis=-1)
+                curr_hess = tf.reduce_sum(curr_hess, axis=0)
+                curr_hess = tf.cast(curr_hess, dtype=hess.dtype)
+
+                hess += curr_hess
+
+            hessian = hess / tf.cast(nb_elt, dtype=hess.dtype)
+
+            ## Workaround 2
+            # elt_in_ds = tf.cast(dataset_size(dataset), dtype=tf.int32)
+            # hess = tf.zeros((self.model.nb_params, self.model.nb_params))
+            # nb_elt = tf.constant(0, dtype=tf.int32)
+            # iter_ds = iter(dataset)
+
+            # def hessian_sum(nb_elt, hess):
+            #     batch_x, batch_y = next(iter_ds)
+            #     batch_size = tf.shape(batch_x)[0]
+            #     nb_elt += batch_size
+            #     with tf.GradientTape(persistent=True, watch_accessed_variables=False) as tape_hess:
+            #         tape_hess.watch(weights)
+            #         grads = self.model.batch_jacobian_tensor(batch_x, batch_y) # pylint: disable=W0212
+
+            #     curr_hess = tape_hess.jacobian(
+            #             grads, weights
+            #             )
+
+            #     curr_hess = tf.reshape(curr_hess, shape=(len(grads), self.model.nb_params, -1))
+            #     curr_hess = tf.reduce_sum(curr_hess, axis=0)
+            #     hess += curr_hess
+
+            #     return nb_elt, hess
+            
+            # nb_elt, hess = tf.while_loop(
+            #     cond = lambda nb_elt, _: nb_elt < elt_in_ds,
+            #     body = hessian_sum,
+            #     loop_vars=[nb_elt, hess]
+            # )
+
+            # hessian = hess / tf.cast(nb_elt, dtype=hess.dtype)
+
         else:
             with tf.GradientTape(persistent=True, watch_accessed_variables=False) as tape_hess:
                 tape_hess.watch(weights)
                 grads = self.model.batch_gradient(dataset) if dataset._batch_size == 1 \
                     else self.model.batch_jacobian(dataset) # pylint: disable=W0212
-                    #TODO: I think batch_jacobian is quite fine in all cases
 
             hess = tape_hess.jacobian(
                     grads, weights,
@@ -175,9 +230,10 @@ class ExactIHVP(InverseHessianVectorProduct):
                     experimental_use_pfor=False
                     )
 
-        hess = [tf.reshape(h, shape=(len(grads), self.model.nb_params, -1)) for h in hess]
-        hessian = tf.concat(hess, axis=-1)
-        hessian = tf.reduce_mean(hessian, axis=0)
+            hess = [tf.reshape(h, shape=(len(grads), self.model.nb_params, -1)) for h in hess]
+        
+            hessian = tf.concat(hess, axis=-1)
+            hessian = tf.reduce_mean(hessian, axis=0)
 
         return tf.linalg.pinv(hessian)
 
@@ -187,7 +243,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         group_data, group_targets = group_batch
         if use_gradient:
             grads = tf.reshape(self.model.batch_jacobian_tensor(group_data, group_targets), (-1, self.model.nb_params))
-            ihvp = tf.matmul(self.inv_hessian, grads, transpose_b=True)
+            ihvp = tf.matmul(self.inv_hessian, tf.cast(grads, dtype=self.inv_hessian.dtype), transpose_b=True)
         else:
             if len(group_batch.element_spec.shape) == 2:
                 ihvp = tf.concat(
@@ -353,8 +409,9 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
             as input
         """
         if self.feature_extractor is None:
-            self.feature_extractor = Model(inputs=self.model.layers[0].input,
-                                           outputs=self.model.layers[self.extractor_layer - 1].output)
+            # self.feature_extractor = Model(inputs=self.model.layers[0].input,
+            #                                outputs=self.model.layers[self.extractor_layer - 1].output)
+            self.feature_extractor = tf.keras.Sequential(self.model.layers[:self.extractor_layer])
         if isinstance(dataset.element_spec, tuple):
             feature_maps = tf.concat([self.feature_extractor(x_batch) for x_batch, _ in dataset], axis=0)
         else:
@@ -393,7 +450,6 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         # Compute the IHVP for each pair feature map-label
         def cgd_func(single_grad):
-            # print(f"single_grad: {single_grad.shape}")
             inv_hessian_vect_product = conjugate_gradients_solve(self, tf.expand_dims(single_grad, axis=-1), x0=None,
                                                                  maxiter=self.n_cgd_iters)
             return inv_hessian_vect_product

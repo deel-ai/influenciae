@@ -9,6 +9,7 @@ from abc import abstractmethod
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
 
 from .influence_factory import InfluenceCalculatorFactory
 from deel.influenciae.types import Tuple, Dict, Any, Optional
@@ -92,6 +93,14 @@ class MissingLabelEvaluator:
 
             noisy_training_dataset = noisy_training_dataset.batch(self.train_batch_size)
             
+            # quickfix_model = Sequential()
+            # quickfix_model.add(model.base_model)
+            # quickfix_model.add(model.flatten)
+            # quickfix_model.add(model.dense_1)
+            # quickfix_model.add(model.drop_1)
+            # quickfix_model.add(model.lrelu)
+            # quickfix_model.add(model.dense_2)
+
             influence_calculator = influence_factory.build(noisy_training_dataset, model, data_train)
             influences_values = influence_calculator.compute_influence_values(noisy_training_dataset)
             # print(f"For index: {index}, influence values are computed")

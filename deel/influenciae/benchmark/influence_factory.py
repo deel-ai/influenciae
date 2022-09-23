@@ -8,7 +8,7 @@ import tensorflow as tf
 
 from deel.influenciae.common import InfluenceModel, BaseInfluenceCalculator
 
-from deel.influenciae.influence import FirstOrderInfluenceCalculator, ExactIHVP
+from deel.influenciae.influence import FirstOrderInfluenceCalculator, ExactIHVP, ConjugateGradientDescentIHVP
 from deel.influenciae.rps import RPSLJE
 
 from deel.influenciae.types import Any
@@ -25,7 +25,8 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model, data_train) -> BaseInfluenceCalculator:
         influence_model = InfluenceModel(model, start_layer=-1)
-        ihvp_calculator = ExactIHVP(influence_model, training_dataset)
+        # ihvp_calculator = ExactIHVP(influence_model, training_dataset)
+        ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, -1, training_dataset)
         influence_calculator = FirstOrderInfluenceCalculator(influence_model, training_dataset, ihvp_calculator)
         return influence_calculator
 
