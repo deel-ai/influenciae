@@ -5,7 +5,7 @@
 """
 Inverse Hessian Vector Product (ihvp) module
 """
-
+import sys
 from abc import ABC, abstractmethod
 from argparse import ArgumentError
 
@@ -37,6 +37,10 @@ class InverseHessianVectorProduct(ABC):
 
         self.model = model
         self.train_set = train_dataset
+
+    @abstractmethod
+    def compute_ihvp_single_batch(self, group_batch: Tuple[tf.Tensor, tf.Tensor], use_gradient: bool = True) -> tf.Tensor:
+        raise NotImplementedError
 
     @abstractmethod
     def compute_ihvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
@@ -316,10 +320,10 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         self._batch_shape_tensor = None
         self.n_hessian = dataset_size(train_dataset)
         self.extractor_layer = extractor_layer
+        self.cardinality = train_dataset.cardinality()
         self.train_set = self._compute_feature_map_dataset(self.train_set)  # extract the train set's features
         self.model = BaseInfluenceModel(
-            # Model(inputs=model.layers[model.target_layer].input, outputs=model.layers[-1].output),
-            tf.keras.Sequential(model.layers[extractor_layer:]),  # TODO make it more generic with Model(in, out)
+            tf.keras.Sequential(model.layers[extractor_layer:]),
             weights_to_watch=model.weights,
             loss_function=model.loss_function,
             weights_processed=True
@@ -364,6 +368,43 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         return feature_map_dataset
 
+
+    def single_grad(self, args):
+        feature_map, label = args
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(self.weights)
+            y_pred = self.model.loss_function(tf.expand_dims(label, axis=0), self.model(tf.expand_dims(feature_map, axis=0)))
+
+        gradients = tape.gradient(y_pred, self.weights)
+
+        return gradients
+
+    def compute_ihvp_single_batch(self, group_batch: Tuple[tf.Tensor, tf.Tensor], use_gradient: bool = True) -> tf.Tensor:
+
+        # Transform the dataset into a set of feature maps-labels
+        if use_gradient:
+            feature_maps = self.feature_extractor(group_batch[0])
+
+            grads = self.model.batch_jacobian_tensor(feature_maps, group_batch[1])
+            # grads = tf.vectorized_map(fn=self.single_grad, elems=[feature_maps, group_batch[1]])
+            # print(f"grads: {grads}")
+        else:
+            grads = group_batch[0] if isinstance(group_batch.element_spec, tuple) else group_batch
+
+        # Compute the IHVP for each pair feature map-label
+        def cgd_func(single_grad):
+            # print(f"single_grad: {single_grad.shape}")
+            inv_hessian_vect_product = conjugate_gradients_solve(self, tf.expand_dims(single_grad, axis=-1), x0=None,
+                                                                 maxiter=self.n_cgd_iters)
+            return inv_hessian_vect_product
+        
+        ihvp_list = tf.map_fn(fn=cgd_func, elems=grads)
+
+        ihvp_list = tf.transpose(ihvp_list) if ihvp_list.shape[-1] != 1 \
+            else tf.transpose(tf.squeeze(ihvp_list, axis=-1))
+
+        return ihvp_list
+
     def compute_ihvp(self, group: tf.data.Dataset, use_gradient: bool = True) -> tf.Tensor:
         """
         Computes the inverse-hessian-vector product of a group of points approximately using
@@ -394,7 +435,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         # Compute the IHVP for each pair feature map-label
         ihvp_list = []
-        ihvp_shape = None
+
         for x_influence_grad in grads:
             # Squeeze when the grads have some weird shape
             if len(x_influence_grad.shape) > 1:
@@ -403,8 +444,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
             inv_hessian_vect_product = conjugate_gradients_solve(self, x_influence_grads, x0=None,
                                                                  maxiter=self.n_cgd_iters)
             ihvp_list.append(inv_hessian_vect_product)
-            if ihvp_shape is None:
-                ihvp_shape = inv_hessian_vect_product.shape
+
         ihvp_list = tf.stack(ihvp_list, axis=0)
         ihvp_list = tf.transpose(ihvp_list) if ihvp_list.shape[-1] != 1 \
             else tf.transpose(tf.squeeze(ihvp_list, axis=-1))
@@ -491,15 +531,27 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
                 loss = self.model.loss_function(y_hessian_current, self.model(feature_maps_hessian_current))
             backward = tape.jacobian(loss, self.weights)
         hessian_vector_product = acc.jvp(backward)
+
         hvp = [tf.reshape(hessian_vp, shape=(-1,)) for hessian_vp in hessian_vector_product]
         hvp = tf.concat(hvp, axis=0)
 
-        weight = tf.cast(tf.shape(feature_maps_hessian_current)[0], dtype=tf.float32) / \
-                 tf.cast(self.n_hessian, dtype=tf.float32)
+        weight = tf.cast(tf.shape(feature_maps_hessian_current)[0], dtype=hvp.dtype) / \
+                 tf.cast(self.n_hessian, dtype=hvp.dtype)
 
         hvp = hvp * weight
 
         return hvp
+
+    def __reshape_vector(self, grads, weights):
+        grads_reshape = []
+        index = 0
+        for w in weights:
+            shape = tf.shape(w)
+            size = tf.reduce_prod(shape)
+            g = grads[index:(index + size)]
+            grads_reshape.append(tf.reshape(g, shape))
+            index += size
+        return grads_reshape
 
     def __call__(self, x_initial: tf.Tensor) -> tf.Tensor:
         """
@@ -515,16 +567,57 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         hessian_vector_product: tf.Tensor
             Tensor with the hessian-vector product
         """
-        cum_size_list_up = tf.cumsum([tf.size(w) for w in self.weights])
-        cum_size_list_down = tf.concat([tf.constant([0], dtype=tf.int32), cum_size_list_up[:-1]], axis=0)
-        x = [tf.reshape(x_initial[s_down: s_up], tf.shape(w)) for w, s_down, s_up in zip(self.weights, cum_size_list_down, cum_size_list_up)]
+        x = self.__reshape_vector(x_initial, self.model.weights)
 
-        hessian_vector_product = tf.zeros_like(self.model.nb_params)
-        for features_block, labels_block in self.train_set:
-            for f, l in zip(tf.unstack(features_block), tf.unstack(labels_block)):
-                hessian_product_current = self.__sub_call(x, tf.expand_dims(f, axis=0),
-                                                          tf.expand_dims(l, axis=0))
-                hessian_vector_product += hessian_product_current
-        hessian_vector_product = tf.reshape(hessian_vector_product, tf.shape(x_initial))
+        hvp_init = tf.zeros((self.model.nb_params,), dtype=x_initial.dtype)
+        dataset_iterator = iter(self.train_set)
+
+        def body_func(i, hessian_vector_product):
+            features_block, labels_block = next(dataset_iterator)
+            
+            # def inner_body_func(j, hessian_vector_product_inner):
+            #     f = features_block[j]
+            #     l = labels_block[j]
+
+            #     hessian_product_current = self.__sub_call(x, tf.expand_dims(f, axis=0),
+            #                                 tf.expand_dims(l, axis=0))
+            #     hessian_vector_product_inner += hessian_product_current
+
+            #     return (j+1, hessian_vector_product_inner)
+
+            # _, hessian_vector_product_inner = tf.while_loop(
+            #     cond= lambda j, _: j < tf.shape(features_block)[0],
+            #     body=inner_body_func,
+            #     loop_vars=[tf.constant(0, dtype=tf.int32), hessian_vector_product]
+            # )
+
+            def batched_hvp(elt):
+                f, l = elt
+                hessian_product_current = self.__sub_call(x, tf.expand_dims(f, axis=0), tf.expand_dims(l, axis=0))
+
+                return hessian_product_current
+
+            hessian_vector_product_inner = tf.reduce_sum(
+                tf.map_fn(fn=batched_hvp, elems=[features_block, labels_block], fn_output_signature=x_initial.dtype),
+                axis=0
+            )
+
+            hessian_vector_product += hessian_vector_product_inner
+            return (i+1, hessian_vector_product)
+
+        _, hessian_vector_product = tf.while_loop(
+            cond=lambda i, _: i < self.cardinality,
+            body=body_func,
+            loop_vars=[tf.constant(0, dtype=tf.int64), hvp_init]
+        )
+
+        # for features_block, labels_block in self.train_set:
+        #     for f, l in zip(tf.unstack(features_block), tf.unstack(labels_block)):
+        #         hessian_product_current = self.__sub_call(x, tf.expand_dims(f, axis=0),
+        #                                                   tf.expand_dims(l, axis=0))
+        #         hessian_vector_product += hessian_product_current
+        # hessian_vector_product = tf.reshape(hessian_vector_product, tf.shape(x_initial))
+
+        hessian_vector_product = tf.reshape(hessian_vector_product, (self.model.nb_params, 1))
 
         return hessian_vector_product
