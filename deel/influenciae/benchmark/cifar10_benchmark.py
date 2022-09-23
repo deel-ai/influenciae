@@ -11,6 +11,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model
+from tensorflow.keras.models import Sequential
 from tensorflow.keras.applications import EfficientNetB0, VGG19
 from tensorflow.keras.layers import Dense, Flatten, Dropout
 from tensorflow.keras.regularizers import L1L2
@@ -22,47 +23,88 @@ from .model_resnet import ResNet
 
 from deel.influenciae.types import Tuple, Union, Any
 
-class EfficientNetCIFAR(Model):
+# class EfficientNetCIFAR(Model):
+#     def __init__(self, model: Union[str, Model], use_regu=True, **kwargs):
+#         super(EfficientNetCIFAR, self).__init__(**kwargs)
+#         if isinstance(model, Model):
+#             self.base_model = model
+#         else:
+#             if model == 'resnet':
+#                 self.base_model = ResNet(input_shape=(32, 32, 3), include_top=False, block='basic_block',
+#                                          residual_unit='v1',
+#                                          repetitions=(3, 3, 3), initial_filters=16, initial_pooling=None,
+#                                          final_pooling=None)
+#             elif model == 'efficient_net':
+#                 self.base_model = EfficientNetB0(include_top=False, weights=None, input_shape=(32, 32, 3))
+#             elif model == 'vgg19':
+#                 self.base_model = VGG19(include_top=False, weights=None, input_shape=(32, 32, 3))
+#             else:
+#                 raise Exception('unknown model=' + model)
+
+#         self.flatten = Flatten()
+
+#         if use_regu:
+#             self.dense_1 = Dense(128, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4))
+#         else:
+#             self.dense_1 = Dense(128)
+
+#         self.lrelu = tf.keras.layers.LeakyReLU()
+#         self.drop_1 = Dropout(0.4)
+#         if use_regu:
+#             self.dense_2 = Dense(10, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4), kernel_initializer="he_normal")
+#         else:
+#             self.dense_2 = Dense(10)
+
+#     def call(self, inputs, training=None, mask=None):
+#         x = self.base_model(inputs)
+#         x = self.flatten(x)
+#         x = self.dense_1(x)
+#         x = self.drop_1(x)
+#         x = self.lrelu(x)
+#         x = self.dense_2(x)
+
+#         return x
+
+class EfficientNetCIFAR(Sequential):
     def __init__(self, model: Union[str, Model], use_regu=True, **kwargs):
         super(EfficientNetCIFAR, self).__init__(**kwargs)
         if isinstance(model, Model):
-            self.base_model = model
+            base_model = model
         else:
             if model == 'resnet':
-                self.base_model = ResNet(input_shape=(32, 32, 3), include_top=False, block='basic_block',
+                base_model = ResNet(input_shape=(32, 32, 3), include_top=False, block='basic_block',
                                          residual_unit='v1',
                                          repetitions=(3, 3, 3), initial_filters=16, initial_pooling=None,
                                          final_pooling=None)
             elif model == 'efficient_net':
-                self.base_model = EfficientNetB0(include_top=False, weights=None, input_shape=(32, 32, 3))
+                base_model = EfficientNetB0(include_top=False, weights=None, input_shape=(32, 32, 3))
             elif model == 'vgg19':
-                self.base_model = VGG19(include_top=False, weights=None, input_shape=(32, 32, 3))
+                base_model = VGG19(include_top=False, weights=None, input_shape=(32, 32, 3))
             else:
                 raise Exception('unknown model=' + model)
-
-        self.flatten = Flatten()
+        self.add(base_model)
+        self.add(Flatten())
 
         if use_regu:
-            self.dense_1 = Dense(128, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4))
+            dense_1 = Dense(128, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4))
         else:
-            self.dense_1 = Dense(128)
+            dense_1 = Dense(128)
+        self.add(dense_1)
 
-        self.lrelu = tf.keras.layers.LeakyReLU()
-        self.drop_1 = Dropout(0.4)
+        self.add(Dropout(0.4))
+        self.add(tf.keras.layers.LeakyReLU())
+        
         if use_regu:
-            self.dense_2 = Dense(10, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4), kernel_initializer="he_normal")
+            dense_2 = Dense(10, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4), kernel_initializer="he_normal")
         else:
-            self.dense_2 = Dense(10)
+            dense_2 = Dense(10)
+        
+        self.add(dense_2)
 
-    def call(self, inputs, training=None, mask=None):
-        x = self.base_model(inputs)
-        x = self.flatten(x)
-        x = self.dense_1(x)
-        x = self.drop_1(x)
-        x = self.lrelu(x)
-        x = self.dense_2(x)
+    # def call(self, inputs, training=None, mask=None):
+    #     x = self(inputs)
 
-        return x
+    #     return x
 
 
 class Cifar10TrainingProcedure(BaseTrainingProcedure):
@@ -175,8 +217,8 @@ class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
         training_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
-        # training_dataset = training_dataset.take(1000)
-        # test_dataset = test_dataset.take(10)
+        training_dataset = training_dataset.take(10)
+        test_dataset = test_dataset.take(10)
         training_procedure = Cifar10TrainingProcedure(epochs, model_type, use_regu, sgd)
         super(Cifar10MissingLabelEvaluator, self).__init__(training_dataset, test_dataset, training_procedure,
                                                            nb_classes=10,misslabeling_ratio=misslabeling_ratio,

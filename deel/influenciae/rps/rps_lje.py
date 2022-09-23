@@ -38,8 +38,9 @@ class RPSLJE(VectorBasedInfluenceCalculator):
         self.ihvp_calculator = ihvp_calculator
         if isinstance(target_layer, str):
             target_layer = from_layer_name_to_layer_idx(model, target_layer)
-        self.feature_model = Sequential(self.model.layers[:-target_layer])
 
+        self.feature_model = Sequential(self.model.layers[:target_layer])
+        print(self.feature_model.layers)
     def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
         Compute the influence vector for a training sample
@@ -60,7 +61,7 @@ class RPSLJE(VectorBasedInfluenceCalculator):
         vec_weight = tf.concat([tf.reshape(w, (1, -1)) for w in self.model.weights], axis=1)
         vec_weight = tf.repeat(vec_weight, tf.shape(ihvp)[1], axis=0)
         #TODO: ask questions here
-        ihvp = vec_weight - tf.transpose(ihvp)
+        ihvp = tf.cast(vec_weight, dtype=ihvp.dtype) - tf.transpose(ihvp)
 
         return ihvp
 
@@ -111,6 +112,7 @@ class RPSLJE(VectorBasedInfluenceCalculator):
         """
         ihvp = self.compute_influence_vector(train_samples)
         evaluate_vect = self.preprocess_sample_to_evaluate(train_samples)
+        evaluate_vect = tf.cast(evaluate_vect, dtype=ihvp.dtype)
         influence_values = tf.reduce_sum(
             tf.math.multiply(evaluate_vect, ihvp), axis=1, keepdims=True)
 
