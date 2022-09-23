@@ -27,7 +27,6 @@ class BaseInfluenceCalculator:
     @abstractmethod
     def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        #TODO: Is it a batch ? Or a single tensor ?
         Compute the influence score for a single batch of training samples
 
         Parameters
@@ -46,8 +45,6 @@ class BaseInfluenceCalculator:
     def compute_influence_vector_dataset(self, dataset_train: tf.data.Dataset,
                                          load_or_save_train_influence_vector_path: str = None) -> tf.data.Dataset:
         """
-        #TODO: It is actually building the dataset ((batch_samples), batch_influence_vect)
-        #TODO: Should it erase the previous dataset ?
         Compute the influence vector for each sample of the training dataset
 
         Parameters
@@ -69,7 +66,6 @@ class BaseInfluenceCalculator:
     @abstractmethod
     def compute_influence_values_dataset(self, dataset_train: tf.data.Dataset) -> tf.data.Dataset:
         """
-        #TODO: It is actually building a new dataset
         Compute the influence score for each sample of the training dataset
 
         Parameters
@@ -87,8 +83,6 @@ class BaseInfluenceCalculator:
 
     def compute_influence_values(self, dataset_train: tf.data.Dataset) -> np.array:
         """
-        #TODO: As for the compute influence vector dataset it should
-        #TODO: have a save possibility and a load to not map several times
         Compute the influence score for each sample of the training dataset
 
         Parameters
@@ -333,7 +327,7 @@ class BaseInfluenceCalculator:
         if path.exists(dataset_path):
             dataset = tf.data.experimental.load(dataset_path)
         else:
-            raise NotFoundErr("The dataset path was not found")
+            raise NotFoundErr(f"The dataset path: {dataset_path} was not found")
         return dataset
 
 class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
@@ -347,8 +341,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     @abstractmethod
     def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        #TODO: Why it does not belong to the previous abstarct class ?
-        #TODO: Or is it compute_influence_vector_dataset that should not belong upthere ?
         Compute the influence vector for a training sample
 
         Parameters
@@ -365,7 +357,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     @abstractmethod
     def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
-        #TODO: Same question ?
         Preprocess a sample to evaluate
 
         Parameters
@@ -383,10 +374,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate,
                                                       influence_vector: tf.Tensor) -> tf.Tensor:
         """
-        preproc_sample_to_evaluate = (batch1, features_size)
-        influence_vector = (batch2, features_size)
-        return (batch1, batch2)
-        #TODO: sample_to_evaluate being either a training sample or not right ?
         Compute the influence score for a preprocessed sample to evaluate and a training influence VECTOR
 
         Parameters
@@ -616,12 +603,20 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
                 )
         )
 
-        # TODO: Find a workaround
-        # if save_influence_value_path is not None:
-        #     self.save_dataset(influence_value_dataset, save_influence_value_path)
+        if save_influence_value_path is not None:
+            for batch_idx, (_, samples_inf_val_dataset) in enumerate(influence_value_dataset):
+                self.save_dataset(samples_inf_val_dataset, f"{save_influence_value_path}/batch_{batch_idx:06d}")
 
         return influence_value_dataset
 
+    # def load_influence_values_for_dataset_to_evaluate(self, dataset_to_evaluate: tf.data.Dataset, loading_path:str):
+    #     """
+        
+    #     """
+    #     influence_value_dataset = dataset_to_evaluate.map(
+    #         lambda x_batch, y_batch: (x_batch, y_batch), self.load_dataset(f"{loading_path}/batch_{idx}")
+    #     )
+    #     return influence_value_dataset
 
     def top_k(self,
               sample_to_evaluate: Tuple[tf.Tensor, tf.Tensor],
