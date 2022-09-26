@@ -6,4 +6,4 @@
 Influence function module
 """
 from .first_order_influence_calculator import FirstOrderInfluenceCalculator
-from .inverse_hessian_vector_product import ExactIHVP, ConjugateGradientDescentIHVP
+from .second_order_influence_calculator import SecondOrderInfluenceCalculator

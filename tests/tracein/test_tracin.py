@@ -10,7 +10,7 @@ from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSqua
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.tracein.tracin import TracIn
 
-from ..utils import almost_equal, assert_inheritance
+from ..utils_test import almost_equal, assert_inheritance
 
 def test_compute_influence_vector():
     model_feature = Sequential()

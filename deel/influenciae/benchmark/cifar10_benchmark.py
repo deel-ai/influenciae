@@ -21,7 +21,7 @@ from tensorflow.keras.optimizers import Adam
 from .base_benchmark import BaseTrainingProcedure, MissingLabelEvaluator
 from .model_resnet import ResNet
 
-from deel.influenciae.types import Tuple, Union, Any
+from ..types import Tuple, Union, Any
 
 # class EfficientNetCIFAR(Model):
 #     def __init__(self, model: Union[str, Model], use_regu=True, **kwargs):

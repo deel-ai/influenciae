@@ -5,12 +5,12 @@
 """
 Second order Influence module
 """
-
 import tensorflow as tf
 
-from .influence_calculator import BaseInfluenceCalculator, ExactIHVP, ConjugateGradientDescentIHVP
+from .influence_calculator import BaseInfluenceCalculator
+from ..common import ExactIHVP, ConjugateGradientDescentIHVP
 
-from ..common.tf_operations import assert_batched_dataset, dataset_size
+from ..utils import assert_batched_dataset, dataset_size
 from ..types import Optional
 
 

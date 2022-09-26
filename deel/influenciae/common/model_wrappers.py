@@ -11,7 +11,7 @@ import itertools
 import tensorflow as tf
 from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
 
-from .tf_operations import assert_batched_dataset, \
+from ..utils import assert_batched_dataset, \
     from_layer_name_to_layer_idx
 from ..types import Callable, Optional, Union, List
 

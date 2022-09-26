@@ -8,18 +8,12 @@ First order Influence module
 
 import tensorflow as tf
 
-from .influence_calculator import IHVPCalculator
-from ..common.influence_abstract import VectorBasedInfluenceCalculator
+from ..common import InfluenceModel
+from ..common import VectorBasedInfluenceCalculator
+from ..common import InverseHessianVectorProduct, IHVPCalculator
 
 from ..types import Optional, Union, Tuple
-from ..common import assert_batched_dataset, dataset_size
-
-from .inverse_hessian_vector_product import (
-    InverseHessianVectorProduct,
-    ExactIHVP
-)
-
-from ..common import InfluenceModel
+from ..utils import assert_batched_dataset, dataset_size
 
 
 class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):

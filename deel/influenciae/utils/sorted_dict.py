@@ -4,9 +4,11 @@
 # =====================================================================================
 from sortedcontainers import SortedDict
 from operator import neg
+
 import tensorflow as tf
 import numpy as np
-from typing import Sequence, Tuple
+
+from ..types import Sequence, Tuple
 
 
 class MaximumSortedDict:
