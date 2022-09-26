@@ -2,16 +2,15 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
-import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.influence.inverse_hessian_vector_product import ExactIHVP, ConjugateGradientDescentIHVP
+from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
 
-from ..utils import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
 
 def test_exact_hessian():

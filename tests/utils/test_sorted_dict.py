@@ -1,4 +1,4 @@
-from deel.influenciae.common.sorted_dict import MaximumSortedDict, BatchedSortedDict
+from deel.influenciae.utils.sorted_dict import MaximumSortedDict, BatchedSortedDict
 import tensorflow as tf
 
 

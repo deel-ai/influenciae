@@ -12,7 +12,7 @@ from tensorflow.keras.losses import (MeanAbsoluteError, CategoricalCrossentropy,
 
 from deel.influenciae.common import BaseInfluenceModel, InfluenceModel
 
-from ..utils import generate_model, assert_tensor_equal, almost_equal
+from ..utils_test import generate_model, assert_tensor_equal, almost_equal
 
 
 def test_loss_reduction():

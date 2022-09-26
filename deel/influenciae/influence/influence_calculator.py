@@ -7,48 +7,13 @@ Abstract Influence module
 """
 
 from abc import ABC, abstractmethod
-from enum import Enum
 import tensorflow as tf
 
-from .inverse_hessian_vector_product import (
-    InverseHessianVectorProduct,
-    ExactIHVP,
-    ConjugateGradientDescentIHVP
-)
+from ..common import InfluenceModel
+from ..common import InverseHessianVectorProduct, IHVPCalculator, ExactIHVP
 
+from ..utils import dataset_size
 from ..types import Optional, Union
-from ..common import InfluenceModel, dataset_size
-
-
-class IHVPCalculator(Enum):
-    """
-    Inverse Hessian Vector Product Calculator interface.
-    """
-    Exact = ExactIHVP
-    Cgd = ConjugateGradientDescentIHVP
-
-    @staticmethod
-    def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
-        """
-        Restore an IHVPCalculator from string.
-
-        Parameters
-        ----------
-        ihvp_calculator
-            String indicated the method use to compute the inverse hessian vector product,
-            e.g 'exact' or 'cgd'.
-
-        Returns
-        -------
-        ivhp_calculator
-            IHVPCalculator object.
-        """
-        assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
-                                                    "vector product calculators are supported."
-        if ihvp_calculator == 'exact':
-            return IHVPCalculator.Exact
-
-        return IHVPCalculator.Cgd
 
 
 class BaseInfluenceCalculator(ABC):

@@ -5,17 +5,17 @@
 """
 Inverse Hessian Vector Product (ihvp) module
 """
-import sys
 from abc import ABC, abstractmethod
+from enum import Enum
 from argparse import ArgumentError
 
 import tensorflow as tf
 from tensorflow.keras import Model
 
-from ..common import BaseInfluenceModel, InfluenceModel, conjugate_gradients_solve
+from ..common import BaseInfluenceModel, InfluenceModel
 
 from ..types import Optional, Union, Tuple
-from ..common import assert_batched_dataset, dataset_size
+from ..utils import assert_batched_dataset, dataset_size, conjugate_gradients_solve
 
 
 class InverseHessianVectorProduct(ABC):
@@ -677,3 +677,34 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
         hessian_vector_product = tf.reshape(hessian_vector_product, (self.model.nb_params, 1))
 
         return hessian_vector_product
+
+
+class IHVPCalculator(Enum):
+    """
+    Inverse Hessian Vector Product Calculator interface.
+    """
+    Exact = ExactIHVP
+    Cgd = ConjugateGradientDescentIHVP
+
+    @staticmethod
+    def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
+        """
+        Restore an IHVPCalculator from string.
+
+        Parameters
+        ----------
+        ihvp_calculator
+            String indicated the method use to compute the inverse hessian vector product,
+            e.g 'exact' or 'cgd'.
+
+        Returns
+        -------
+        ivhp_calculator
+            IHVPCalculator object.
+        """
+        assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
+                                                    "vector product calculators are supported."
+        if ihvp_calculator == 'exact':
+            return IHVPCalculator.Exact
+
+        return IHVPCalculator.Cgd

@@ -6,9 +6,9 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 
 from ..common import InfluenceModel, VectorBasedInfluenceCalculator
-from ..influence.influence_calculator import InverseHessianVectorProduct
-from ..common import from_layer_name_to_layer_idx
+from ..common import InverseHessianVectorProduct
 
+from ..utils import from_layer_name_to_layer_idx
 from ..types import Union, Tuple
 
 class RPSLJE(VectorBasedInfluenceCalculator):
@@ -40,7 +40,7 @@ class RPSLJE(VectorBasedInfluenceCalculator):
             target_layer = from_layer_name_to_layer_idx(model, target_layer)
 
         self.feature_model = Sequential(self.model.layers[:target_layer])
-        print(self.feature_model.layers)
+
     def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
         """
         Compute the influence vector for a training sample

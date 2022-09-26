@@ -13,10 +13,9 @@ from xml.dom import NotFoundErr
 import numpy as np
 import tensorflow as tf
 
-from .sorted_dict import MaximumSortedDict
-from .nearest_neighbors import BaseNearestNeighbor, LinearNearestNeighbor
+from ..utils import MaximumSortedDict, BaseNearestNeighbor, LinearNearestNeighbor
 
-from .tf_operations import assert_batched_dataset
+from ..utils import assert_batched_dataset
 from ..types import Optional, Tuple
 
 class BaseInfluenceCalculator:
@@ -63,9 +62,9 @@ class BaseInfluenceCalculator:
         raise NotImplementedError()
 
 
-    @abstractmethod
     def compute_influence_values_dataset(self, dataset_train: tf.data.Dataset) -> tf.data.Dataset:
         """
+        #TODO: It is not using function specific to this class, could be put at higher level ?
         Compute the influence score for each sample of the training dataset
 
         Parameters
@@ -78,8 +77,10 @@ class BaseInfluenceCalculator:
             batch of the training dataset
             influence score
         """
-        raise NotImplementedError()
+        dataset_train = dataset_train.map(
+            lambda batch_x, batch_y: ((batch_x, batch_y), self.compute_pairwise_influence_value((batch_x, batch_y))))
 
+        return dataset_train
 
     def compute_influence_values(self, dataset_train: tf.data.Dataset) -> np.array:
         """
@@ -416,27 +417,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         return inf_vect_ds
 
 
-    def compute_influence_values_dataset(self, dataset_train: tf.data.Dataset) -> tf.data.Dataset:
-        """
-        #TODO: It is not using function specific to this class, could be put at higher level ?
-        Compute the influence score for each sample of the training dataset
-
-        Parameters
-        ----------
-        dataset_train
-            The training dataset
-        Returns
-        -------
-        A dataset containing the tuple:
-            batch of the training dataset
-            influence score
-        """
-        dataset_train = dataset_train.map(
-            lambda batch_x, batch_y: ((batch_x, batch_y), self.compute_pairwise_influence_value((batch_x, batch_y))))
-
-        return dataset_train
-
-
     def compute_influence_values_from_tensor(
             self,
             train_samples: Tuple[tf.Tensor, tf.Tensor],
@@ -608,15 +588,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
                 self.save_dataset(samples_inf_val_dataset, f"{save_influence_value_path}/batch_{batch_idx:06d}")
 
         return influence_value_dataset
-
-    # def load_influence_values_for_dataset_to_evaluate(self, dataset_to_evaluate: tf.data.Dataset, loading_path:str):
-    #     """
-        
-    #     """
-    #     influence_value_dataset = dataset_to_evaluate.map(
-    #         lambda x_batch, y_batch: (x_batch, y_batch), self.load_dataset(f"{loading_path}/batch_{idx}")
-    #     )
-    #     return influence_value_dataset
 
     def top_k(self,
               sample_to_evaluate: Tuple[tf.Tensor, tf.Tensor],

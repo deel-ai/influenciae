@@ -4,8 +4,8 @@
 # =====================================================================================
 import tensorflow as tf
 
-from deel.influenciae.rps_l2 import RepresenterPointL2
-from ..utils import almost_equal
+from deel.influenciae.rps import RepresenterPointL2
+from ..utils_test import almost_equal
 
 
 def test_surrogate_model():

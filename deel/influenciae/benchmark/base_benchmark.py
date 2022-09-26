@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.models import Sequential
 
 from .influence_factory import InfluenceCalculatorFactory
-from deel.influenciae.types import Tuple, Dict, Any, Optional
+from ..types import Tuple, Dict, Any, Optional
 
 class BaseTrainingProcedure:
     """

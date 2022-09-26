@@ -13,7 +13,7 @@ from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.regularizers import L2
 
-from ..common import assert_batched_dataset, BacktrackingLineSearch, dataset_size
+from ..utils import assert_batched_dataset, BacktrackingLineSearch, dataset_size
 
 
 class RepresenterPointL2:

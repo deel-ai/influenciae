@@ -6,12 +6,13 @@ from abc import abstractmethod
 
 import tensorflow as tf
 
-from deel.influenciae.common import InfluenceModel, BaseInfluenceCalculator
+from ..common import InfluenceModel, BaseInfluenceCalculator
+from ..common import ExactIHVP, ConjugateGradientDescentIHVP
 
-from deel.influenciae.influence import FirstOrderInfluenceCalculator, ExactIHVP, ConjugateGradientDescentIHVP
-from deel.influenciae.rps import RPSLJE
+from ..influence import FirstOrderInfluenceCalculator
+from ..rps import RPSLJE
 
-from deel.influenciae.types import Any
+from ..types import Any
 
 class InfluenceCalculatorFactory:
     """

@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
 
-from deel.influenciae.common import find_layer, is_dataset_batched
+from deel.influenciae.utils import find_layer, is_dataset_batched
 
 
 def test_find_layer():
