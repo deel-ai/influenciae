@@ -7,4 +7,4 @@ Benchmark module
 """
 
 from .base_benchmark import BaseTrainingProcedure, MissingLabelEvaluator, Display
-from .influence_factory import InfluenceCalculatorFactory, FirstOrderFactory, RPSLJEFactory
+from .influence_factory import InfluenceCalculatorFactory, FirstOrderFactory, RPSLJEFactory, TracInFactory
