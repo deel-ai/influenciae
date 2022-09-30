@@ -8,7 +8,7 @@ Custom operations related to tensorflow objects
 
 import tensorflow as tf
 
-from ..types import Union
+from ..types import Union, Tuple
 
 
 def find_layer(model: tf.keras.Model, layer: Union[str, int]) -> tf.keras.layers.Layer:
@@ -106,3 +106,13 @@ def dataset_size(dataset: tf.data.Dataset):
 
     size = dataset.cardinality().numpy() * dataset._batch_size # pylint: disable=W0212
     return size
+
+def default_process_batch(batch: Tuple[tf.Tensor, ...]) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    """
+    TODO: Docs
+    """
+    y_true = batch[1]
+    model_inp = batch[0]
+    sample_weight = None
+
+    return model_inp, y_true, sample_weight

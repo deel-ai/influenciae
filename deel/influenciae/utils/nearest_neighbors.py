@@ -25,7 +25,7 @@ class BaseNearestNeighbor:
         dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32         
+        d_type: tf.DType = tf.float32
     ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
@@ -77,7 +77,7 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32 
+        d_type: tf.DType = tf.float32
         ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
