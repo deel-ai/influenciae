@@ -5,167 +5,259 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.losses import Reduction, MeanSquaredError
+from tensorflow.keras.losses import Reduction, MeanSquaredError, BinaryCrossentropy
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP
-from deel.influenciae.rps.rps_lje import RPSLJE
+from deel.influenciae.common import ExactIHVP, ExactFactory
+
+from deel.influenciae.rps import RPSLJE
+from deel.influenciae.influence import FirstOrderInfluenceCalculator
 
 from ..utils_test import assert_inheritance
 
 def test_compute_influence_vector():
+    tf.random.set_seed(0)
+
     model_feature = Sequential()
     model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
     model_feature.add(Conv2D(4, kernel_size=(2, 2),
                              activation='relu', dtype=tf.float64))
     model_feature.add(Flatten(dtype=tf.float64))
 
-    model = Sequential(
-        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
+    binary = True
+    if binary:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64, activation='sigmoid')])
+        loss_function = BinaryCrossentropy(reduction=Reduction.NONE)
+    else:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64)])
+        loss_function = MeanSquaredError(reduction=Reduction.NONE)
 
     model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
-
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_train = tf.random.normal((50, 1), dtype=tf.float64)
 
-    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
-    ihvp_calculator = ExactIHVP(influence_model, train_dataset.batch(5))
-    rps_lje = RPSLJE(influence_model, ihvp_calculator, target_layer=-1)
-
-    f_train = model_feature(inputs_train)
-    g_train = 2 * (tf.reduce_sum(f_train, axis=1, keepdims=True) - targets_train) * f_train
-    ihvp = tf.ones((50, 64), dtype=tf.float64) - (tf.matmul(g_train, ihvp_calculator.inv_hessian))
-
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
     ihvp_computed = rps_lje.compute_influence_vector((inputs_train, targets_train))
-    assert ihvp_computed.shape == (50, 64) # (nb_inputs, nb_params)
-    assert tf.reduce_max(tf.abs(ihvp_computed - ihvp)) < 1E-6
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+
+    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    weight = model.layers[-1].weights[0]
+    vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
+    weight.assign(weight - vect)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+    ihvp_expected = first_order.compute_influence_vector((inputs_train, targets_train))
+
+    assert tf.reduce_max(tf.abs((ihvp_computed - ihvp_expected) / ihvp_expected)) < 1E-2
+
 
 def test_preprocess_sample_to_evaluate():
+    tf.random.set_seed(0)
+
     model_feature = Sequential()
     model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
     model_feature.add(Conv2D(4, kernel_size=(2, 2),
                              activation='relu', dtype=tf.float64))
     model_feature.add(Flatten(dtype=tf.float64))
 
-    model = Sequential(
-        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
+    binary = True
+    if binary:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64, activation='sigmoid')])
+        loss_function = BinaryCrossentropy(reduction=Reduction.NONE)
+    else:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64)])
+        loss_function = MeanSquaredError(reduction=Reduction.NONE)
 
     model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
-
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_train = tf.random.normal((50, 1), dtype=tf.float64)
 
-    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
-
-    ihvp_calculator = ExactIHVP(influence_model, train_dataset.batch(5))
-    rps_lje = RPSLJE(influence_model, ihvp_calculator, target_layer=-1)
-
-    f_train = model_feature(inputs_train)
-    f_train_computed = rps_lje.preprocess_sample_to_evaluate((inputs_train, targets_train))
-    assert f_train_computed.shape == (50, 64)
-    assert tf.reduce_max(tf.abs(f_train_computed - f_train)) < 1E-6
-
-def test_compute_influence_value_from_influence_vector():
-    model_feature = Sequential()
-    model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
-    model_feature.add(Conv2D(4, kernel_size=(2, 2),
-                             activation='relu', dtype=tf.float64))
-    model_feature.add(Flatten(dtype=tf.float64))
-
-    model = Sequential(
-        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
-
-    model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
-
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
-
-    inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
-    targets_train = tf.random.normal((50, 1), dtype=tf.float64)
     inputs_test = tf.random.normal((60, 5, 5, 3), dtype=tf.float64)
     targets_test = tf.random.normal((60, 1), dtype=tf.float64)
 
-    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
-    ihvp_calculator = ExactIHVP(influence_model, train_dataset.batch(5))
-    rps_lje = RPSLJE(influence_model, ihvp_calculator, target_layer=-1)
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
-    f_train = model_feature(inputs_train)
-    g_train = 2 * (tf.reduce_sum(f_train, axis=1, keepdims=True) - targets_train) * f_train
-    ihvp = tf.ones((50, 64), dtype=tf.float64) - (tf.matmul(g_train, ihvp_calculator.inv_hessian))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
+    pre_evaluate_computed = rps_lje.preprocess_sample_to_evaluate((inputs_test, targets_test))
 
-    v_test = rps_lje.preprocess_sample_to_evaluate((inputs_test, targets_test))
-    influence_values_expected = tf.matmul(v_test, tf.transpose(ihvp))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-    influence_values_computed = rps_lje.compute_influence_value_from_influence_vector(v_test, ihvp)
-    assert influence_values_computed.shape == (60, 50)
-    assert tf.reduce_max(tf.abs(influence_values_computed - influence_values_expected)) < 1E-6
+    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    weight = model.layers[-1].weights[0]
+    vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
+    weight.assign(weight - vect)
 
-def test_compute_pairwise_influence_value():
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+    pre_evaluate_expected = first_order.preprocess_sample_to_evaluate((inputs_test, targets_test))
+
+    assert tf.reduce_max(tf.abs(pre_evaluate_computed - pre_evaluate_expected)) < 1E-3
+
+
+def test_compute_influence_value_from_influence_vector():
+    tf.random.set_seed(0)
+
     model_feature = Sequential()
     model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
     model_feature.add(Conv2D(4, kernel_size=(2, 2),
                              activation='relu', dtype=tf.float64))
     model_feature.add(Flatten(dtype=tf.float64))
 
-    model = Sequential(
-        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
+    binary = True
+    if binary:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64, activation='sigmoid')])
+        loss_function = BinaryCrossentropy(reduction=Reduction.NONE)
+    else:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64)])
+        loss_function = MeanSquaredError(reduction=Reduction.NONE)
 
     model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
-
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_train = tf.random.normal((50, 1), dtype=tf.float64)
 
-    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train))
+    inputs_test = tf.random.normal((60, 5, 5, 3), dtype=tf.float64)
+    targets_test = tf.random.normal((60, 1), dtype=tf.float64)
 
-    ihvp_calculator = ExactIHVP(influence_model, train_dataset.batch(5))
-    rps_lje = RPSLJE(influence_model, ihvp_calculator, target_layer=-1)
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
-    f_train = model_feature(inputs_train)
-    g_train = 2 * (tf.reduce_sum(f_train, axis=1, keepdims=True) - targets_train) * f_train
-    ihvp = tf.ones((50, 64), dtype=tf.float64) - (tf.matmul(g_train, ihvp_calculator.inv_hessian))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
+    v_test = rps_lje.preprocess_sample_to_evaluate((inputs_test, targets_test))
+    influence_vector = rps_lje.compute_influence_vector((inputs_test, targets_test))
+    influence_values_computed = rps_lje.compute_influence_value_from_influence_vector(v_test, influence_vector)
 
-    expected_values = tf.reduce_sum(tf.multiply(ihvp, f_train), axis=1, keepdims=True)
-    computed_values = rps_lje.compute_pairwise_influence_value((inputs_train, targets_train))
-    assert computed_values.shape == (50, 1)
-    assert tf.reduce_max(tf.abs(computed_values - expected_values)) < 1E-6
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-def test_inheritance():
+    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    weight = model.layers[-1].weights[0]
+    vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
+    weight.assign(weight - vect)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+    v_test = first_order.preprocess_sample_to_evaluate((inputs_test, targets_test))
+    influence_vector = first_order.compute_influence_vector((inputs_test, targets_test))
+    influence_values_expected = first_order.compute_influence_value_from_influence_vector(v_test, influence_vector)
+
+    assert tf.reduce_max(
+        tf.abs((influence_values_computed - influence_values_expected) / influence_values_expected)) < 1E-2
+
+
+def test_compute_pairwise_influence_value():
+    tf.random.set_seed(0)
+
     model_feature = Sequential()
     model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
     model_feature.add(Conv2D(4, kernel_size=(2, 2),
                              activation='relu', dtype=tf.float64))
     model_feature.add(Flatten(dtype=tf.float64))
 
-    model = Sequential(
-        [model_feature, Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64)])
+    binary = True
+    if binary:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64, activation='sigmoid')])
+        loss_function = BinaryCrossentropy(reduction=Reduction.NONE)
+    else:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64)])
+        loss_function = MeanSquaredError(reduction=Reduction.NONE)
 
     model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
 
-    if_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+    inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
+    targets_train = tf.random.normal((50, 1), dtype=tf.float64)
+
+    inputs_test = tf.random.normal((60, 5, 5, 3), dtype=tf.float64)
+    targets_test = tf.random.normal((60, 1), dtype=tf.float64)
+
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
+    influence_values_computed = rps_lje.compute_pairwise_influence_value((inputs_test, targets_test))
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+
+    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    weight = model.layers[-1].weights[0]
+    vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
+    weight.assign(weight - vect)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    ihvp_calculator = ExactIHVP(influence_model, train_dataset)
+    first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
+    influence_values_expected = first_order.compute_pairwise_influence_value((inputs_test, targets_test))
+
+    assert tf.reduce_max(
+        tf.abs((influence_values_computed - influence_values_expected) / influence_values_expected)) < 1E-2
+
+
+def test_inheritance():
+    tf.random.set_seed(0)
+
+    model_feature = Sequential()
+    model_feature.add(Input(shape=(5, 5, 3), dtype=tf.float64))
+    model_feature.add(Conv2D(4, kernel_size=(2, 2),
+                             activation='relu', dtype=tf.float64))
+    model_feature.add(Flatten(dtype=tf.float64))
+
+    binary = True
+    if binary:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64, activation='sigmoid')])
+        loss_function = BinaryCrossentropy(reduction=Reduction.NONE)
+    else:
+        model = Sequential(
+            [model_feature, Dense(1, use_bias=False, dtype=tf.float64)])
+        loss_function = MeanSquaredError(reduction=Reduction.NONE)
+
+    model(tf.random.normal((10, 5, 5, 3), dtype=tf.float64))
 
     inputs_train = tf.random.normal((10, 5, 5, 3), dtype=tf.float64)
-    inputs_test = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_train = tf.random.normal((10, 1), dtype=tf.float64)
+
+    inputs_test = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_test = tf.random.normal((50, 1), dtype=tf.float64)
 
-    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
-    test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
+    test_dataset = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
 
-    ihvp_calculator = ExactIHVP(if_model, train_set)
-    rps_lje = RPSLJE(if_model, ihvp_calculator, target_layer=-1)
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
+    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
+
     method = rps_lje
 
-    nb_params = if_model.nb_params
+    nb_params = influence_model.nb_params
 
     assert_inheritance(
         method,
         nb_params,
-        train_set,
-        test_set
+        train_dataset,
+        test_dataset
     )
