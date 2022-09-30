@@ -7,14 +7,14 @@ Second order Influence module
 """
 import tensorflow as tf
 
-from .influence_calculator import BaseInfluenceCalculator
+from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP
 
 from ..utils import assert_batched_dataset, dataset_size
 from ..types import Optional
 
 
-class SecondOrderInfluenceCalculator(BaseInfluenceCalculator):
+class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     """
     A class implementing the necessary methods to compute the different influence quantities
     using the second-order approximation.
@@ -40,15 +40,6 @@ class SecondOrderInfluenceCalculator(BaseInfluenceCalculator):
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
     """
-    def compute_influence(self, dataset: tf.data.Dataset) -> tf.Tensor:
-        raise NotImplementedError('Second order influence functions are not available for single points.')
-
-    def compute_influence_values(
-            self,
-            dataset_train: tf.data.Dataset,
-            dataset_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
-        raise NotImplementedError('Second order influence functions are not available for single points.')
 
     def compute_influence_group(
             self,
@@ -132,7 +123,8 @@ class SecondOrderInfluenceCalculator(BaseInfluenceCalculator):
         interactions
             A tensor containing the addition of the influence of the points in the group
         """
-        return tf.reduce_sum(self.ihvp_calculator.compute_ihvp(dataset), axis=1, keepdims=True)
+        ihvp = self._compute_ihvp_group_train(dataset)
+        return tf.reduce_sum(ihvp, axis=1, keepdims=True)
 
     def _compute_pairwise_interactions(self, dataset: tf.data.Dataset):
         """
@@ -155,7 +147,7 @@ class SecondOrderInfluenceCalculator(BaseInfluenceCalculator):
              of the group
         """
         local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
-            else ConjugateGradientDescentIHVP(self.model, dataset)
+            else ConjugateGradientDescentIHVP(self.model, dataset) # TODO: Use a factory instead ?
 
         interactions = self.ihvp_calculator.compute_ihvp(
             tf.data.Dataset.from_tensors(
