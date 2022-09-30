@@ -16,7 +16,7 @@ from ..utils import dataset_size
 from ..types import Optional, Union
 
 
-class BaseInfluenceCalculator(ABC):
+class BaseGroupInfluenceCalculator(ABC):
     """
     A base class for objets that calculate the different quantities related to the influence
     functions.
@@ -70,61 +70,6 @@ class BaseInfluenceCalculator(ABC):
             self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
         elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
             self.ihvp_calculator = ihvp_calculator
-
-    @abstractmethod
-    def compute_influence(self, dataset: tf.data.Dataset) -> tf.Tensor:
-        """
-        Computes the influence function vector -- an estimation of the weights difference when
-        removing point(s) -- one vector for each point.
-
-        Parameters
-        ----------
-        dataset
-            A batched Tensorflow dataset containing the points from which we aim to compute the
-            influence of removal.
-
-        Returns
-        -------
-        influence_vectors
-            A tensor containing one vector per input point.
-
-        """
-        raise NotImplementedError()
-
-    @abstractmethod
-    def compute_influence_values(
-            self,
-            dataset_train: tf.data.Dataset,
-            dataset_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
-        """
-        Computes Cook's distance of each point(s) provided individually, giving measure of the
-        influence that each point carries on the model's weights.
-
-        The dataset_train contains the points we will be removing and dataset_to_evaluate,
-        those with respect to whom we will be measuring the influence.
-        As we will be performing the same operation in batches, we consider that each point
-        from one dataset corresponds to one from the other. As such, both datasets must contain
-        the same amount of points. In case the dataset_to_evaluate is not given, use by default the
-        dataset_train: compute the self influence.
-
-
-        Parameters
-        ----------
-        dataset_train
-            A batched TF dataset containing the points we wish to remove.
-        dataset_to_evaluate
-            A batched TF dataset containing the points with respect to whom we wish to measure
-            the influence of removing the training points. Default as dataset_train (self
-            influence).
-
-        Returns
-        -------
-        influence_values
-            A tensor containing one influence value per pair of input values (one coming from
-            each dataset).
-        """
-        raise NotImplementedError()
 
     @abstractmethod
     def compute_influence_group(
@@ -206,3 +151,14 @@ class BaseInfluenceCalculator(ABC):
             raise ValueError("The amount of points in the train and evaluation groups must match.")
 
         return size_a
+
+    def _compute_ihvp_group_train(self, group_train: tf.data.Dataset):
+        """
+        TODO
+        """
+        ihvp_ds = self.ihvp_calculator.compute_ihvp(group_train)
+        ihvp = []
+        for batch_ihvp in ihvp_ds:
+            ihvp.append(batch_ihvp)
+        ihvp = tf.concat(ihvp, axis=0)
+        return ihvp

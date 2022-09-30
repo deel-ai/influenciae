@@ -5,8 +5,9 @@
 """
 First order Influence module
 """
-
 import tensorflow as tf
+
+from .base_group_influence import BaseGroupInfluenceCalculator
 
 from ..common import InfluenceModel
 from ..common import VectorBasedInfluenceCalculator
@@ -16,7 +17,7 @@ from ..types import Optional, Union, Tuple
 from ..utils import assert_batched_dataset, dataset_size
 
 
-class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
+class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInfluenceCalculator):
     """
     TODO: Improve documentation to be more specific
     A class implementing the necessary methods to compute the different influence quantities
@@ -57,32 +58,18 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
             shuffle_buffer_size: Optional[int] = 10000,
             normalize=False
     ):
-        self.model = model
-
-        self.train_size = dataset_size(dataset)
-
-        if n_samples_for_hessian is None:
-            dataset_to_estimate_hessian = dataset
-        else:
-            dataset_to_estimate_hessian = dataset.unbatch().shuffle(shuffle_buffer_size)\
-                .take(n_samples_for_hessian).batch(dataset._batch_size)
-
-        self.train_set = dataset_to_estimate_hessian
-
-        # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
-        if isinstance(ihvp_calculator, str):
-            self.ihvp_calculator = IHVPCalculator.from_string(ihvp_calculator).value(self.model,
-                                                                                     self.train_set)
-        elif isinstance(ihvp_calculator, IHVPCalculator):
-            self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
-        elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
-            self.ihvp_calculator = ihvp_calculator
-        else:
-            raise AttributeError("ihvp_calculator should belong to ['str, IHVPCalculator', 'InverseHessianVectorProduct']")
+        super().__init__(
+            model,
+            dataset,
+            ihvp_calculator,
+            n_samples_for_hessian,
+            shuffle_buffer_size
+        )
 
         self.normalize = normalize
 
-    def __normalize_if_needed(self, v):
+    @tf.function
+    def _normalize_if_needed(self, v):
         """
         Normalize the input vector if the normalize property is True. If False, do nothing
 
@@ -100,7 +87,8 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
             v = v / tf.norm(v, axis=0, keepdims=True)
         return v
 
-    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    @tf.function
+    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Compute the influence vector for a training sample
 
@@ -115,11 +103,12 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
         #TODO: should return (batch, nb_params) or (nb_params, batch) ?
         """
         influence_vector = self.ihvp_calculator.compute_ihvp_single_batch(train_samples)
-        influence_vector = self.__normalize_if_needed(influence_vector)
+        influence_vector = self._normalize_if_needed(influence_vector)
         influence_vector = tf.transpose(influence_vector) #TODO: ensure it is what we want
         return influence_vector
 
-    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    @tf.function
+    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Preprocess a sample to evaluate
 
@@ -132,12 +121,11 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
         -------
         The preprocessed sample to evaluate
         """
-        batch_data, batch_label = samples_to_evaluate
-        sample_evaluate_grads = self.model.batch_jacobian_tensor(batch_data, batch_label)
+        sample_evaluate_grads = self.model.batch_jacobian_tensor(samples_to_evaluate)
         return sample_evaluate_grads
 
-
-    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate,
+    @tf.function
+    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate: tf.Tensor,
                                                       influence_vector: tf.Tensor) -> tf.Tensor:
         """
         Compute the influence score for a preprocessed sample to evaluate and a training influence vector
@@ -155,8 +143,8 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
         influence_values = tf.matmul(preproc_sample_to_evaluate, tf.transpose(influence_vector))
         return influence_values
 
-
-    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    @tf.function
+    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Compute the influence score for a training sample
 
@@ -198,14 +186,15 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
         """
         assert_batched_dataset(group)
 
-        ihvp = self.ihvp_calculator.compute_ihvp(group)
+        ihvp = self._compute_ihvp_group_train(group)
         reduced_ihvp = tf.reduce_sum(ihvp, axis=1)
 
-        reduced_ihvp = self.__normalize_if_needed(reduced_ihvp)
+        reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
         influence_group = tf.reshape(reduced_ihvp, (1, -1))
 
         return influence_group
+
 
     def compute_influence_values_group(
             self,
@@ -241,14 +230,15 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator):
             # default to self influence
             group_to_evaluate = group_train
 
-        dataset_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
+        ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
 
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
-                                                 (dataset_size, -1)), axis=0, keepdims=True)
+                                                 (ds_size, -1)), axis=0, keepdims=True)
 
-        reduced_ihvp = tf.reduce_sum(self.ihvp_calculator.compute_ihvp(group_train), axis=1, keepdims=True)
+        ihvp = self._compute_ihvp_group_train(group_train)
+        reduced_ihvp = tf.reduce_sum(ihvp, axis=1, keepdims=True)
 
-        reduced_ihvp = self.__normalize_if_needed(reduced_ihvp)
+        reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
         influence_values_group = tf.matmul(reduced_grads, reduced_ihvp)
 
