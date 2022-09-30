@@ -35,7 +35,7 @@ class TracIn(VectorBasedInfluenceCalculator):
             self.learning_rates = [learning_rates for _ in range(len(models))]
 
 
-    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Compute the influence vector for a training sample
 
@@ -49,14 +49,14 @@ class TracIn(VectorBasedInfluenceCalculator):
         """
         influence_vectors = []
         for model, lr in zip(self.models, self.learning_rates):
-            g_train = model.batch_jacobian_tensor(*train_samples)
+            g_train = model.batch_jacobian_tensor(train_samples)
             influence_vectors.append(g_train * tf.cast(tf.sqrt(lr), tf.float64))
         influence_vectors = tf.concat(influence_vectors, axis=1)
 
         return influence_vectors
 
 
-    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Preprocess a sample to evaluate
 
@@ -91,7 +91,7 @@ class TracIn(VectorBasedInfluenceCalculator):
         return influence_values
 
 
-    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Compute the influence score for a training sample
 
