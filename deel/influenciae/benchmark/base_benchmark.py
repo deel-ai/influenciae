@@ -13,9 +13,10 @@ import json
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
+from tensorflow.keras.optimizers import Optimizer # pylint: disable=E0611
 
 from .influence_factory import InfluenceCalculatorFactory
-from ..types import Tuple, Dict, Any, Optional
+from ..types import Tuple, Dict, Any, Optional, List
 
 
 class BaseTrainingProcedure:
@@ -244,6 +245,36 @@ class MissingLabelEvaluator:
         if not os.path.exists(dirname):
             os.makedirs(dirname)
         np.save(path_to_save, (curves, mean_curve, roc), allow_pickle=True)
+
+
+class ModelsSaver(tf.keras.callbacks.Callback):
+    """
+    TODO
+    """
+    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str]):
+        self.epochs_to_save = epochs_to_save
+        self.optimizer = optimizer
+
+        self.models = []
+        self.learning_rates = []
+
+        if saving_path is not None and not os.path.exists(saving_path):
+            os.mkdir(saving_path)
+        self.saving_path = saving_path
+
+    def on_epoch_end(self, epoch):
+        """
+        TODO
+        """
+        if epoch in self.epochs_to_save:
+            epoch_model = tf.keras.models.clone_model(self.model)
+            epoch_lr = self.optimizer.lr
+            self.models.append(epoch_model)
+            self.learning_rates.append(epoch_lr)
+
+            if self.saving_path is not None:
+                tf.data.experimental.save(f"{self.saving_path}/model_ep_{epoch:.6d}")
+                np.save(f"{self.saving_path}/learning_rates", np.array(self.learning_rates), allow_pickle=True)
 
 
 class Display:

@@ -26,6 +26,9 @@ class InfluenceCalculatorFactory:
     @abstractmethod
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               data_train: Any) -> BaseInfluenceCalculator:
+        """
+        TODO: Docs
+        """
         raise NotImplementedError
 
 
@@ -42,7 +45,8 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         self.dataset_hessian_size = dataset_hessian_size
         assert self.ihvp_mode in ['exact', 'cgd']
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model, data_train) -> BaseInfluenceCalculator:
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              data_train: Any) -> BaseInfluenceCalculator:
         influence_model = InfluenceModel(model, start_layer=self.start_layer)
         if self.ihvp_mode == 'exact':
             ihvp_calculator = ExactIHVP(influence_model, training_dataset)
@@ -72,7 +76,8 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         self.dataset_hessian_size = dataset_hessian_size
         assert self.ihvp_mode in ['exact', 'cgd']
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model, data_train) -> BaseInfluenceCalculator:
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              data_train: Any) -> BaseInfluenceCalculator:
         influence_model = InfluenceModel(model, start_layer=self.start_layer)
         if self.ihvp_mode == 'exact':
             ihvp_calculator_factory = ExactFactory()
@@ -92,10 +97,11 @@ class TracInFactory(InfluenceCalculatorFactory):
     """
     TODO: Docs
     """
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model, data_train) -> BaseInfluenceCalculator:
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              data_train: Any) -> BaseInfluenceCalculator:
         models = []
-        for model in data_train[0]:
-            influence_model = InfluenceModel(model)
+        for model_data in data_train[0]:
+            influence_model = InfluenceModel(model_data)
             models.append(influence_model)
         influence_calculator = TracIn(models, data_train[1])
         return influence_calculator
