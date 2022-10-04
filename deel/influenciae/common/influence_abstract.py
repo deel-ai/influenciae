@@ -13,7 +13,7 @@ from xml.dom import NotFoundErr
 import numpy as np
 import tensorflow as tf
 
-from ..utils import MaximumSortedDict, BaseNearestNeighbor, LinearNearestNeighbor
+from ..utils import BatchSort, BaseNearestNeighbor, LinearNearestNeighbor
 
 from ..utils import assert_batched_dataset
 from ..types import Optional, Tuple
@@ -127,18 +127,20 @@ class BaseInfluenceCalculator:
             influence score of k most important samples
         """
         assert_batched_dataset(dataset_train)
-        batch_sorted_dict = MaximumSortedDict(k)
+        elt_spec = dataset_train.element_spec[0]
+        batch_sorted_dict = BatchSort(elt_spec.shape[1:], (1, k), dtype=elt_spec.dtype)
 
         for batch in dataset_train:
-            influences_values = self.compute_pairwise_influence_value(batch)
-            batch_sorted_dict.add_all(tf.squeeze(influences_values,axis=-1).numpy(), batch[0])
+            influence_values = self.compute_pairwise_influence_value(batch)
+            batch_sorted_dict.add_all(tf.expand_dims(batch[0], axis=0), tf.transpose(influence_values))
 
-        influences_values = tf.stack(batch_sorted_dict.get_key_values().keys())
+        best_samples, best_values = batch_sorted_dict.get()
+        influence_values = tf.stack(best_values)
         training_samples = tf.concat(
-            [tf.expand_dims(v, axis=0) for v in batch_sorted_dict.get_key_values().values()], axis=0
+            [tf.expand_dims(v, axis=0) for v in best_samples], axis=0
         )
-
-        return training_samples, influences_values
+        training_samples, influence_values = tf.squeeze(training_samples, axis=0), tf.squeeze(influence_values, axis=0)
+        return training_samples, influence_values
 
 
     @abstractmethod
@@ -330,6 +332,7 @@ class BaseInfluenceCalculator:
         """
         tf.data.experimental.save(dataset, load_or_save_path)
 
+
     def load_dataset(self, dataset_path):
         """
         TODO: Docs
@@ -339,6 +342,7 @@ class BaseInfluenceCalculator:
         else:
             raise NotFoundErr(f"The dataset path: {dataset_path} was not found")
         return dataset
+
 
 class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     """
@@ -422,8 +426,11 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         #TODO: Improve by saving only the influence vector
         inf_vect_ds = dataset_train.map(lambda *batch: (batch, self.compute_influence_vector(batch)))
         if save_influence_vector_ds_path is not None:
-            self.save_dataset(inf_vect_ds, save_influence_vector_ds_path)
+            # self.save_dataset(inf_vect_ds, save_influence_vector_ds_path)
+            inf_vect = inf_vect_ds.map(lambda *batch: batch[-1])
+            self.save_dataset(inf_vect.unbatch(), save_influence_vector_ds_path)
         return inf_vect_ds
+
 
     @tf.function
     def compute_influence_values_from_tensor(
@@ -477,6 +484,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         """
         if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+            batch_size = dataset_train._batch_size # pylint: disable=W0212
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
             if save_influence_vector_ds_path is not None:
                 warn("Since you loaded the inf_vect_ds we ignore the saving option (useless)")
         else:
@@ -579,6 +588,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
 
         if load_influence_vector_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_path)
+            batch_size = dataset_train._batch_size # pylint: disable=W0212
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
                                                               save_influence_vector_path)
@@ -634,6 +645,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         """
         if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+            batch_size = dataset_train._batch_size # pylint: disable=W0212
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train, save_influence_vector_ds_path)
         batch_size_eval = int(tf.shape(sample_to_evaluate[0])[0])
@@ -695,10 +708,12 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
 
         if vector_influence_in_cache:
             # TODO: Question the intended behavior here, is it save or load ?
-            load_influence_vector_path = None
+            load_influence_vector_ds_path = None
 
-        if load_influence_vector_path is not None:
+        if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
+            batch_size = dataset_train._batch_size # pylint: disable=W0212
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
                                                               save_influence_vector_ds_path)
