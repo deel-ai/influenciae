@@ -7,42 +7,29 @@ CIFAR-10 Benchmark module
 """
 import ssl
 
-ssl._create_default_https_context = ssl._create_unverified_context
-
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import Model
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.applications import EfficientNetB0, VGG19
-from tensorflow.keras.layers import Dense, Flatten, Dropout
-from tensorflow.keras.regularizers import L1L2
-from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.optimizers import Adam, Optimizer
+from tensorflow.keras import Model # pylint: disable=E0611
+from tensorflow.keras.models import Sequential # pylint: disable=E0611
+from tensorflow.keras.applications import EfficientNetB0, VGG19 # pylint: disable=E0611
+from tensorflow.keras.layers import Dense, Flatten, Dropout # pylint: disable=E0611
+from tensorflow.keras.regularizers import L1L2 # pylint: disable=E0611
+from tensorflow.keras.losses import CategoricalCrossentropy # pylint: disable=E0611
+from tensorflow.keras.optimizers import Adam # pylint: disable=E0611
 
-from .base_benchmark import BaseTrainingProcedure, MissingLabelEvaluator
+from .base_benchmark import BaseTrainingProcedure, MissingLabelEvaluator, ModelsSaver
 from .model_resnet import ResNet
 
 from ..types import Tuple, Union, Any, Optional, List
 
-
-class ModelsSaver(tf.keras.callbacks.Callback):
-
-    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer):
-        self.epochs_to_save = epochs_to_save
-        self.optimizer = optimizer
-
-        self.models = []
-        self.learning_rates = []
-
-    def on_epoch_end(self, epoch, logs={}):
-        if epoch in self.epochs_to_save:
-            self.models.append(tf.keras.models.clone_model(self.model))
-            self.learning_rates.append(self.optimizer.lr)
-
+ssl._create_default_https_context = ssl._create_unverified_context # pylint: disable=W0212
 
 class EfficientNetCIFAR(Sequential):
+    """
+    TODO
+    """
     def __init__(self, model: Union[str, Model], use_regu=True, **kwargs):
-        super(EfficientNetCIFAR, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if isinstance(model, Model):
             base_model = model
         else:
@@ -81,7 +68,6 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
     """
     TODO: Docs
     """
-
     def __init__(self, epochs=60, model_type: str = 'resnet', use_regu: bool = True, sgd=False,
                  epochs_to_save: Optional[List[int]] = None, verbose: bool = True, use_tensorboard:bool = False):
         self.epochs = epochs
@@ -171,8 +157,8 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
 
         if self.epochs_to_save is not None:
             return train_stats, test_stats, model, (model_saver.models, model_saver.learning_rates)
-        else:
-            return train_stats, test_stats, model, None
+
+        return train_stats, test_stats, model, None
 
 
 class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
@@ -191,7 +177,8 @@ class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
             epochs_to_save: Optional[List[int]] = None,
             take_batch: Optional[int] = None,
             verbose_training: bool = True,
-            use_tensorboard:bool = False):
+            use_tensorboard:bool = False
+        ): # pylint: disable=R0913
 
         config = {
             "epochs": epochs,
@@ -220,8 +207,8 @@ class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
             test_dataset = test_dataset.take(take_batch)
         training_procedure = Cifar10TrainingProcedure(epochs, model_type, use_regu, sgd, epochs_to_save,
                                                       verbose_training, use_tensorboard)
-        super(Cifar10MissingLabelEvaluator, self).__init__(training_dataset, test_dataset, training_procedure,
-                                                           nb_classes=10, misslabeling_ratio=misslabeling_ratio,
-                                                           train_batch_size=train_batch_size,
-                                                           test_batch_size=test_batch_size,
-                                                           config=config)
+        super().__init__(training_dataset, test_dataset, training_procedure,
+                         nb_classes=10, misslabeling_ratio=misslabeling_ratio,
+                         train_batch_size=train_batch_size,
+                         test_batch_size=test_batch_size,
+                         config=config)

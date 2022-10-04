@@ -17,22 +17,22 @@ Implementation Adapted from: github.com/raghakot/keras-resnet
 Implementation Adapted from: github.com/keras-team/keras-contrib
 """
 import six
-import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input
-from tensorflow.keras.layers import Activation
-from tensorflow.keras.layers import Reshape
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.layers import Conv2D
-from tensorflow.keras.layers import MaxPooling2D
-from tensorflow.keras.layers import GlobalMaxPooling2D
-from tensorflow.keras.layers import GlobalAveragePooling2D
-from tensorflow.keras.layers import Dropout
-from tensorflow.keras.layers import Add
-from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.layers import ReLU
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras import backend as K
+
+from tensorflow.keras.models import Model # pylint: disable=E0611
+from tensorflow.keras.layers import Input # pylint: disable=E0611
+from tensorflow.keras.layers import Activation # pylint: disable=E0611
+from tensorflow.keras.layers import Reshape # pylint: disable=E0611
+from tensorflow.keras.layers import Dense # pylint: disable=E0611
+from tensorflow.keras.layers import Conv2D # pylint: disable=E0611
+from tensorflow.keras.layers import MaxPooling2D # pylint: disable=E0611
+from tensorflow.keras.layers import GlobalMaxPooling2D # pylint: disable=E0611
+from tensorflow.keras.layers import GlobalAveragePooling2D # pylint: disable=E0611
+from tensorflow.keras.layers import Dropout # pylint: disable=E0611
+from tensorflow.keras.layers import Add # pylint: disable=E0611
+from tensorflow.keras.layers import BatchNormalization # pylint: disable=E0611
+from tensorflow.keras.layers import ReLU # pylint: disable=E0611
+from tensorflow.keras.regularizers import l2 # pylint: disable=E0611
+from tensorflow.keras import backend as K # pylint: disable=E0611
 
 
 def _bn_relu(x, bn_name=None, relu_name=None):
@@ -44,6 +44,9 @@ def _bn_relu(x, bn_name=None, relu_name=None):
 
 def get_Conv2D(filters, kernel_size=(3, 3), padding='circular', activation=ReLU, use_bias=True, strides=(1, 1),
                name=None):
+    """
+    TODO:Docs
+    """
     return Conv2D(filters=filters, kernel_size=kernel_size, padding=padding, activation=activation,
                    use_bias=use_bias, strides=strides, name=name)
 
@@ -120,7 +123,7 @@ def _shortcut(input_feature, residual, conv_name_base=None, bn_name_base=None):
     shortcut = input_feature
     # 1 X 1 conv if shape is different. Else identity.
     if stride_width > 1 or stride_height > 1 or not equal_channels:
-        # print('reshaping via a convolution...')
+
         if conv_name_base is not None:
             conv_name_base = conv_name_base + '1'
         shortcut = Conv2D(filters=residual_shape[CHANNEL_AXIS],

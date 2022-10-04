@@ -9,8 +9,8 @@ This code was based on an implementation by Louis Bethune (ANITI) -- https://git
 from dataclasses import dataclass
 
 import tensorflow as tf
-from tensorflow.keras import Model
-from tensorflow.keras.optimizers import Optimizer, SGD
+from tensorflow.keras import Model # pylint: disable=E0611
+from tensorflow.keras.optimizers import Optimizer, SGD # pylint: disable=E0611
 
 from ..types import Callable
 
@@ -45,7 +45,7 @@ class BacktrackingLineSearch(Optimizer):
             scaling_factor: float,
             **kwargs
     ):
-        super(BacktrackingLineSearch, self).__init__(name="backtracking_line_search", **kwargs)
+        super().__init__(name="backtracking_line_search", **kwargs)
         self.optimizer = SGD()
         self.scaling_factor = scaling_factor
         self.batches_per_epoch = int(batches_per_epoch)
@@ -80,7 +80,9 @@ class BacktrackingLineSearch(Optimizer):
 
         # Attempt a first direction
         norm = self.c_gradnorm(gradients)
-        closure = lambda: model.compiled_loss(labels, model(x_inputs, training=True))
+        def closure():
+            return model.compiled_loss(labels, model(x_inputs, training=True))
+        # closure = lambda: model.compiled_loss(labels, model(x_inputs, training=True))
         self.parameters.eta *= self.parameters.gamma
         direction = self.attempt_step(model, curr_weights, gradients, closure)
 
@@ -166,7 +168,10 @@ class BacktrackingLineSearch(Optimizer):
         pass
 
     def get_config(self):
-        base_config = super(BacktrackingLineSearch, self).get_config()
+        """
+        TODO: Docs
+        """
+        base_config = super().get_config()
         base_config["batches_per_epoch"] = self.batches_per_epoch
         base_config["scaling_factor"] = self.scaling_factor
         return base_config
