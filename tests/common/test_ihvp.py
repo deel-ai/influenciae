@@ -12,6 +12,94 @@ from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
 
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
+def test_compute_ihvp_single_batch():
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+    kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
+    inputs = tf.random.normal((25, 1, 3))
+    target = tf.random.normal((25, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
+
+    # Compute the IHVP symbolically and check results
+    hessian_list = tf.concat([
+        tf.expand_dims(hessian_ground_truth(tf.squeeze(inp), kernel), axis=0) for inp in inputs
+    ], axis=0)
+    stochastic_hessian = tf.reduce_mean(hessian_list, axis=0)
+    ground_truth_inv_hessian = tf.linalg.pinv(stochastic_hessian)
+    ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
+    ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
+
+    ## ExactIHVP
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+
+    # test the compute_ihvp_single_batch
+    ihvp_list = []
+    for batch in train_set.batch(1):
+        batch_ihvp = ihvp_calculator.compute_ihvp_single_batch(batch)
+        assert batch_ihvp.shape == (2,1)
+        ihvp_list.append(batch_ihvp)
+    ihvp_batch = tf.concat(ihvp_list, axis=1)
+    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=1e-2)
+
+    ## ConjugateGradientIHVP
+    ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5))
+
+    # test the compute_ihvp_single_batch
+    ihvp_list = []
+    for batch in train_set.batch(1):
+        batch_ihvp = ihvp_calculator.compute_ihvp_single_batch(batch)
+        assert batch_ihvp.shape == (2,1)
+        ihvp_list.append(batch_ihvp)
+    ihvp_batch = tf.concat(ihvp_list, axis=1)
+    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=1e-2)
+
+
+def test_compute_hvp_single_batch():
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
+
+    inputs = tf.random.normal((25, 1, 3))
+    target = tf.random.normal((25, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
+
+    # Compute the HVP symbolically and check results
+    hessian_list = tf.concat([
+        tf.expand_dims(hessian_ground_truth(tf.squeeze(inp), kernel), axis=0) for inp in inputs
+    ], axis=0)
+    ground_truth_hessian = tf.reduce_mean(hessian_list, axis=0)
+    ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
+    ground_truth_hvp = tf.matmul(ground_truth_hessian, ground_truth_grads)
+
+    ## ExactIHVP
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+
+    # test the compute_hvp_single_batch
+    ihvp_calculator.hessian = tf.linalg.pinv(ihvp_calculator.inv_hessian)
+    hvp_list = []
+    for batch in train_set.batch(1):
+        batch_hvp = ihvp_calculator.compute_hvp_single_batch(batch)
+        assert batch_hvp.shape == (2,1)
+        hvp_list.append(batch_hvp)
+    hvp_batch = tf.concat(hvp_list, axis=1)
+    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=1e-2)
+
+    ## ConjugateGradientIHVP
+    ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5))
+
+    # test the compute_hvp_single_batch
+    hvp_list = []
+    for batch in train_set.batch(1):
+        batch_hvp = ihvp_calculator.compute_hvp_single_batch(batch)
+        assert batch_hvp.shape == (2,1)
+        hvp_list.append(batch_hvp)
+    hvp_batch = tf.concat(hvp_list, axis=1)
+    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=1e-2)
+
 
 def test_exact_hessian():
     # Make sure that the hessian matrix is being calculated right
@@ -44,7 +132,6 @@ def test_exact_hessian():
 
 def test_exact_ihvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
-    # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -72,15 +159,6 @@ def test_exact_ihvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
     assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-2)
-
-    # test the compute_ihvp_single_batch
-    ihvp_list = []
-    for batch in train_set.batch(1):
-        batch_ihvp = ihvp_calculator.compute_ihvp_single_batch(batch)
-        assert batch_ihvp.shape == (2,1)
-        ihvp_list.append(batch_ihvp)
-    ihvp_batch = tf.concat(ihvp_list, axis=1)
-    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=1e-2)
 
     # test with an initialization with the stochastic_hessian
     ihvp_calculator2 = ExactIHVP(influence_model, train_hessian=stochastic_hessian)
@@ -210,6 +288,7 @@ def test_cgd_hvp():
     assert hvp_vectors.shape == (2, 25) # nb_params times nb_elt stacked on the last axis
     ground_truth_hvp_vector = tf.matmul(ground_truth_hessian, tf.transpose(vectors))
     assert almost_equal(hvp_vectors, ground_truth_hvp_vector, epsilon=1e-3)
+
 
 def test_cgd_ihvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
