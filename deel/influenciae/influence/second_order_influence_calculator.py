@@ -62,14 +62,84 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         """
         assert_batched_dataset(group)
         fraction = tf.cast(dataset_size(group), dtype=tf.float32) / tf.cast(self.train_size, dtype=tf.float32)
+
         coeff_additive_term = (1. - 2 * fraction) / \
                               (tf.square(1. - fraction) * tf.cast(self.train_size, dtype=tf.float32))
         coeff_pairwise_term = 1. / tf.square((1. - fraction) * tf.cast(self.train_size, dtype=tf.float32))
-        influence_group = coeff_additive_term * self._compute_additive_term(group) + \
-                          coeff_pairwise_term * self._compute_pairwise_interactions(group)
+
+        additive = coeff_additive_term * self._compute_additive_term(group)
+        pairwise = coeff_pairwise_term * self._compute_pairwise_interactions(group)
+
+        influence_group = additive + pairwise
         influence_group = tf.transpose(influence_group)  # to get the right shape for the output
 
         return influence_group
+
+    def _compute_additive_term(self, dataset: tf.data.Dataset):
+        """
+        Computes the additive term as per Basu et al.'s article. It accounts for the influence of each of the
+        points that we wish to remove, without taking into account the interactions between each other
+
+        Parameters
+        ----------
+            dataset
+                A batched TF dataset containing the points we wish to remove
+
+        Returns
+        -------
+        interactions
+            A tensor containing the addition of the influence of the points in the group
+        """
+        ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
+        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
+        return reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
+
+    def _compute_pairwise_interactions(self, dataset: tf.data.Dataset):
+        """
+        Computes the term corresponding to the pairwise interactions as per Basu et al.'s article. It will
+        contain all the interactions between each of the points with each of the other points.
+
+        Disclaimer: this term can be quite computationally intensive to calculate, as there are 3 nested hessian-vector
+        products. Thus, it can also be a source of numerical instability when using an approximate version of an
+        IHVP calculator.
+
+       Parameters
+        ----------
+            dataset
+                A batched TF dataset containing the points we wish to remove
+
+        Returns
+        -------
+        interactions
+            A tensor containing the sum of all the interactions of each point we are removing with each other point
+             of the group
+        """
+        local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
+            else ConjugateGradientDescentIHVP(
+                self.model,
+                self.ihvp_calculator.extractor_layer,
+                dataset,
+                self.ihvp_calculator.n_cgd_iters,
+                self.ihvp_calculator.feature_extractor
+            )
+
+        ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
+        ihvp_ds = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1))
+
+        reduced_ihvp = ihvp_ds.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
+        reduced_ihvp_ds = tf.data.Dataset.from_tensors(reduced_ihvp).batch(dataset._batch_size) # pylint: disable=W0212
+
+        local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False).batch(dataset._batch_size) # pylint: disable=W0212
+
+        interactions = self.ihvp_calculator.compute_ihvp(
+            local_hvp, use_gradient=False
+        )
+
+        ds_size = tf.cast(dataset_size(dataset), dtype=interactions.element_spec.dtype)
+        interactions = interactions.map(lambda x: x*ds_size)
+
+        return interactions.get_single_element()
+
 
     def compute_influence_values_group(
             self,
@@ -107,60 +177,3 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
                                                  (ds_size, -1)), axis=0, keepdims=True)
 
         return tf.matmul(reduced_grads, influence)
-
-    def _compute_additive_term(self, dataset: tf.data.Dataset):
-        """
-        Computes the additive term as per Basu et al.'s article. It accounts for the influence of each of the
-        points that we wish to remove, without taking into account the interactions between each other
-
-        Parameters
-        ----------
-            dataset
-                A batched TF dataset containing the points we wish to remove
-
-        Returns
-        -------
-        interactions
-            A tensor containing the addition of the influence of the points in the group
-        """
-        ihvp = self._compute_ihvp_group_train(dataset)
-        return tf.reduce_sum(ihvp, axis=1, keepdims=True)
-
-    def _compute_pairwise_interactions(self, dataset: tf.data.Dataset):
-        """
-        Computes the term corresponding to the pairwise interactions as per Basu et al.'s article. It will
-        contain all the interactions between each of the points with each of the other points.
-
-        Disclaimer: this term can be quite computationally intensive to calculate, as there are 3 nested hessian-vector
-        products. Thus, it can also be a source of numerical instability when using an approximate version of an
-        IHVP calculator.
-
-       Parameters
-        ----------
-            dataset
-                A batched TF dataset containing the points we wish to remove
-
-        Returns
-        -------
-        interactions
-            A tensor containing the sum of all the interactions of each point we are removing with each other point
-             of the group
-        """
-        local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
-            else ConjugateGradientDescentIHVP(self.model, dataset) # TODO: Use a factory instead ?
-
-        interactions = self.ihvp_calculator.compute_ihvp(
-            tf.data.Dataset.from_tensors(
-                tf.squeeze(
-                    local_ihvp.compute_hvp(
-                        tf.data.Dataset.from_tensors(
-                            tf.reduce_sum(self.ihvp_calculator.compute_ihvp(dataset), axis=1)
-                        ).batch(1),
-                        use_gradient=False),
-                    axis=-1)
-                ).batch(1), use_gradient=False
-        )
-        interactions *= tf.cast(dataset_size(dataset), dtype=tf.float32)
-        interactions = tf.expand_dims(interactions, axis=1) if len(interactions.shape) == 1 else interactions
-
-        return interactions

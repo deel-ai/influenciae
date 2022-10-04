@@ -3,7 +3,7 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Abstract Influence module
+Abstract Group Influence module
 """
 
 from abc import ABC, abstractmethod
@@ -151,14 +151,3 @@ class BaseGroupInfluenceCalculator(ABC):
             raise ValueError("The amount of points in the train and evaluation groups must match.")
 
         return size_a
-
-    def _compute_ihvp_group_train(self, group_train: tf.data.Dataset):
-        """
-        TODO
-        """
-        ihvp_ds = self.ihvp_calculator.compute_ihvp(group_train)
-        ihvp = []
-        for batch_ihvp in ihvp_ds:
-            ihvp.append(batch_ihvp)
-        ihvp = tf.concat(ihvp, axis=0)
-        return ihvp

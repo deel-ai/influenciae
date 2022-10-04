@@ -14,7 +14,7 @@ from ..common import VectorBasedInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
 from ..types import Optional, Union, Tuple
-from ..utils import assert_batched_dataset, dataset_size
+from ..utils import assert_batched_dataset
 
 
 class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInfluenceCalculator):
@@ -161,7 +161,6 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         influence_values = tf.reduce_sum(
             tf.math.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
         #TODO: improve IHVP to not compute 2 times the gradient
-        #TODO: Attention au normalize
         return influence_values
 
 
@@ -186,8 +185,9 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         """
         assert_batched_dataset(group)
 
-        ihvp = self._compute_ihvp_group_train(group)
-        reduced_ihvp = tf.reduce_sum(ihvp, axis=1)
+        ihvp_ds = self.ihvp_calculator.compute_ihvp(group)
+        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
+        reduced_ihvp = reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
@@ -235,8 +235,9 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
                                                  (ds_size, -1)), axis=0, keepdims=True)
 
-        ihvp = self._compute_ihvp_group_train(group_train)
-        reduced_ihvp = tf.reduce_sum(ihvp, axis=1, keepdims=True)
+        ihvp_ds = self.ihvp_calculator.compute_ihvp(group_train)
+        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
+        reduced_ihvp = reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
