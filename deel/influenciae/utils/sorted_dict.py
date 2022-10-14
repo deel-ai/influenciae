@@ -7,16 +7,27 @@ TODO
 """
 import tensorflow as tf
 import numpy as np
+from enum import Enum
+
+
+class ORDER(Enum):
+    ASCENDING = 1
+    DESCENDING = 2
+
 
 class BatchSort:
     """
     #TODO: Add documentation
     """
-    def __init__(self, batch_shape, k_shape, dtype=tf.float32):
+    def __init__(self, batch_shape, k_shape, dtype=tf.float32,order:ORDER=ORDER.DESCENDING):
         self.k = k_shape[1]
         shape = tf.concat((k_shape, batch_shape), axis=0)
         self.best_batch = tf.Variable(tf.zeros(shape, dtype=dtype), trainable=False)
-        self.best_values = tf.Variable(tf.ones(k_shape, dtype=dtype) * (-np.inf), trainable=False)
+        self.order = order
+        if self.order == ORDER.DESCENDING:
+            self.best_values = tf.Variable(tf.ones(k_shape, dtype=dtype) * (-np.inf), trainable=False)
+        else:
+            self.best_values = tf.Variable(tf.ones(k_shape, dtype=dtype) * np.inf, trainable=False)
 
     def add_all(self, batch_key: tf.Tensor, batch_values: tf.Tensor) -> None:
         """
@@ -24,7 +35,12 @@ class BatchSort:
         """
         current_score = tf.concat([self.best_values, batch_values], axis=1)
         current_batch = tf.concat([self.best_batch, batch_key], axis=1)
-        indexes = tf.argsort(current_score,axis=1,direction='DESCENDING')
+
+        if self.order == ORDER.DESCENDING:
+            indexes = tf.argsort(current_score,axis=1,direction='DESCENDING')
+        else:
+            indexes = tf.argsort(current_score, axis=1, direction='ASCENDING')
+
         indexes = indexes[:, :self.k]
 
         current_best_score = tf.gather(current_score, indexes,batch_dims=1)
@@ -44,4 +60,9 @@ class BatchSort:
         TODO
         """
         self.best_batch.assign(tf.zeros_like(self.best_batch))
-        self.best_values.assign((-np.inf) * tf.ones_like(self.best_values))
+
+        if self.order == ORDER.DESCENDING:
+            self.best_values.assign((-np.inf) * tf.ones_like(self.best_values))
+        else:
+            self.best_values.assign(np.inf * tf.ones_like(self.best_values))
+
