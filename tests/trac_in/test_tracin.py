@@ -8,7 +8,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSquaredError
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.tracein.tracin import TracIn
+from deel.influenciae.trac_in.tracin import TracIn
 
 from ..utils_test import almost_equal, assert_inheritance
 
