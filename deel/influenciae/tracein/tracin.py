@@ -50,7 +50,7 @@ class TracIn(VectorBasedInfluenceCalculator):
         influence_vectors = []
         for model, lr in zip(self.models, self.learning_rates):
             g_train = model.batch_jacobian_tensor(train_samples)
-            influence_vectors.append(g_train * tf.cast(tf.sqrt(lr), tf.float64))
+            influence_vectors.append(g_train * tf.cast(tf.sqrt(lr), g_train.dtype))
         influence_vectors = tf.concat(influence_vectors, axis=1)
 
         return influence_vectors

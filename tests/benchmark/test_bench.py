@@ -13,13 +13,13 @@ import numpy as np
 def test_first_order_exact():
     take_batch = 10
     cifar10_evaluator = Cifar10MissingLabelEvaluator(epochs=5,
-                                                     model_type='resnet',
+                                                     model_type='efficient_net',
                                                      misslabeling_ratio=0.0005,
                                                      use_regu=True,
                                                      sgd=False,
                                                      train_batch_size=3,
                                                      test_batch_size=3,
-                                                     epochs_to_save=[1, 3],
+                                                     epochs_to_save=None,
                                                      take_batch=take_batch,
                                                      verbose_training=False)
 
@@ -38,7 +38,7 @@ def test_first_order_cgd():
                                                      sgd=False,
                                                      train_batch_size=10,
                                                      test_batch_size=10,
-                                                     epochs_to_save=[1, 3],
+                                                     epochs_to_save=None,
                                                      take_batch=take_batch,
                                                      verbose_training=False)
 
@@ -76,7 +76,7 @@ def test_rps_lje():
                                                      sgd=False,
                                                      train_batch_size=10,
                                                      test_batch_size=10,
-                                                     epochs_to_save=[1, 3],
+                                                     epochs_to_save=None,
                                                      take_batch=take_batch,
                                                      verbose_training=False)
 
