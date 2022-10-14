@@ -13,7 +13,7 @@ import json
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-from tensorflow.keras.optimizers import Optimizer # pylint: disable=E0611
+from tensorflow.keras.optimizers import Optimizer  # pylint: disable=E0611
 
 from .influence_factory import InfluenceCalculatorFactory
 from ..types import Tuple, Dict, Any, Optional, List
@@ -23,11 +23,12 @@ class BaseTrainingProcedure:
     """
     TODO: Docs
     """
+
     @abstractmethod
     def train(
             self, training_dataset: tf.data.Dataset, test_dataset: tf.data.Dataset,
             train_batch_size: int = 128, test_batch_size: int = 128,
-            log_path:Optional[str]=None) -> Tuple[float, float, tf.keras.Model, Any]:
+            log_path: Optional[str] = None) -> Tuple[float, float, tf.keras.Model, Any]:
         """
         TODO
         """
@@ -38,6 +39,7 @@ class MissingLabelEvaluator:
     """
     TODO: Docs
     """
+
     def __init__(
             self,
             training_dataset: tf.data.Dataset,
@@ -109,7 +111,7 @@ class MissingLabelEvaluator:
         for index in range(nbr_of_evaluation):
 
             if use_tensorboard:
-                experiment_name = method_name  + "_" + str(index)
+                experiment_name = method_name + "_" + str(index)
 
                 file_writer = tf.summary.create_file_writer(path_to_save + "/" + method_name + "/seed" + str(index),
                                                             filename_suffix=experiment_name)
@@ -148,7 +150,6 @@ class MissingLabelEvaluator:
             if path_to_save is not None:
                 curves_, mean_curve_, roc_ = self.__build(curves)
                 self.__save(path_to_save + "/" + method_name + "/data.npy", curves_, mean_curve_, roc_)
-
 
             if use_tensorboard:
                 tf_writer.__exit__()
@@ -215,21 +216,19 @@ class MissingLabelEvaluator:
         """
         dataset_size = tf.data.experimental.cardinality(self.training_dataset)
         noise_mask = np.random.uniform(size=(dataset_size,)) > self.misslabeling_ratio
-
-        noisy_label = np.round(np.random.uniform(size=(dataset_size,)) * self.nb_classes)
-        noisy_label = np.cast[np.int32](noisy_label)
-        noisy_label = np.where(noise_mask, -1 * np.ones_like(noisy_label), noisy_label)
-        noisy_label = tf.convert_to_tensor(noisy_label, dtype=tf.int32)
-        noise_mask_dataset = tf.data.Dataset.from_tensor_slices(noisy_label)
-
+        noise_mask_dataset = tf.data.Dataset.from_tensor_slices(noise_mask)
         noisy_dataset = tf.data.Dataset.zip((self.training_dataset, noise_mask_dataset))
 
-        def noise_map(z, y_noise):
+        def noise_map(z, y_mask):
             """
             TODO
             """
             (x, y) = z
-            y = tf.where(y_noise > -1, tf.one_hot(y_noise, tf.shape(y)[-1]), y)
+            y_noise = tf.random.uniform(shape=(1,)) * tf.cast((tf.shape(y)[-1] - 1), dtype=tf.float32)
+            y_noise = tf.cond(y_noise > tf.cast(tf.argmax(y), dtype=tf.float32), lambda: y_noise + 1, lambda: y_noise)
+            y_noise = tf.cast(y_noise, dtype=tf.int32)
+            y_noise = tf.cast(tf.squeeze(tf.one_hot(y_noise, tf.shape(y)[-1]), axis=0), dtype=y.dtype)
+            y = tf.where(y_mask, y, y_noise)
             return x, y
 
         noisy_dataset = noisy_dataset.map(noise_map)
@@ -251,6 +250,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
     """
     TODO
     """
+
     def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str] = None):
         self.epochs_to_save = epochs_to_save
         self.optimizer = optimizer
