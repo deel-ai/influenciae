@@ -4,72 +4,114 @@
 # =====================================================================================
 import tensorflow as tf
 
-from deel.influenciae.utils import BatchSort
-
-def test_maximum_sorted_dict():
-    # TODO: Refacto
-    # v = MaximumSortedDict(3)
-    # v.add(5, 'a')
-    # v.add(4, 'b')
-    # v.add(3, 'd')
-    # v.add(6, 'd')
-    # v.add(1, 'd')
-    # assert list(v.get_key_values().keys()) == [6, 5, 4]
-    pass
+from deel.influenciae.utils.sorted_dict import BatchSort, ORDER
 
 
-def test_batched_sorted_dict():
-    # TODO: Refacto
-    # bsd = BatchedSortedDict(batch_size=5, size_maximum=3)
+def test_batched_sorted_dict_1():
+    bsd = BatchSort(batch_shape=(2,), k_shape=(1, 4), dtype=tf.float32, order=ORDER.DESCENDING)
 
-    # # 1
-    # keys = tf.expand_dims(tf.convert_to_tensor([1, 1, 1, 1, 1], dtype=tf.float32), axis=1)
-    # values = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]), axis=1)
-    # bsd.add_all(keys, values)
+    # 1
+    v = tf.expand_dims(tf.convert_to_tensor([1, 1, 1, 1, 1], dtype=tf.float32), axis=0)
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32), axis=0)
+    bsd.add_all(k, v)
 
-    # # 2
-    # keys = tf.expand_dims(tf.convert_to_tensor([1, 1, 1, 1, 1], dtype=tf.float32), axis=1) * 2
-    # values = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]), axis=1) * 10
-    # bsd.add_all(keys, values)
+    # 2
+    v = tf.expand_dims(tf.convert_to_tensor([0, 0, 0, 0, 1], dtype=tf.float32), axis=0) * 2
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 10
+    bsd.add_all(k, v)
 
-    # # 3
-    # keys = tf.expand_dims(tf.convert_to_tensor([1, 1, 1, 1, 1], dtype=tf.float32), axis=1) * 3
-    # values = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]), axis=1) * 100
-    # bsd.add_all(keys, values)
+    # 3
+    v = tf.expand_dims(tf.convert_to_tensor([1, 1, -1, -1, -1], dtype=tf.float32), axis=0) * 3
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 100
+    bsd.add_all(k, v)
 
-    # # 4
-    # keys = tf.expand_dims(tf.convert_to_tensor([1, 1, -1, 1, 1], dtype=tf.float32), axis=1) * 2.5
-    # values = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]), axis=1) * 1000
-    # bsd.add_all(keys, values)
+    # 4
+    v = tf.expand_dims(tf.convert_to_tensor([1, -1, -1, -1, -1], dtype=tf.float32), axis=0) * 2.5
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 1000
+    bsd.add_all(k, v)
 
-    # key, values = bsd.get()
+    key, k = bsd.get()
 
-    # key_expected = tf.convert_to_tensor([[3., 2.5, 2.],
-    #                                      [3., 2.5, 2.],
-    #                                      [3., 2., 1.],
-    #                                      [3., 2.5, 2.],
-    #                                      [3., 2.5, 2.]])
+    values_expected = tf.convert_to_tensor([[3., 3., 2.5, 2.]])
 
-    # values_expected = tf.convert_to_tensor([[[200, 200],
-    #                                          [2000, 2000],
-    #                                          [20, 20]],
+    key_expected = tf.convert_to_tensor([[[200, 200], [300, 300], [2000, 2000], [60, 60]]], dtype=tf.float32)
 
-    #                                         [[300, 300],
-    #                                          [3000, 3000],
-    #                                          [30, 30]],
+    assert tf.reduce_max(tf.abs(key - key_expected)) < 1E-6
+    assert tf.reduce_max(tf.abs(k - values_expected)) < 1E-6
 
-    #                                         [[400, 400],
-    #                                          [40, 40],
-    #                                          [4, 4]],
 
-    #                                         [[500, 500],
-    #                                          [5000, 5000],
-    #                                          [50, 50]],
+def test_batched_sorted_dict_2():
+    bsd = BatchSort(batch_shape=(2,), k_shape=(1, 4), dtype=tf.float32, order=ORDER.ASCENDING)
 
-    #                                         [[600, 600],
-    #                                          [6000, 6000],
-    #                                          [60, 60]]])
+    # 1
+    v = tf.expand_dims(tf.convert_to_tensor([-1, -1, -1, -1, -1], dtype=tf.float32), axis=0)
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32), axis=0)
+    bsd.add_all(k, v)
 
-    # assert tf.reduce_all(key == key_expected)
-    # assert tf.reduce_all(values == values_expected)
-    pass
+    # 2
+    v = tf.expand_dims(tf.convert_to_tensor([0, 0, 0, 0, -1], dtype=tf.float32), axis=0) * 2
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 10
+    bsd.add_all(k, v)
+
+    # 3
+    v = tf.expand_dims(tf.convert_to_tensor([-1, -1, 1, 1, 1], dtype=tf.float32), axis=0) * 3
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 100
+    bsd.add_all(k, v)
+
+    # 4
+    v = tf.expand_dims(tf.convert_to_tensor([-1, 1, 1, 1, 1], dtype=tf.float32), axis=0) * 2.5
+    k = tf.expand_dims(tf.convert_to_tensor([[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]], dtype=tf.float32),
+                       axis=0) * 1000
+    bsd.add_all(k, v)
+
+    key, k = bsd.get()
+
+    values_expected = tf.convert_to_tensor([[-3., -3., -2.5, -2.]])
+
+    key_expected = tf.convert_to_tensor([[[200, 200], [300, 300], [2000, 2000], [60, 60]]], dtype=tf.float32)
+
+    assert tf.reduce_max(tf.abs(key - key_expected)) < 1E-6
+    assert tf.reduce_max(tf.abs(k - values_expected)) < 1E-6
+
+
+def test_batched_sorted_dict_3():
+    bsd = BatchSort(batch_shape=(2,), k_shape=(2, 4), dtype=tf.float32, order=ORDER.DESCENDING)
+
+    # 1
+    v = tf.convert_to_tensor([[1, 1, 1, 1, 1], [-1, -1, -1, -1, -1]], dtype=tf.float32)
+    k = tf.convert_to_tensor([[[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]],
+                              [[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]], dtype=tf.float32)
+    bsd.add_all(k, v)
+
+    # 2
+    v = tf.convert_to_tensor([[-1, 1, -1, -1, -1], [-1, -1, -1, -1, -1]], dtype=tf.float32) * 2
+    k = tf.convert_to_tensor([[[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]],
+                              [[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]], dtype=tf.float32) * 10
+    bsd.add_all(k, v)
+
+    # 3
+    v = tf.convert_to_tensor([[-1, -1, 1, 1, 1], [1, 1, 1, -1, -1]], dtype=tf.float32) * 3
+    k = tf.convert_to_tensor([[[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]],
+                              [[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]], dtype=tf.float32) * 100
+    bsd.add_all(k, v)
+
+    # 4
+    v = tf.convert_to_tensor([[-1, -1, -1, -1, -1], [-1, -1, -1, 1, -1]], dtype=tf.float32) * 2.5
+    k = tf.convert_to_tensor([[[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]],
+                              [[2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]], dtype=tf.float32) * 1000
+    bsd.add_all(k, v)
+
+    key, k = bsd.get()
+
+    values_expected = tf.convert_to_tensor([[3., 3., 3., 2.], [3., 3., 3.0, 2.5]])
+
+    key_expected = tf.convert_to_tensor([[[400, 400], [500, 500], [600, 600], [30, 30]],
+                                         [[200, 200], [300, 300], [400, 400], [5000, 5000]]], dtype=tf.float32)
+
+    assert tf.reduce_max(tf.abs(key - key_expected)) < 1E-6
+    assert tf.reduce_max(tf.abs(k - values_expected)) < 1E-6
