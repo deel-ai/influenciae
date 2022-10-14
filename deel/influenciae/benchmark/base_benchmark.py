@@ -251,7 +251,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
     """
     TODO
     """
-    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str]):
+    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str] = None):
         self.epochs_to_save = epochs_to_save
         self.optimizer = optimizer
 
@@ -262,7 +262,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
             os.mkdir(saving_path)
         self.saving_path = saving_path
 
-    def on_epoch_end(self, epoch):
+    def on_epoch_end(self, epoch, logs):
         """
         TODO
         """
