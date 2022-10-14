@@ -9,8 +9,9 @@ from abc import abstractmethod
 
 import tensorflow as tf
 
-from .sorted_dict import BatchSort
+from .sorted_dict import BatchSort, ORDER
 from ..types import Callable, Optional
+
 
 #TODO: Update documentation
 class BaseNearestNeighbor:
@@ -25,7 +26,8 @@ class BaseNearestNeighbor:
         dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32
+        d_type: tf.DType = tf.float32,
+        order: ORDER = ORDER.DESCENDING
     ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
@@ -77,7 +79,8 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32
+        d_type: tf.DType = tf.float32,
+        order: ORDER = ORDER.DESCENDING
         ) -> None:
         """
         Build the neighbor object which will be used to find the k neighbor among a dataset
@@ -95,7 +98,7 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         self.dataset = dataset
         self.dot_product_fun = dot_product_fun
         batch_shape = self.dataset.element_spec[0][0].shape[1:]
-        self.batched_sorted_dic = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type)
+        self.batched_sorted_dic = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type, order=order)
 
     def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None):
         """

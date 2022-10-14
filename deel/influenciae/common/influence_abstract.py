@@ -14,9 +14,11 @@ import numpy as np
 import tensorflow as tf
 
 from ..utils import BatchSort, BaseNearestNeighbor, LinearNearestNeighbor
+from ..utils.sorted_dict import ORDER
 
 from ..utils import assert_batched_dataset
 from ..types import Optional, Tuple
+
 
 class BaseInfluenceCalculator:
     """
@@ -107,7 +109,8 @@ class BaseInfluenceCalculator:
         return inf_val
 
 
-    def compute_top_k_from_training_dataset(self, dataset_train: tf.data.Dataset, k: int) -> Tuple[
+    def compute_top_k_from_training_dataset(self, dataset_train: tf.data.Dataset, k: int,
+                                            order:ORDER=ORDER.DESCENDING) -> Tuple[
                                                                                                 tf.Tensor, tf.Tensor]:
         """
         #TODO: Clarify documentation
@@ -128,7 +131,7 @@ class BaseInfluenceCalculator:
         """
         assert_batched_dataset(dataset_train)
         elt_spec = dataset_train.element_spec[0]
-        batch_sorted_dict = BatchSort(elt_spec.shape[1:], (1, k), dtype=elt_spec.dtype)
+        batch_sorted_dict = BatchSort(elt_spec.shape[1:], (1, k), dtype=elt_spec.dtype, order=order)
 
         for batch in dataset_train:
             influence_values = self.compute_pairwise_influence_value(batch)
@@ -241,7 +244,8 @@ class BaseInfluenceCalculator:
               nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
               d_type: tf.DType = tf.float32,
               load_influence_vector_ds_path=None,
-              save_influence_vector_ds_path=None) -> Tuple[
+              save_influence_vector_ds_path=None,
+              order:ORDER=ORDER.DESCENDING) -> Tuple[
                 Tuple[tf.Tensor, ...], tf.Tensor, Tuple[tf.Tensor, ...]]:
         """
         #TODO: It is like the substep of the following function ?
@@ -278,7 +282,8 @@ class BaseInfluenceCalculator:
                             vector_influence_in_cache: bool = True,
                             load_influence_vector_ds_path: str = None,
                             save_influence_vector_ds_path: str = None,
-                            save_top_k_ds_path: str = None) -> tf.data.Dataset:
+                            save_top_k_ds_path: str = None,
+                            order:ORDER=ORDER.DESCENDING) -> tf.data.Dataset:
         """
         #TODO: Builds a dataset ((batch_samples_to_evaluate), influence VECTOR OR VALUE)
         Find the top-k closest elements for each element of dataset to evaluate in the training dataset
@@ -485,7 +490,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
             batch_size = dataset_train._batch_size # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train, inf_vect_ds.batch(batch_size)))
             if save_influence_vector_ds_path is not None:
                 warn("Since you loaded the inf_vect_ds we ignore the saving option (useless)")
         else:
@@ -589,7 +594,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         if load_influence_vector_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_path)
             batch_size = dataset_train._batch_size # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train, inf_vect_ds.batch(batch_size)))
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
                                                               save_influence_vector_path)
@@ -616,7 +621,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
               nearest_neighbor: BaseNearestNeighbor = LinearNearestNeighbor(),
               d_type: tf.DType = tf.float32,
               load_influence_vector_ds_path=None,
-              save_influence_vector_ds_path=None) -> Tuple[
+              save_influence_vector_ds_path=None,
+              order:ORDER=ORDER.DESCENDING) -> Tuple[
                 Tuple[tf.Tensor, ...], tf.Tensor, Tuple[tf.Tensor, ...]]:
         """
         Find the top-k closest elements of the training dataset for each sample to evaluate
@@ -646,7 +652,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
             batch_size = dataset_train._batch_size # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train, inf_vect_ds.batch(batch_size)))
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train, save_influence_vector_ds_path)
         batch_size_eval = int(tf.shape(sample_to_evaluate[0])[0])
@@ -656,7 +662,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             self.compute_influence_value_from_influence_vector,
             k,
             query_batch_size=batch_size_eval,
-            d_type = d_type
+            d_type = d_type,
+            order=order
         )
 
         return self._top_k_with_inf_vect_dataset_train(sample_to_evaluate, nearest_neighbor, batch_size_eval)
@@ -669,7 +676,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
                             vector_influence_in_cache: bool = True,
                             load_influence_vector_ds_path: str = None,
                             save_influence_vector_ds_path: str = None,
-                            save_top_k_ds_path: str = None) -> tf.data.Dataset:
+                            save_top_k_ds_path: str = None,
+                            order:ORDER=ORDER.DESCENDING) -> tf.data.Dataset:
         """
         Find the top-k closest elements for each element of dataset to evaluate in the training dataset
         The method will return a dataset containing a tuple of:
@@ -713,7 +721,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
         if load_influence_vector_ds_path is not None:
             inf_vect_ds = self.load_dataset(load_influence_vector_ds_path)
             batch_size = dataset_train._batch_size # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((dataset_train.unbatch(), inf_vect_ds)).batch(batch_size)
+            inf_vect_ds = tf.data.Dataset.zip((dataset_train, inf_vect_ds.batch(batch_size)))
         else:
             inf_vect_ds = self.compute_influence_vector_dataset(dataset_train,
                                                               save_influence_vector_ds_path)
@@ -727,7 +735,8 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             self.compute_influence_value_from_influence_vector,
             k,
             query_batch_size=batch_size_eval,
-            d_type = d_type
+            d_type = d_type,
+            order=order,
         )
 
         top_k_dataset = dataset_to_evaluate.map(
@@ -767,7 +776,6 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             Top-k training sample for each sample to evaluate.
         """
         v_to_evaluate = self.preprocess_sample_to_evaluate(sample_to_evaluate)
-
         if batch_size_eval is None:
             influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)
         else:
