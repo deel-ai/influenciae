@@ -4,8 +4,10 @@
 # =====================================================================================
 import tensorflow as tf
 
-from deel.influenciae.rps import RepresenterPointL2
-from ..utils_test import almost_equal
+from deel.influenciae.rps.rps_l2 import RepresenterPointL2
+from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
+from tensorflow.keras.models import Sequential
+from tests.utils_test import assert_inheritance
 
 
 def test_surrogate_model():
@@ -31,7 +33,7 @@ def test_surrogate_model():
     assert surrogate_model.output_shape == model.output_shape
 
     # Train and check that it has learned to predict like the original model
-    rps_l2._train_last_layer()
+    rps_l2._train_last_layer(100)
     surrogate_model = rps_l2.linear_layer
     original_preds = model(x_train)
     surrogate_preds = surrogate_model(rps_l2.feature_extractor(x_train))
@@ -57,15 +59,21 @@ def test_gradients():
     )
     model.fit(train_set.shuffle(100).batch(32), epochs=40, verbose=0)
     rps_l2 = RepresenterPointL2(model, train_set.batch(32), lambda_regularization=0.1)
-    rps_l2._train_last_layer()
+    rps_l2._train_last_layer(100)
     surrogate_model = rps_l2.linear_layer
 
     # Compute gradients symbolically for the cross-entropy and compare to AD
     preds = surrogate_model(rps_l2.feature_extractor(x_train))
     ground_truth_gradients = tf.transpose(tf.nn.sigmoid(preds)) - tf.cast(y_train, tf.float32)
-    gradients = tf.concat([g for _, _, g in rps_l2._compute_gradients(train_set.batch(16))], axis=0)
+    gradients = []
+    for x, y in train_set.batch(16):
+        z = rps_l2.feature_extractor(x)
+        g = rps_l2._compute_gradients(z, y)
+        g = tf.multiply(g, -2. * rps_l2.lambda_regularization * tf.cast(rps_l2.n_train, tf.float32))
+        gradients.append(g)
+    gradients = tf.concat(gradients, axis=0)
     assert gradients.shape == (100,)
-    assert almost_equal(ground_truth_gradients, gradients, epsilon=1e-4)
+    assert tf.reduce_max(tf.abs(ground_truth_gradients - gradients)) < 1e-4
 
 
 def test_influence_values():
@@ -87,7 +95,7 @@ def test_influence_values():
     model.fit(train_set.shuffle(100).batch(32), epochs=40, verbose=0)
     lambda_regularization = 0.1
     rps_l2 = RepresenterPointL2(model, train_set.batch(20), lambda_regularization=lambda_regularization)
-    rps_l2._train_last_layer()
+    rps_l2._train_last_layer(100)
     surrogate_model = rps_l2.linear_layer
 
     # Compute influence values symbolically
@@ -98,7 +106,8 @@ def test_influence_values():
 
     # Compare to the values from AD
     influence = rps_l2.compute_influence_values(train_set.batch(20))
-    assert almost_equal(ground_truth_influence, influence, epsilon=1e-3)
+
+    assert tf.reduce_max(tf.abs(tf.transpose(ground_truth_influence) - influence)) < 1e-3
 
 
 def test_predict_with_kernel():
@@ -123,7 +132,50 @@ def test_predict_with_kernel():
     model.fit(train_set.shuffle(100).batch(32), epochs=40, validation_data=test_set.batch(32), verbose=0)
     lambda_regularization = 10.
     rps_l2 = RepresenterPointL2(model, train_set.batch(20), lambda_regularization=lambda_regularization)
-    kernel_preds = rps_l2.predict_with_kernel(train_set.map(lambda x, y: x).batch(20))
+    kernel_preds = []
+    for x_ in train_set.batch(20):
+        kernel_preds.append(rps_l2.predict_with_kernel(x_))
+    kernel_preds = tf.concat(kernel_preds, axis=0)
+    # kernel_preds = rps_l2.predict_with_kernel(train_set.map(lambda x, y: x).batch(20))
     model_preds = model.predict(train_set.map(lambda x, y: x).batch(20))
     bce_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.SUM)
     assert bce_loss(tf.squeeze(model_preds), kernel_preds) / 100. < 0.1
+
+
+def test_inheritance():
+    model = Sequential()
+    model.add(Input(shape=(5, 5, 3), dtype=tf.float64))
+    model.add(Conv2D(4, kernel_size=(2, 2),
+                     activation='relu', dtype=tf.float64))
+    model.add(Flatten(dtype=tf.float64))
+
+    model.add(Dense(1, kernel_initializer=tf.ones_initializer, use_bias=False, dtype=tf.float64))
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(1e-2),
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True,
+                                                reduction=tf.keras.losses.Reduction.NONE),
+        metrics=['accuracy']
+    )
+
+    model(tf.random.normal((50, 5, 5, 3), dtype=tf.float64))
+
+    inputs_train = tf.random.normal((10, 5, 5, 3), dtype=tf.float64)
+    inputs_test = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
+    targets_train = tf.random.normal((10, 1), dtype=tf.float64)
+    targets_test = tf.random.normal((50, 1), dtype=tf.float64)
+
+    train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
+    test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
+
+    lambda_regularization = 10.
+    method = RepresenterPointL2(model, train_set, lambda_regularization=lambda_regularization)
+
+    nb_params = tf.reduce_sum([tf.size(w) for w in model.layers[-1].weights])
+
+    assert_inheritance(
+        method,
+        nb_params,
+        train_set,
+        test_set
+    )
