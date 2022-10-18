@@ -15,14 +15,17 @@ from ..common import ExactFactory, CGDFactory
 
 from ..influence import FirstOrderInfluenceCalculator
 from ..rps import RPSLJE
-from ..tracein import TracIn
+from ..trac_in import TracIn
+from ..rps import RepresenterPointL2
 
 from ..types import Any, Union
+
 
 class InfluenceCalculatorFactory:
     """
     TODO: Docs
     """
+
     @abstractmethod
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               data_train: Any) -> BaseInfluenceCalculator:
@@ -36,6 +39,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
     """
     TODO: Docs
     """
+
     def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_cgd_iters=100,
                  feature_extractor: Union[int, tf.keras.Model] = -1):
         self.start_layer = start_layer
@@ -67,6 +71,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
     """
     TODO: Docs
     """
+
     def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_cgd_iters=100,
                  feature_extractor: Union[int, tf.keras.Model] = -1):
         self.start_layer = start_layer
@@ -97,6 +102,7 @@ class TracInFactory(InfluenceCalculatorFactory):
     """
     TODO: Docs
     """
+
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               data_train: Any) -> BaseInfluenceCalculator:
         models = []
@@ -104,4 +110,26 @@ class TracInFactory(InfluenceCalculatorFactory):
             influence_model = InfluenceModel(model_data)
             models.append(influence_model)
         influence_calculator = TracIn(models, data_train[1])
+        return influence_calculator
+
+
+class RPSL2Factory(InfluenceCalculatorFactory):
+    """
+    TODO: Docs
+    """
+
+    def __init__(self, lambda_regularization: float, scaling_factor: float = 0.1, layer_index=-2, epochs: int = 100):
+        self.lambda_regularization = lambda_regularization
+        self.scaling_factor = scaling_factor
+        self.epochs = epochs
+        self.layer_index = layer_index
+
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              data_train: Any) -> BaseInfluenceCalculator:
+        influence_calculator = RepresenterPointL2(model,
+                                                  training_dataset,
+                                                  self.lambda_regularization,
+                                                  self.scaling_factor,
+                                                  self.epochs,
+                                                  self.layer_index)
         return influence_calculator

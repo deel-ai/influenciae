@@ -468,7 +468,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
             dataset_train: tf.data.Dataset,
             samples_to_evaluate: Tuple[tf.Tensor, ...],
             load_influence_vector_ds_path: str = None,
-            save_influence_vector_ds_path: str = None) -> tf.data.Dataset:
+            save_influence_vector_ds_path: str = None) -> Tuple[Tuple[tf.Tensor, ...],tf.data.Dataset]:
         """
         Compute the influence score between samples to evaluate and training dataset
 
@@ -502,7 +502,7 @@ class VectorBasedInfluenceCalculator(BaseInfluenceCalculator):
     def _compute_inf_values_with_inf_vect_dataset(
             self,
             inf_vect_dataset: tf.data.Dataset,
-            samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.data.Dataset:
+            samples_to_evaluate: Tuple[tf.Tensor, ...]) -> Tuple[Tuple[tf.Tensor, ...],tf.data.Dataset]:
         """
         Compute the influence score between samples to evaluate and vector of influence of training dataset
 
