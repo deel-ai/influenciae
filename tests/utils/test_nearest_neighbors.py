@@ -3,12 +3,12 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 
-from deel.influenciae.utils.nearest_neighbors import LinearNearestNeighbor, ORDER
+from deel.influenciae.utils.nearest_neighbors import LinearNearestNeighbors, ORDER
 import tensorflow as tf
 
 
 def test_linear_nearest():
-    linear_nearest = LinearNearestNeighbor()
+    linear_nearest = LinearNearestNeighbors()
 
     def dot_product_fun(x1, x2):
         influence_values = tf.matmul(x1, tf.transpose(x2))
