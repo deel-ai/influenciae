@@ -3,20 +3,22 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-TODO: Insert insightful description
+Module implementing a Nearest Neighbors interface and a Linear Nearest Neighbors
+algorithm. It will prove itself useful for finding the top-k most influential
+examples of datasets, as implemented in the influence calculator interface.
 """
 from abc import abstractmethod
 
 import tensorflow as tf
 
 from .sorted_dict import BatchSort, ORDER
-from ..types import Callable, Optional
+from ..types import Callable, Optional, Tuple
 
 
-#TODO: Update documentation
-class BaseNearestNeighbor:
+class BaseNearestNeighbors:
     """
-    Nearest Neighbor abstract to search over a dataset
+    A Nearest Neighbors interface for efficiently searching for specific data-points
+    in a dataset.
     """
 
     @abstractmethod
@@ -30,48 +32,67 @@ class BaseNearestNeighbor:
         order: ORDER = ORDER.DESCENDING
     ) -> None:
         """
-        Build the neighbor object which will be used to find the k neighbor among a dataset
+        Builds the nearest neighbors object that will be used to find the k neighbors
+        inside the provided dataset.
 
         Parameters
         ----------
         dataset
-            Dataset containing the points which shall be indexed
+            A TF dataset containing the points which shall be indexed.
         dot_product_fun
             The dot product function used to compute the distance between 2 points
-        Returns
-        -------
-            None
+        k
+            An integer for the amount of samples to search for
+        query_batch_size
+            An integer for the query's batch size
+        d_type
+            The dataset's element's data-type
+        order
+            Either descending or ascending for the top or bottom results as per the similarity metric
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None):
+    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None) -> Tuple[tf.Tensor, tf.Tensor]:
         """
-        Find the k closest points to the dataset
+        Find the k closest points to the provided vector in the object's dataset.
 
         Parameters
         ----------
         vector_to_find
             A tensor of points to query.
-        k
-            the number of nearest neighbors to return
+        batch_size
+            An integer with the query's batch size
+
         Returns
         -------
-            distances
-            k closets points
+        values_and_samples
+            A tuple with the k closest points to the queries and their corresponding distances in the format
+            (distances, points)
         """
         raise NotImplementedError()
 
 
-class LinearNearestNeighbor(BaseNearestNeighbor):
+class LinearNearestNeighbors(BaseNearestNeighbors):
     """
-    Nearest Neighbor based on a linear search over a dataset
+    An implementation of a Linear Nearest Neighbors search algorithm using a given similarity metric and
+    doing as much lazy computations as possible for scalability.
+
+    Attributes
+    ----------
+    dataset
+        A TF dataset with the points from which the nearest neighbors will be searched.
+    dot_product_fun
+        A callable taking in two vectors and returning a notion of similarity between them.
+    batched_sorted_dict
+        A BatchSort instance that takes care of keeping the top/bottom most similar examples from
+        the batch.
     """
 
     def __init__(self):
         self.dataset = None
         self.dot_product_fun = None
-        self.batched_sorted_dic = None
+        self.batched_sorted_dict = None
 
     def build(
         self,
@@ -83,49 +104,57 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
         order: ORDER = ORDER.DESCENDING
         ) -> None:
         """
-        Build the neighbor object which will be used to find the k neighbor among a dataset
+        Builds the linear nearest neighbors object that will be used to find the k neighbors
+        inside the provided dataset.
 
         Parameters
         ----------
         dataset
-            Dataset containing the points which shall be indexed
+            A TF dataset containing the points which shall be indexed.
         dot_product_fun
             The dot product function used to compute the distance between 2 points
-        Returns
-        -------
-            None
+        k
+            An integer for the amount of samples to search for
+        query_batch_size
+            An integer for the query's batch size
+        d_type
+            The dataset's element's data-type
+        order
+            Either descending or ascending for the top or bottom results as per the similarity metric
         """
         self.dataset = dataset
         self.dot_product_fun = dot_product_fun
         batch_shape = self.dataset.element_spec[0][0].shape[1:]
-        self.batched_sorted_dic = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type, order=order)
+        self.batched_sorted_dict = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type, order=order)
 
-    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None):
+    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None) -> Tuple[tf.Tensor, tf.Tensor]:
         """
-        Find the k closest points to the dataset
+        Find the k closest points to the provided vector in the object's dataset.
 
         Parameters
         ----------
         vector_to_find
             A tensor of points to query.
-        k
-            the number of nearest neighbors to return
+        batch_size
+            An integer with the query's batch size
+
         Returns
         -------
-            distances
-            k closets points
+        values_and_samples
+            A tuple with the k closest points to the queries and their corresponding distances in the format
+            (distances, points)
         """
         if batch_size is None:
             batch_size = tf.shape(vector_to_find)[0]
 
         dataset_iterator = iter(self.dataset)
-        self.batched_sorted_dic.reset()
+        self.batched_sorted_dict.reset()
 
         def body_func(i):
             batch, ihvp = next(dataset_iterator)
             influence_values = self.dot_product_fun(vector_to_find, ihvp)
 
-            self.batched_sorted_dic.add_all(
+            self.batched_sorted_dict.add_all(
                 tf.repeat(tf.expand_dims(batch[0], axis=0), batch_size, axis=0),
                 influence_values
             )
@@ -138,6 +167,6 @@ class LinearNearestNeighbor(BaseNearestNeighbor):
             loop_vars=[tf.constant(0, dtype=tf.int64)]
         )
 
-        training_samples, influences_values = self.batched_sorted_dic.get()
+        training_samples, influences_values = self.batched_sorted_dict.get()
 
         return influences_values, training_samples

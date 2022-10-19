@@ -10,4 +10,4 @@ from .backtracking_line_search import BacktrackingLineSearch
 from .tf_operations import find_layer, from_layer_name_to_layer_idx, is_dataset_batched, \
      assert_batched_dataset, dataset_size, default_process_batch
 from .sorted_dict import BatchSort
-from .nearest_neighbors import BaseNearestNeighbor, LinearNearestNeighbor
+from .nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
