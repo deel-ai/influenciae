@@ -11,7 +11,7 @@ from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
-from deel.influenciae.common import InverseHessianVectorProductFactory, ExactFactory, CGDFactory
+from deel.influenciae.common import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory
 
 from ..utils_test import almost_equal
 
@@ -25,7 +25,7 @@ def test_exact_factory():
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
 
     ihvp = ExactIHVP(influence_model, train_set)
-    exact_factory = ExactFactory()
+    exact_factory = ExactIHVPFactory()
     assert isinstance(exact_factory, InverseHessianVectorProductFactory)
 
     ihvp_from_factory = exact_factory.build(influence_model, train_set)
@@ -47,7 +47,7 @@ def test_cgd_factory():
     # case 1
     feature_extractor = Sequential(model.layers[:1])
     ihvp = ConjugateGradientDescentIHVP(influence_model, 1, train_set, n_cgd_iters, feature_extractor)
-    cgd_factory = CGDFactory(feature_extractor, n_cgd_iters, 1)
+    cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters, 1)
     assert isinstance(cgd_factory, InverseHessianVectorProductFactory)
 
     ihvp_from_factory = cgd_factory.build(influence_model, train_set)
@@ -62,7 +62,7 @@ def test_cgd_factory():
     # case 2
     feature_extractor = 1
     ihvp = ConjugateGradientDescentIHVP(influence_model, 1, train_set, n_cgd_iters, None)
-    cgd_factory = CGDFactory(feature_extractor, n_cgd_iters)
+    cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
     assert isinstance(cgd_factory, InverseHessianVectorProductFactory)
 
     ihvp_from_factory = cgd_factory.build(influence_model, train_set)
@@ -77,4 +77,4 @@ def test_cgd_factory():
     # case 3
     feature_extractor = Sequential(model.layers[:1])
     with pytest.raises(AssertionError):
-        cgd_factory = CGDFactory(feature_extractor, n_cgd_iters)
+        cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)

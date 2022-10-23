@@ -39,7 +39,7 @@ def test_compute_influence_vector():
 
     inf_vect = []
     for batch in train_set:
-        batched_inf_vec = tracin.compute_influence_vector(batch)
+        batched_inf_vec = tracin._compute_influence_vector(batch)
         assert batched_inf_vec.shape == (5, 2*if_model.nb_params) # (batch_size, nb_model * nb_params)
         #TODO: What should be the shape of that (nb_model*batch_size, nb_params) or (batch_size, nb_model*nb_params)
         inf_vect.append(batched_inf_vec)
@@ -94,14 +94,14 @@ def test_compute_influence_value_from_influence_vector():
 
     inf_vect = []
     for train_batch in train_set:
-        batch_inf_vec = tracin.compute_influence_vector(train_batch)
+        batch_inf_vec = tracin._compute_influence_vector(train_batch)
         inf_vect.append(batch_inf_vec)
     inf_vect = tf.concat(inf_vect, axis=0)
 
     computed_values = []
     for test_batch in test_set:
-        preproc_test_batch = tracin.preprocess_sample_to_evaluate(test_batch)
-        inf_values = tracin.compute_influence_value_from_influence_vector(preproc_test_batch, inf_vect)
+        preproc_test_batch = tracin._preprocess_samples(test_batch)
+        inf_values = tracin._compute_influence_value_from_influence_vector(preproc_test_batch, inf_vect)
         computed_values.append(inf_values)
     computed_values = tf.concat(computed_values, axis=0)
     assert computed_values.shape == (50, 10)
@@ -135,7 +135,7 @@ def test_compute_pairwise_influence_value():
 
     pairwise_inf = []
     for batch in train_set:
-        loc_pairwise_inf = tracin.compute_pairwise_influence_value(batch)
+        loc_pairwise_inf = tracin._compute_influence_value_from_batch(batch)
         assert loc_pairwise_inf.shape == (5, 1)
         pairwise_inf.append(loc_pairwise_inf)
     pairwise_inf = tf.concat(pairwise_inf, axis=0)
