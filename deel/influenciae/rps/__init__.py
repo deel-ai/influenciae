@@ -7,4 +7,4 @@ Representer Point L2 module
 """
 
 from .rps_l2 import RepresenterPointL2
-from .rps_lje import RPSLJE
+from .rps_lje import RepresenterPointLJE
