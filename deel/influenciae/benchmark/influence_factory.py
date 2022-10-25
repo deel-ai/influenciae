@@ -83,7 +83,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         assert self.ihvp_mode in ['exact', 'cgd']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> BaseInfluenceCalculator:
+              train_info: Any) -> FirstOrderInfluenceCalculator:
         """
         Builds an instance of a first order influence calculator class following the provided model and
         training dataset. No additional information is required.
@@ -149,7 +149,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         assert self.ihvp_mode in ['exact', 'cgd']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> BaseInfluenceCalculator:
+              train_info: Any) -> RepresenterPointLJE:
         """
         Builds an instance of a representer point LJE class following the provided model and training dataset.
         No additional information is required in this case.
@@ -191,7 +191,7 @@ class TracInFactory(InfluenceCalculatorFactory):
     """
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> BaseInfluenceCalculator:
+              train_info: Any) -> TracIn:
         """
         Builds an instance of the TracIn class following the provided model, training dataset
         and additional information.
@@ -243,7 +243,7 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         self.layer_index = layer_index
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> BaseInfluenceCalculator:
+              train_info: Any) -> RepresenterPointL2:
         """
         Builds an instance of the representer point L2 class following the provided model and training dataset.
         No additional information is required in this case.
