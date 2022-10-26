@@ -42,5 +42,5 @@ def test_backtracking_line_search():
     # Get the estimated m and b
     m_estimated = model.weights[0]
     b_estimated = model.weights[1]
-    assert almost_equal(m_estimated, tf.cast(m, tf.float32), epsilon=1e-2)
-    assert almost_equal(b_estimated, tf.cast(b, tf.float32), epsilon=1e-2)
+    assert almost_equal(m_estimated, tf.cast(m, tf.float32), epsilon=5e-2)
+    assert almost_equal(b_estimated, tf.cast(b, tf.float32), epsilon=5e-2)
