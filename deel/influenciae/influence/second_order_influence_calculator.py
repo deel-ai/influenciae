@@ -52,7 +52,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         choosing the amount of samples for the hessian.
     """
 
-    def compute_influence_group(
+    def compute_influence_vector_group(
             self,
             group: tf.data.Dataset
     ) -> tf.Tensor:
@@ -182,7 +182,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing one influence value for the whole group.
         """
         ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
-        influence = tf.transpose(self.compute_influence_group(group_train))
+        influence = tf.transpose(self.compute_influence_vector_group(group_train))
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
                                                  (ds_size, -1)), axis=0, keepdims=True)
 

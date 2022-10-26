@@ -11,11 +11,11 @@ a more efficient estimation at the cost of a little precision.
 """
 import tensorflow as tf
 
-from ..common import InfluenceModel, VectorBasedInfluenceCalculator
+from ..common import InfluenceModel, BaseInfluenceCalculator
 from ..types import Union, List, Tuple
 
 
-class TracIn(VectorBasedInfluenceCalculator):
+class TracIn(BaseInfluenceCalculator):
     """
     A class implementing an influence score based on TracIn method proposed in
     https://arxiv.org/pdf/2002.08484.pdf
@@ -86,7 +86,7 @@ class TracIn(VectorBasedInfluenceCalculator):
         evaluate_vect = self._compute_influence_vector(samples)
         return evaluate_vect
 
-    def _compute_influence_value_from_influence_vector(
+    def _estimate_influence_value_from_influence_vector(
             self,
             preproc_test_sample: tf.Tensor,
             influence_vector: tf.Tensor

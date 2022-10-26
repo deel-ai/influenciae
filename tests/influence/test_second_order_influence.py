@@ -148,7 +148,7 @@ def test_compute_influence_group():
         influence_calculator = SecondOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
                                                           n_samples_for_hessian=25,
                                                           shuffle_buffer_size=25)
-        influence_group = influence_calculator.compute_influence_group(group.batch(5))
+        influence_group = influence_calculator.compute_influence_vector_group(group.batch(5))
         assert influence_group.shape == (1, 2)
         assert almost_equal(influence_group, ground_truth_influence_group, epsilon=1e-3)
 
@@ -242,7 +242,7 @@ def test_cnn_shapes():
         influence_calculator = SecondOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
                                                             n_samples_for_hessian=25,
                                                             shuffle_buffer_size=25)
-        influence = influence_calculator.compute_influence_group(train_set.batch(5))
+        influence = influence_calculator.compute_influence_vector_group(train_set.batch(5))
         assert influence.shape == (1, 650)
         influence_values = influence_calculator.compute_influence_values_group(train_set.batch(5), test_set.batch(5))
         assert influence_values.shape == (1, 1)

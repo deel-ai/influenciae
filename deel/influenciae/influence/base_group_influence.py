@@ -80,7 +80,7 @@ class BaseGroupInfluenceCalculator(ABC):
             self.ihvp_calculator = ihvp_calculator
 
     @abstractmethod
-    def compute_influence_group(
+    def compute_influence_vector_group(
             self,
             group: tf.data.Dataset
     ) -> tf.Tensor:
