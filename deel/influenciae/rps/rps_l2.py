@@ -9,7 +9,7 @@ https://arxiv.org/abs/1811.09720
 """
 import tensorflow as tf
 
-from ..common import VectorBasedInfluenceCalculator
+from ..common import BaseInfluenceCalculator
 from ..types import Tuple
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
@@ -19,7 +19,7 @@ from tensorflow.keras.regularizers import L2
 from ..utils import assert_batched_dataset, BacktrackingLineSearch, dataset_size
 
 
-class RepresenterPointL2(VectorBasedInfluenceCalculator):
+class RepresenterPointL2(BaseInfluenceCalculator):
     """
     A class implementing a method to compute the influence of training points through
     the representer point theorem for kernels.
@@ -105,7 +105,7 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
         evaluate_vect = self.feature_extractor(samples[:-1])
         return evaluate_vect
 
-    def _compute_influence_value_from_influence_vector(
+    def _estimate_influence_value_from_influence_vector(
             self,
             preproc_test_sample: tf.Tensor,
             influence_vector: tf.Tensor
@@ -241,7 +241,8 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
         predictions
             A tensor with an approximation of the model's predictions
         """
-        _, dataset_influence = self._compute_influence_values_in_batches(self.train_set, samples_to_evaluate)
+        influence_vectors = self.compute_influence_vector(self.train_set)
+        _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
         dataset_influence = dataset_influence.map(lambda x, v: v)
         dataset_iterator = iter(dataset_influence)
 

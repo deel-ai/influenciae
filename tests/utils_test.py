@@ -9,7 +9,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.utils import to_categorical
 
-from deel.influenciae.common.influence_abstract import VectorBasedInfluenceCalculator
+from deel.influenciae.common.influence_abstract import BaseInfluenceCalculator
 
 def almost_equal(arr1, arr2, epsilon=1e-6):
     """Ensure two array are almost equal at an epsilon"""
@@ -80,6 +80,7 @@ def hessian_ground_truth(input_vector, kernel_matrix):
 
     return tf.convert_to_tensor([[h1, h23], [h23, h4]], dtype=tf.float32)
 
+
 def assert_inheritance(
         method,
         nb_params,
@@ -93,31 +94,18 @@ def assert_inheritance(
     train_batch = next(iter_train)
 
     # compute_influence_values_from_tensor
-    inf_val_from_tensor = method._compute_individual_influence_values_from_batch(
+    inf_val_from_tensor = method._estimate_individual_influence_values_from_batch(
         train_samples=train_batch,
         samples_to_evaluate=test_batch
     )
     assert inf_val_from_tensor.shape == (10, 5) # (test_batch_size, train_batch_size)
 
-    # compute_influence_values_for_sample_to_evaluate
-    batch_samples, iter_inf_val_sample_ds = method._compute_influence_values_in_batches(
-        train_set,
-        test_batch
-    )
-    assert batch_samples==test_batch
-    iter_inf_val_sample_ds = iter(iter_inf_val_sample_ds)
-    train_sample, inf_val_test_batch = next(iter_inf_val_sample_ds)
-    assert inf_val_test_batch.shape == (10, 5) # (test_batch_size, len train_set)
-
     # compute_influence_values_for_dataset_to_evaluate
-    inf_val_dataset = method.compute_influence_values_in_batches(
-        test_set,
-        train_set
-    )
+    inf_val_dataset = method.estimate_influence_values_in_batches(test_set, train_set)
     iter_inf_val_dataset = iter(inf_val_dataset)
     batch_samples, batched_associated_ds = next(iter_inf_val_dataset)
-    assert batch_samples[0].shape==(10, 5, 5, 3)
-    assert batch_samples[1].shape==(10, 1)
+    assert batch_samples[0].shape == (10, 5, 5, 3)
+    assert batch_samples[1].shape == (10, 1)
     iter_batched_associated_ds = iter(batched_associated_ds)
     (batch_x, batch_y), batch_inf = next(iter_batched_associated_ds)
     assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
@@ -148,7 +136,7 @@ def assert_inheritance(
     inf_values = method._compute_influence_values(
         train_set
     )
-    assert inf_values.shape == (10,1)
+    assert inf_values.shape == (10, 1)
 
     # compute_top_k_from_training_dataset
     top_k_train_samples, top_k_inf_val = method.compute_top_k_from_training_dataset(
@@ -158,23 +146,8 @@ def assert_inheritance(
     assert top_k_train_samples.shape == (3, 5, 5, 3) # (k, *input_shape)
     assert top_k_inf_val.shape == (3,)
 
-    # top_k
-    _, top_k_inf_val, top_k_samples = method._top_k_from_batch(
-        test_batch,
-        train_set,
-        k=3,
-        d_type=tf.float64
-    )
-    assert top_k_inf_val.shape == (10, 3,) # (test_batch_size, k, 1)
-    assert top_k_samples.shape == (10, 3, 5, 5, 3) # (test_batch_size, k, *input_shape)
-
     # top_k_dataset
-    top_k_dataset = method.top_k(
-        test_set,
-        train_set,
-        k=3,
-        d_type=tf.float64
-    )
+    top_k_dataset = method.top_k(test_set, train_set, k=3, d_type=tf.float64)
     iter_top_k = iter(top_k_dataset)
     (batch_evaluate_x, batch_evaluate_y), k_inf_val, k_training_samples = next(iter_top_k)
     assert batch_evaluate_x.shape == (10, 5, 5, 3)

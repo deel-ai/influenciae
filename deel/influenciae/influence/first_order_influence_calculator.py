@@ -19,14 +19,14 @@ import tensorflow as tf
 from .base_group_influence import BaseGroupInfluenceCalculator
 
 from ..common import InfluenceModel
-from ..common import VectorBasedInfluenceCalculator
+from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
 from ..types import Optional, Union, Tuple
 from ..utils import assert_batched_dataset
 
 
-class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInfluenceCalculator):
+class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceCalculator):
     """
     A class implementing the necessary methods to compute the different influence quantities
     using a first-order approximation. This makes it ideal for individual points and small
@@ -141,8 +141,8 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         return sample_evaluate_grads
 
     @tf.function
-    def _compute_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
-                                                       influence_vector: tf.Tensor) -> tf.Tensor:
+    def _estimate_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
+                                                        influence_vector: tf.Tensor) -> tf.Tensor:
         """
         Compute the influence score for a preprocessed sample to evaluate and a training influence vector
 
@@ -179,7 +179,7 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         #TODO: improve IHVP to not compute 2 times the gradient
         return influence_values
 
-    def compute_influence_group(
+    def compute_influence_vector_group(
             self,
             group: tf.data.Dataset
     ) -> tf.Tensor:

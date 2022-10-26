@@ -145,7 +145,7 @@ def test_compute_influence_value_from_influence_vector():
     rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
     v_test = rps_lje._preprocess_samples((inputs_test, targets_test))
     influence_vector = rps_lje._compute_influence_vector((inputs_test, targets_test))
-    influence_values_computed = rps_lje._compute_influence_value_from_influence_vector(v_test, influence_vector)
+    influence_values_computed = rps_lje._estimate_influence_value_from_influence_vector(v_test, influence_vector)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
@@ -161,7 +161,7 @@ def test_compute_influence_value_from_influence_vector():
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
     v_test = first_order._preprocess_samples((inputs_test, targets_test))
     influence_vector = first_order._compute_influence_vector((inputs_test, targets_test))
-    influence_values_expected = first_order._compute_influence_value_from_influence_vector(v_test, influence_vector)
+    influence_values_expected = first_order._estimate_influence_value_from_influence_vector(v_test, influence_vector)
 
     assert tf.reduce_max(
         tf.abs((influence_values_computed - influence_values_expected) / influence_values_expected)) < 1E-2
