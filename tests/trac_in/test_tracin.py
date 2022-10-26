@@ -101,7 +101,7 @@ def test_compute_influence_value_from_influence_vector():
     computed_values = []
     for test_batch in test_set:
         preproc_test_batch = tracin._preprocess_samples(test_batch)
-        inf_values = tracin._compute_influence_value_from_influence_vector(preproc_test_batch, inf_vect)
+        inf_values = tracin._estimate_influence_value_from_influence_vector(preproc_test_batch, inf_vect)
         computed_values.append(inf_values)
     computed_values = tf.concat(computed_values, axis=0)
     assert computed_values.shape == (50, 10)
