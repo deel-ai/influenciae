@@ -20,17 +20,11 @@ from xml.dom import NotFoundErr
 
 import tensorflow as tf
 
-from ..utils import BatchSort, BaseNearestNeighbors, LinearNearestNeighbors
-from ..utils.sorted_dict import ORDER
-
+from ..utils import BatchSort, BaseNearestNeighbors, LinearNearestNeighbors, ORDER
 from ..utils import assert_batched_dataset
 from ..types import Optional, Tuple
 from ..utils.tf_operations import map_to_device, get_device
 
-
-# TODO create parent class with only self-influence
-# TODO readme, getting started and launch benchmarks
-# TODO notebook with some tips for ensuring a good detection performance
 
 
 class CACHE(Enum):
