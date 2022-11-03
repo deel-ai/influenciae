@@ -169,7 +169,7 @@ class BacktrackingLineSearch(Optimizer):
 
     def get_config(self):
         """
-        TODO: Docs
+        Implementation of configuration setter method, as required for the Optimizer interface.
         """
         base_config = super().get_config()
         base_config["batches_per_epoch"] = self.batches_per_epoch

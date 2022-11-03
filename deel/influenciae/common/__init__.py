@@ -7,7 +7,7 @@ Common classes and methods
 """
 
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
-from .influence_abstract import BaseInfluenceCalculator, VectorBasedInfluenceCalculator
+from .influence_abstract import BaseInfluenceCalculator, CACHE
 from .inverse_hessian_vector_product import InverseHessianVectorProduct, ExactIHVP, ConjugateGradientDescentIHVP, \
      IHVPCalculator
-from .ihvp_factory import InverseHessianVectorProductFactory, ExactFactory, CGDFactory
+from .ihvp_factory import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory

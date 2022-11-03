@@ -33,6 +33,7 @@ def find_layer(model: tf.keras.Model, layer: Union[str, int]) -> tf.keras.layers
         return model.layers[layer]
     raise ValueError(f"Could not find any layer {layer}.")
 
+
 def from_layer_name_to_layer_idx(model: tf.keras.Model, layer_name: str) -> int:
     """
     Finds the layer index of the corresponding layer name for the model
@@ -54,6 +55,7 @@ def from_layer_name_to_layer_idx(model: tf.keras.Model, layer_name: str) -> int:
             return layer_idx
     raise ValueError(f'No such layer: {layer_name}. Existing layers are: '
                        f'{list(layer.name for layer in model.layers)}.')
+
 
 def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
     """
@@ -107,9 +109,21 @@ def dataset_size(dataset: tf.data.Dataset):
     size = dataset.cardinality().numpy() * dataset._batch_size # pylint: disable=W0212
     return size
 
-def default_process_batch(batch: Tuple[tf.Tensor, ...]) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+
+def default_process_batch(batch: Tuple[tf.Tensor, ...]) -> Tuple[tf.Tensor, tf.Tensor, Union[tf.Tensor, None]]:
     """
-    TODO: Docs
+    A processing function to get the information into the right format for ingestion in the case of
+    the default case where the batch is in the format (x, y) and there's no weight in a per-sample basis.
+
+    Parameters
+    ----------
+    batch
+        A tuple of tensors, where the information is in the format (x, y).
+
+    Returns
+    -------
+    processed_batch
+        A tuple containing explicitly the inputs, the targets and the per-sample weights (if present, None otherwise)
     """
     y_true = batch[1]
     model_inp = batch[0]

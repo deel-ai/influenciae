@@ -1,6 +1,5 @@
 from deel.influenciae.benchmark.influence_factory import TracInFactory, RPSLJEFactory, FirstOrderFactory, RPSL2Factory
-from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MissingLabelEvaluator
-from typing import List
+from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MislabelingDetectorEvaluator
 import argparse
 
 if __name__ == '__main__':
@@ -10,10 +9,11 @@ if __name__ == '__main__':
     parser.add_argument("-epochs", default=60, type=int, help="Number of epochs to train the model")
     parser.add_argument("-model_type", default='resnet', type=str, choices=['resnet', 'efficient_net', 'vgg19'],
                         help="Type of model")
-    parser.add_argument("-misslabeling_ratio", default=0.0005, type=float,
+    parser.add_argument("-mislabeling_ratio", default=0.0005, type=float,
                         help="The ratio of samples miss labeled in the dataset")
     parser.add_argument("-use_regu", default=False, type=bool, help="Regularization of the last layers with L1L2 regu")
-    parser.add_argument("-sgd", default=False, type=bool, help="Use sgd or adam optimizer")
+    parser.add_argument("-force_overfit", default=False, type=bool,
+                        help="Force overfiting of the classifier with sgd optimizer")
     parser.add_argument("-train_batch_size", default=128, type=int, help="The batch size used for the training")
     parser.add_argument("-test_batch_size", default=128, type=int,
                         help="The batch size used for the test accuracy metric")
@@ -52,18 +52,18 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    cifar10_evaluator = Cifar10MissingLabelEvaluator(epochs=args.epochs,
-                                                     model_type=args.model_type,
-                                                     misslabeling_ratio=args.misslabeling_ratio,
-                                                     use_regu=args.use_regu,
-                                                     sgd=args.sgd,
-                                                     train_batch_size=args.train_batch_size,
-                                                     test_batch_size=args.test_batch_size,
-                                                     influence_batch_size=args.influence_batch_size,
-                                                     epochs_to_save=args.epochs_to_save,
-                                                     take_batch=args.take_batch,
-                                                     verbose_training=args.verbose_training,
-                                                     use_tensorboard=args.use_tensorboard)
+    cifar10_evaluator = Cifar10MislabelingDetectorEvaluator(epochs=args.epochs,
+                                                            model_type=args.model_type,
+                                                            mislabeling_ratio=args.mislabeling_ratio,
+                                                            use_regu=args.use_regu,
+                                                            force_overfit=args.force_overfit,
+                                                            train_batch_size=args.train_batch_size,
+                                                            test_batch_size=args.test_batch_size,
+                                                            influence_batch_size=args.influence_batch_size,
+                                                            epochs_to_save=args.epochs_to_save,
+                                                            take_batch=args.take_batch,
+                                                            verbose_training=args.verbose_training,
+                                                            use_tensorboard=args.use_tensorboard)
 
     if isinstance(args.method_name, str):
         args.method_name = [args.method_name]

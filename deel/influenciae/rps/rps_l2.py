@@ -2,9 +2,14 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+"""
+Module implementing the representer point theorem for kernels for estimating the
+influence of training data-points, as per:
+https://arxiv.org/abs/1811.09720
+"""
 import tensorflow as tf
 
-from ..common import VectorBasedInfluenceCalculator
+from ..common import BaseInfluenceCalculator
 from ..types import Tuple
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
@@ -14,7 +19,7 @@ from tensorflow.keras.regularizers import L2
 from ..utils import assert_batched_dataset, BacktrackingLineSearch, dataset_size
 
 
-class RepresenterPointL2(VectorBasedInfluenceCalculator):
+class RepresenterPointL2(BaseInfluenceCalculator):
     """
     A class implementing a method to compute the influence of training points through
     the representer point theorem for kernels.
@@ -58,17 +63,23 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
         self.weight_matrix_ds = None
         self._train_last_layer(self.epochs)
 
-    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence vector for a training sample
+        Compute an equivalent of the influence vector for a sample of training points.
+
+        Disclaimer: this vector is not an estimation of the difference between the actual
+        model and the perturbed model without the samples (like it is the case with what is
+        calculated using deel.influenciae.influence).
 
         Parameters
         ----------
         train_samples
-            sample to evaluate
+            A tensor with a group of training samples of which we wish to compute the influence.
+
         Returns
         -------
-        The influence vector for the training sample
+        influence_vectors
+            A tensor with the influence for each sample.
         """
         x_batch = self.feature_extractor(train_samples[:-1])
         alpha = self._compute_gradients(x_batch, train_samples[-1])
@@ -77,50 +88,58 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
 
         return influence_vectors
 
-    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Preprocess a sample to evaluate
+        Preprocess a single batch of samples.
 
         Parameters
         ----------
-        samples_to_evaluate
-            sample to evaluate
+        samples
+            A single batch of tensors containing the samples.
+
         Returns
         -------
-        The preprocessed sample to evaluate
+        evaluate_vect
+            The preprocessed sample
         """
-        evaluate_vect = self.feature_extractor(samples_to_evaluate[:-1])
+        evaluate_vect = self.feature_extractor(samples[:-1])
         return evaluate_vect
 
-    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate,
-                                                      influence_vector: tf.Tensor) -> tf.Tensor:
+    def _estimate_influence_value_from_influence_vector(
+            self,
+            preproc_test_sample: tf.Tensor,
+            influence_vector: tf.Tensor
+    ) -> tf.Tensor:
         """
-        Compute the influence score for a preprocessed sample to evaluate and a training influence vector
+        Compute the influence score for a (batch of) preprocessed test sample(s) and a training "influence vector".
 
         Parameters
         ----------
-        preproc_sample_to_evaluate
-            Preprocessed sample to evaluate
+        preproc_test_sample
+            A tensor with a pre-processed sample to evaluate.
         influence_vector
-            Training influence Vector
+            A tensor with the training influence vector.
         Returns
         -------
-        The influence score
+        influence_values
+            A tensor with influence values for the (batch of) test samples.
         """
-        influence_values = tf.matmul(preproc_sample_to_evaluate, tf.transpose(influence_vector))
+        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
         return influence_values
 
-    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence score for a training sample
+        Compute the influence score for a batch of training samples (i.e. self-influence).
 
         Parameters
         ----------
         train_samples
-            Training sample
+            A tensor containing a batch of training samples.
+
         Returns
         -------
-        The influence score
+        influence_values
+            A tensor with the self-influence of the training samples.
         """
         x_batch = self.feature_extractor(train_samples[:-1])
         influence_values = self._compute_gradients(x_batch, train_samples[-1])
@@ -208,7 +227,22 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
         return alpha
 
     def predict_with_kernel(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        _, dataset_influence = self.compute_influence_values_for_sample_to_evaluate(self.train_set, samples_to_evaluate)
+        """
+        Uses the learned kernel to approximate the model's predictions on a group of samples.
+
+        Parameters
+        ----------
+        samples_to_evaluate
+            A single batch of tensors with the samples for which we wish to approximate the model's
+            predictions
+
+        Returns
+        -------
+        predictions
+            A tensor with an approximation of the model's predictions
+        """
+        influence_vectors = self.compute_influence_vector(self.train_set)
+        _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
         dataset_influence = dataset_influence.map(lambda x, v: v)
         dataset_iterator = iter(dataset_influence)
 
@@ -218,8 +252,8 @@ class RepresenterPointL2(VectorBasedInfluenceCalculator):
             value = tf.cast(value, v.dtype) + tf.reduce_sum(v, axis=1)
             return i, value
 
-        _, influence_values = tf.while_loop(lambda i, value: i < dataset_influence.cardinality(), body_fun,
+        _, predictions = tf.while_loop(lambda i, value: i < dataset_influence.cardinality(), body_fun,
                                             [tf.constant(0, dtype=tf.int64),
                                              tf.zeros((tf.shape(samples_to_evaluate[-1])[0],), dtype=tf.float32)])
 
-        return influence_values
+        return predictions

@@ -3,30 +3,46 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-First order Influence module
+First order Influence module implementing computations for all the different influence
+related quantities: influence vector (delta of the weights after holding out the
+sample and the original model's), Cook's distance (or influence values, a measure of
+the model's reliance on the specific sample), both for individual points and whole
+groups of data-points.
+
+Disclaimer: This implements only a first order approximation of the influence function,
+which does not take into account the pairwise interactions of data-points inside groups.
+For a more precise (but much more computationally expensive) alternative, please refer
+to the SecondOrderInfluenceCalculator module.
 """
 import tensorflow as tf
 
 from .base_group_influence import BaseGroupInfluenceCalculator
 
 from ..common import InfluenceModel
-from ..common import VectorBasedInfluenceCalculator
+from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
 from ..types import Optional, Union, Tuple
 from ..utils import assert_batched_dataset
 
 
-class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInfluenceCalculator):
+class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceCalculator):
     """
-    TODO: Improve documentation to be more specific
     A class implementing the necessary methods to compute the different influence quantities
-    using the first-order approximation.
+    using a first-order approximation. This makes it ideal for individual points and small
+    groups of data, as it does so (relatively) efficiently.
+
+    For estimating the influence of large groups of data, please refer to the
+    SecondOrderInfluenceCalculator class, which also takes into account the pairwise interactions
+    between the points inside these groups.
 
     The methods currently implemented are available to evaluate one or a group of point(s):
-    - Influence function vectors: the weights difference when removing point(s)
+    - Influence function vectors: the weights difference when removing points or groups of points
     - Influence values/Cook's distance: a measure of reliance of the model on the individual
-      point(s)
+      points or groups of points.
+
+    For individual points, the following paper is used: https://arxiv.org/abs/1703.04730
+    For groups of points, the following paper is used: https://arxiv.org/abs/1905.13289
 
     Parameters
     ----------
@@ -88,83 +104,88 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         return v
 
     @tf.function
-    def compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence vector for a training sample
+        Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
+        dataset) for a single batch of training samples.
 
         Parameters
         ----------
         train_samples
-            sample to evaluate
+            A tuple with the batch of training samples (with their labels).
+
         Returns
         -------
-        The influence vector for the training sample
-        #TODO: is it train samples or train_y, train_target ? Should be consistent across the different API
-        #TODO: should return (batch, nb_params) or (nb_params, batch) ?
+        influence_vector
+            A tensor with the influence vector for each individual point. Shape will be (batch_size, nb_weights).
         """
-        influence_vector = self.ihvp_calculator.compute_ihvp_single_batch(train_samples)
+        influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)
         influence_vector = self._normalize_if_needed(influence_vector)
-        influence_vector = tf.transpose(influence_vector) #TODO: ensure it is what we want
+        influence_vector = tf.transpose(influence_vector)
         return influence_vector
 
     @tf.function
-    def preprocess_sample_to_evaluate(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Preprocess a sample to evaluate
 
         Parameters
         ----------
-        samples_to_evaluate
+        samples
             sample to evaluate
 
         Returns
         -------
         The preprocessed sample to evaluate
         """
-        sample_evaluate_grads = self.model.batch_jacobian_tensor(samples_to_evaluate)
+        sample_evaluate_grads = self.model.batch_jacobian_tensor(samples)
         return sample_evaluate_grads
 
     @tf.function
-    def compute_influence_value_from_influence_vector(self, preproc_sample_to_evaluate: tf.Tensor,
-                                                      influence_vector: tf.Tensor) -> tf.Tensor:
+    def _estimate_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
+                                                        influence_vector: tf.Tensor) -> tf.Tensor:
         """
-        Compute the influence score for a preprocessed sample to evaluate and a training influence vector
+        Estimates the influence score of leaving out the influence vector corresponding to a given training
+        data-point on a test sample that has already been pre-processed.
 
         Parameters
         ----------
-        preproc_sample_to_evaluate
-            Preprocessed sample to evaluate
+        preproc_test_sample
+            A single pre-processed test sample we wish to evaluate.
         influence_vector
-            Training influence Vector
+            A single influence vector corresponding to a data-point from the training dataset.
+
         Returns
         -------
-        The influence score
+        influence_values
+            A tensor with the resulting influence value.
         """
-        influence_values = tf.matmul(preproc_sample_to_evaluate, tf.transpose(influence_vector))
+        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
         return influence_values
 
     @tf.function
-    def compute_pairwise_influence_value(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence score for a training sample
+        Computes the influence score (self-influence) for a single batch of training samples.
 
         Parameters
         ----------
         train_samples
-            Training sample
+            A tensor with a single batch of training sample.
+
         Returns
         -------
-        The influence score
+        influence_values
+            The influence score of each sample in the batch train_samples.
         """
-        batched_inf_vect = self.compute_influence_vector(train_samples)
-        evaluate_vect = self.preprocess_sample_to_evaluate(train_samples)
+        batched_inf_vect = self._compute_influence_vector(train_samples)
+        evaluate_vect = self._preprocess_samples(train_samples)
         influence_values = tf.reduce_sum(
             tf.math.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
         #TODO: improve IHVP to not compute 2 times the gradient
         return influence_values
 
-
-    def compute_influence_group(
+    def compute_influence_vector_group(
             self,
             group: tf.data.Dataset
     ) -> tf.Tensor:
@@ -194,7 +215,6 @@ class FirstOrderInfluenceCalculator(VectorBasedInfluenceCalculator, BaseGroupInf
         influence_group = tf.reshape(reduced_ihvp, (1, -1))
 
         return influence_group
-
 
     def compute_influence_values_group(
             self,
