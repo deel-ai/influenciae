@@ -104,4 +104,4 @@ def test_rps_l2():
     assert np.shape(result[0]) == (2, take_batch)
     assert np.shape(result[1]) == (take_batch,)
 
-test_rps_l2()
+test_first_order_exact()

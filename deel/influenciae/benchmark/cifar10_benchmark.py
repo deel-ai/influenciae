@@ -24,6 +24,8 @@ from ..types import Tuple, Union, Any, Optional, List
 
 ssl._create_default_https_context = ssl._create_unverified_context # pylint: disable=W0212
 
+
+
 class EfficientNetCIFAR(Sequential):
     """
     TODO
@@ -77,6 +79,13 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         self.epochs_to_save = epochs_to_save
         self.verbose = verbose
         self.use_tensorboard = use_tensorboard
+        # first order
+        self.schedule = [(10, 0.5), (20, 0.5), (30, 0.5), (40, 0.5), (50, 0.5)]
+        self.learning_rate = 1E-3
+
+        # tracin
+        #self.learning_rate = 1E-1
+        #self.schedule = [(15, 0.1), (90, 0.1), (180, 0.1), (240, 0.1)]
 
     def train(
             self,
@@ -88,14 +97,15 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         """
         TODO: Docs
         """
-        random_translation = tf.keras.layers.RandomTranslation(0.1, 0.1)
+        random_translation = tf.keras.layers.RandomTranslation(0.1, 0.1, fill_mode="nearest")
 
         def preprocess(x):
-            x = random_translation(x)
             x = tf.image.random_flip_left_right(x)
+            x = random_translation(x)
+
             return x
 
-        training_dataset = training_dataset.batch(train_batch_size)
+        training_dataset = training_dataset.shuffle(1000).batch(train_batch_size)
         training_dataset_augment = training_dataset.map(lambda x, y: (preprocess(x), y))
         training_dataset_augment = training_dataset_augment.prefetch(100)
 
@@ -115,18 +125,13 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
             optimizer = tf.keras.optimizers.SGD(0.1, momentum=0.9)
         else:
             def lr_schedule(epoch: int):
-                learning_rate = 1e-3  # 0.001
-                if epoch >= 10:
-                    learning_rate /= 2
-                if epoch >= 20:
-                    learning_rate /= 2
-                if epoch >= 30:
-                    learning_rate /= 2
-                if epoch >= 40:
-                    learning_rate /= 2
-                if epoch >= 50:
-                    learning_rate /= 2
-                return learning_rate
+                lr = self.learning_rate
+                for ep_max, coeff in self.schedule:
+                    if epoch >= ep_max:
+                        lr *= coeff
+                    else:
+                        break
+                return lr
 
             lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
 
@@ -142,7 +147,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         model_saver = None
         if self.epochs_to_save is not None:
             model_saver = ModelsSaver(self.epochs_to_save, optimizer)
-            callbacks.append(model_saver)
+            callbacks = [model_saver] + callbacks
 
         if self.use_tensorboard:
             if log_path is None:
@@ -174,6 +179,7 @@ class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
             sgd: bool = False,
             train_batch_size: int = 128,
             test_batch_size: int = 128,
+            influence_batch_size: Optional[int] = None,
             epochs_to_save: Optional[List[int]] = None,
             take_batch: Optional[int] = None,
             verbose_training: bool = True,
@@ -211,4 +217,5 @@ class Cifar10MissingLabelEvaluator(MissingLabelEvaluator):
                          nb_classes=10, misslabeling_ratio=misslabeling_ratio,
                          train_batch_size=train_batch_size,
                          test_batch_size=test_batch_size,
+                         influence_batch_size=influence_batch_size,
                          config=config)
