@@ -49,6 +49,7 @@ class MissingLabelEvaluator:
             misslabeling_ratio: float,
             train_batch_size: int = 128,
             test_batch_size: int = 128,
+            influence_batch_size: Optional[int] = None,
             config: Optional[Dict] = None) -> None:
 
         self.training_dataset = training_dataset
@@ -58,6 +59,10 @@ class MissingLabelEvaluator:
         self.training_procedure = training_procedure
         self.nb_classes = nb_classes
         self.misslabeling_ratio = misslabeling_ratio
+        if influence_batch_size is None:
+            self.influence_batch_size = self.train_batch_size
+        else:
+            self.influence_batch_size = influence_batch_size
         if config is None:
             self.config = {}
         else:
@@ -118,8 +123,11 @@ class MissingLabelEvaluator:
                 tf_writer = file_writer.as_default()
                 tf_writer.__enter__()
 
+            tf.keras.backend.clear_session()
             self.set_seed(seed + index)
+
             noisy_training_dataset, noisy_label_indexes = self.build_noisy_training_dataset()
+            noisy_label_indexes = noisy_label_indexes[0]
 
             acc_train, acc_test, model, data_train = self.training_procedure.train(
                 noisy_training_dataset,
@@ -128,13 +136,15 @@ class MissingLabelEvaluator:
                 self.test_batch_size,
                 log_path=None if path_to_save is None else path_to_save + "/" + method_name + "/seed" + str(index))
 
-            noisy_training_dataset = noisy_training_dataset.batch(self.train_batch_size)
+            # TODO: add a shuffle avant???
+            influence_calculator = influence_factory.build(
+                noisy_training_dataset.shuffle(1000).batch(self.influence_batch_size), model, data_train)
 
-            influence_calculator = influence_factory.build(noisy_training_dataset, model, data_train)
-            influences_values = influence_calculator.compute_influence_values(noisy_training_dataset)
+            influences_values = influence_calculator.compute_influence_values(noisy_training_dataset.batch(self.influence_batch_size))
 
             # compute curve and indexes
             sorted_influences_indexes = np.argsort(-np.squeeze(influences_values))
+
             sorted_curve = self.__compute_curve(sorted_influences_indexes, noisy_label_indexes)
             curves.append(sorted_curve)
 
@@ -268,9 +278,12 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         """
         if epoch in self.epochs_to_save:
             epoch_model = tf.keras.models.clone_model(self.model)
+            epoch_model.build(self.model.input_shape)
+            epoch_model.set_weights(self.model.get_weights())
+
             epoch_lr = self.optimizer.lr
             self.models.append(epoch_model)
-            self.learning_rates.append(epoch_lr)
+            self.learning_rates.append(epoch_lr.numpy())
 
             if self.saving_path is not None:
                 tf.data.experimental.save(f"{self.saving_path}/model_ep_{epoch:.6d}")
