@@ -106,17 +106,18 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     @tf.function
     def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence vector for a training sample
+        Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
+        dataset) for a single batch of training samples.
 
         Parameters
         ----------
         train_samples
-            sample to evaluate
+            A tuple with the batch of training samples (with their labels).
+
         Returns
         -------
-        The influence vector for the training sample
-        #TODO: is it train samples or train_y, train_target ? Should be consistent across the different API
-        #TODO: should return (batch, nb_params) or (nb_params, batch) ?
+        influence_vector
+            A tensor with the influence vector for each individual point. Shape will be (batch_size, nb_weights).
         """
         influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)
         influence_vector = self._normalize_if_needed(influence_vector)
@@ -144,17 +145,20 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     def _estimate_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
                                                         influence_vector: tf.Tensor) -> tf.Tensor:
         """
-        Compute the influence score for a preprocessed sample to evaluate and a training influence vector
+        Estimates the influence score of leaving out the influence vector corresponding to a given training
+        data-point on a test sample that has already been pre-processed.
 
         Parameters
         ----------
         preproc_test_sample
-            Preprocessed sample to evaluate
+            A single pre-processed test sample we wish to evaluate.
         influence_vector
-            Training influence Vector
+            A single influence vector corresponding to a data-point from the training dataset.
+
         Returns
         -------
-        The influence score
+        influence_values
+            A tensor with the resulting influence value.
         """
         influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
         return influence_values
@@ -162,15 +166,17 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     @tf.function
     def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
-        Compute the influence score for a training sample
+        Computes the influence score (self-influence) for a single batch of training samples.
 
         Parameters
         ----------
         train_samples
-            Training sample
+            A tensor with a single batch of training sample.
+
         Returns
         -------
-        The influence score
+        influence_values
+            The influence score of each sample in the batch train_samples.
         """
         batched_inf_vect = self._compute_influence_vector(train_samples)
         evaluate_vect = self._preprocess_samples(train_samples)
