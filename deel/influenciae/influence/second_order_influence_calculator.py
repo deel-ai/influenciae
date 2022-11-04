@@ -16,9 +16,11 @@ import tensorflow as tf
 
 from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP
+from ..common import InfluenceModel
+from ..common import InverseHessianVectorProduct, IHVPCalculator
 
 from ..utils import assert_batched_dataset, dataset_size
-from ..types import Optional
+from ..types import Optional, Union
 
 
 class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
@@ -51,6 +53,21 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
     """
+
+    def __init__(self,
+                 model: InfluenceModel,
+                 dataset: tf.data.Dataset,
+                 ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
+                 n_samples_for_hessian: Optional[int] = None,
+                 shuffle_buffer_size: Optional[int] = 10000):
+
+        super().__init__(model,
+                         dataset,
+                         ihvp_calculator,
+                         n_samples_for_hessian,
+                         shuffle_buffer_size)
+
+        self.train_size = dataset_size(dataset)
 
     def compute_influence_vector_group(
             self,
@@ -127,27 +144,28 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         """
         local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
             else ConjugateGradientDescentIHVP(
-                self.model,
-                self.ihvp_calculator.extractor_layer,
-                dataset,
-                self.ihvp_calculator.n_cgd_iters,
-                self.ihvp_calculator.feature_extractor
-            )
+            self.model,
+            self.ihvp_calculator.extractor_layer,
+            dataset,
+            self.ihvp_calculator.n_cgd_iters,
+            self.ihvp_calculator.feature_extractor
+        )
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
         ihvp_ds = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1))
 
         reduced_ihvp = ihvp_ds.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
-        reduced_ihvp_ds = tf.data.Dataset.from_tensors(reduced_ihvp).batch(dataset._batch_size) # pylint: disable=W0212
+        reduced_ihvp_ds = tf.data.Dataset.from_tensors(reduced_ihvp).batch(dataset._batch_size)  # pylint: disable=W0212
 
-        local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False).batch(dataset._batch_size) # pylint: disable=W0212
+        local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False).batch(
+            dataset._batch_size)  # pylint: disable=W0212
 
         interactions = self.ihvp_calculator.compute_ihvp(
             local_hvp, use_gradient=False
         )
 
         ds_size = tf.cast(dataset_size(dataset), dtype=interactions.element_spec.dtype)
-        interactions = interactions.map(lambda x: x*ds_size)
+        interactions = interactions.map(lambda x: x * ds_size)
 
         return interactions.get_single_element()
 
