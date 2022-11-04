@@ -428,11 +428,11 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
     x = _bn_relu(block)
 
     # Classifier block
-    if include_top and top is 'classification':
+    if include_top and top == 'classification':
         x = GlobalAveragePooling2D()(x)
         x = Dense(units=classes, activation=activation,
                   kernel_initializer="he_normal")(x)
-    elif include_top and top is 'segmentation':
+    elif include_top and top == 'segmentation':
         x = Conv2D(classes, (1, 1), activation='linear', padding='same')(x)
 
         if K.image_data_format() == 'channels_first':
