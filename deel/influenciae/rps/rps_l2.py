@@ -166,18 +166,44 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         loss_function = self.model.compiled_loss._losses[0] if isinstance(self.model.compiled_loss._losses, list) \
             else self.model.compiled_loss
         mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
-        feature_map_ds = self.train_set.map(lambda x, y: self.feature_extractor(x))
-        surrogate_train_set = tf.data.Dataset.zip((feature_map_ds,
-                                                   feature_map_ds.map(lambda x: self.model.layers[-1](x))))
+
         self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
         for epoch in range(epochs):
-            for x_batch, y_batch in surrogate_train_set:
-                with tf.GradientTape() as tape:
-                    logits = self.linear_layer(x_batch, training=True)
-                    loss = mse_loss(y_batch, logits)
-                gradients = tape.gradient(loss, self.linear_layer.trainable_weights)
-                optimizer.step(self.linear_layer, loss, x_batch, y_batch, gradients)
+            for x_batch, _ in self.train_set:
+                loss, grads, z_batch, y_target = self._learn_step_last_layer(x_batch, mse_loss)
+                optimizer.step(self.linear_layer, loss, z_batch, y_target, grads)
+
         self.linear_layer.compile(optimizer=optimizer, loss=loss_function)
+
+    @tf.function
+    def _learn_step_last_layer(self, x_batch, mse_loss):
+        """
+        Trains step for the L2-regularized surrogate linear model to predict like the model on the
+        training dataset.
+        Parameters
+        ----------
+        x_batch
+            A training sample wrt to which we wish to compute the gradients
+        mse_loss
+            The mse loss
+                Returns
+        -------
+        loss
+            loss value of the linear model
+        gradients
+            gradients of the linear model
+        z_batch
+            latent space
+        y_target
+            the prediction of the original model
+        """
+        z_batch = self.feature_extractor(x_batch)
+        y_target = self.model.layers[-1](z_batch)
+        with tf.GradientTape() as tape:
+            logits = self.linear_layer(z_batch, training=True)
+            loss = mse_loss(y_target, logits)
+        gradients = tape.gradient(loss, self.linear_layer.trainable_weights)
+        return loss, gradients, z_batch, y_target
 
     def _create_surrogate_model(self) -> Model:
         """
@@ -216,10 +242,9 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         alpha
             mean of the gradient
         """
+        logits = self.linear_layer(z_batch)
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(z_batch)
-            tape.watch(self.linear_layer.trainable_weights)
-            logits = self.linear_layer(z_batch)
+            tape.watch(logits)
             loss = self.linear_layer.compiled_loss(y_batch, logits)
         alpha = tf.reduce_mean(tape.gradient(loss, logits), axis=1)
         alpha = tf.divide(alpha, -2. * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype))

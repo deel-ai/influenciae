@@ -20,7 +20,7 @@ if __name__ == '__main__':
     parser.add_argument("-influence_batch_size", default=128, type=int,
                         help="The batch size used to compute influence function")
 
-    parser.add_argument("-epochs_to_save", default="20, 40, 60", type=lambda x: [int(x_) for x_ in x.split(',')],
+    parser.add_argument("-epochs_to_save", default="", type=lambda x: [int(x_) for x_ in x.split(',')] if len(x) > 0 else None,
                         help="the model used for the tracin method")
     parser.add_argument("-verbose_training", default=False, type=bool,
                         help="Display in the console intermediate traning step for each models")

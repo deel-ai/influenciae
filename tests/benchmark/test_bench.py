@@ -103,5 +103,3 @@ def test_rps_l2():
     result = cifar10_evaluator.evaluate(influence_factory=influence_factory, nbr_of_evaluation=2, verbose=False)
     assert np.shape(result[0]) == (2, take_batch)
     assert np.shape(result[1]) == (take_batch,)
-
-test_first_order_exact()
