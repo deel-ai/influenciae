@@ -60,8 +60,6 @@ class BaseGroupInfluenceCalculator(ABC):
     ):
         self.model = model
 
-        self.train_size = dataset_size(dataset)
-
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
         else:
