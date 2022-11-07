@@ -8,7 +8,7 @@ Custom operations related to tensorflow objects
 
 import tensorflow as tf
 
-from ..types import Union, Tuple
+from ..types import Union, Tuple, Optional
 
 
 def find_layer(model: tf.keras.Model, layer: Union[str, int]) -> tf.keras.layers.Layer:
@@ -54,7 +54,7 @@ def from_layer_name_to_layer_idx(model: tf.keras.Model, layer_name: str) -> int:
         if layer.name == layer_name:
             return layer_idx
     raise ValueError(f'No such layer: {layer_name}. Existing layers are: '
-                       f'{list(layer.name for layer in model.layers)}.')
+                     f'{list(layer.name for layer in model.layers)}.')
 
 
 def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
@@ -72,7 +72,7 @@ def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
         False if the dataset if not batched else the batch_size of the dataset.
     """
     if hasattr(dataset, '_batch_size'):
-        return dataset._batch_size # pylint: disable=W0212
+        return dataset._batch_size  # pylint: disable=W0212
 
     return False
 
@@ -106,7 +106,7 @@ def dataset_size(dataset: tf.data.Dataset):
     """
     assert_batched_dataset(dataset)
 
-    size = dataset.cardinality().numpy() * dataset._batch_size # pylint: disable=W0212
+    size = dataset.cardinality().numpy() * dataset._batch_size  # pylint: disable=W0212
     return size
 
 
@@ -130,3 +130,25 @@ def default_process_batch(batch: Tuple[tf.Tensor, ...]) -> Tuple[tf.Tensor, tf.T
     sample_weight = None
 
     return model_inp, y_true, sample_weight
+
+
+def get_device(device: Optional[str]):
+    if device is not None:
+        return device
+    else:
+        physical_devices = tf.config.list_physical_devices('GPU')
+        if physical_devices is None or len(physical_devices) == 0:
+            return 'cpu:0'
+        else:
+            return 'GPU:0'
+
+
+def map_to_device(dataset: tf.data.Dataset, map_fun, device: Optional[str]):
+    device = get_device(device)
+
+    def map_fun_device(*args):
+        with tf.device(device):
+            result = map_fun(*args)
+        return result
+
+    return dataset.map(map_fun_device)
