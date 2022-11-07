@@ -3,8 +3,8 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Benchmark module
+Visualizations module
 """
 
-from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator
-from .influence_factory import InfluenceCalculatorFactory, FirstOrderFactory, RPSLJEFactory, TracInFactory
+from .benchmark import BenchmarkDisplay
+from .image import plot_most_influential_images, plot_datacentric_explanations
