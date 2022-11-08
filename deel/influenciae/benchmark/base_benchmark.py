@@ -250,7 +250,7 @@ class MislabelingDetectorEvaluator:
             influence_calculator = influence_factory.build(
                 noisy_training_dataset.shuffle(1000).batch(self.influence_batch_size), model, data_train)
 
-            influences_values = influence_calculator._compute_influence_values(
+            influences_values = influence_calculator._compute_influence_values(  # pylint: disable=W0212
                 noisy_training_dataset.batch(self.influence_batch_size))
 
             # compute curve and indexes
@@ -455,7 +455,8 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         A list with the different learning rates at the different stage of the training process.
     """
 
-    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str] = None):
+    def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str] = None, **kwargs):
+        super().__init__(**kwargs)
         self.epochs_to_save = epochs_to_save
         self.optimizer = optimizer
 
@@ -466,7 +467,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
             os.mkdir(saving_path)
         self.saving_path = saving_path
 
-    def on_epoch_end(self, epoch: int, logs) -> None:
+    def on_epoch_end(self, epoch: int, logs: Optional[Dict] = None) -> None:
         """
         Save the relevant training information (model, learning rate, save to disk if desired)
         after a training epoch.
@@ -476,6 +477,10 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         epoch
             An integer with the current epoch. If it is in the list of epochs after which to
             save the training information, do so.
+        logs
+            Dict, metric results for this training epoch, and for the validation epoch if validation
+            is performed. Validation result keys are prefixed with val_. For training epoch, the
+            values of the Model's metrics are returned.
         """
         if epoch in self.epochs_to_save:
             epoch_model = tf.keras.models.clone_model(self.model)

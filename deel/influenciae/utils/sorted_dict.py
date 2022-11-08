@@ -6,12 +6,18 @@
 Module containing the implementation of a SortedDictionary, useful for computing the
 top-k most influential samples in a large dataset.
 """
+from enum import Enum
+
 import tensorflow as tf
 import numpy as np
-from enum import Enum
 
 
 class ORDER(Enum):
+    """
+    Enumeration for the two types of ordering for the sorting function.
+    ASCENDING puts the elements with the smallest value first.
+    DESCENDING puts the elements with the largest value first.
+    """
     ASCENDING = 1
     DESCENDING = 2
 

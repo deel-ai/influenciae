@@ -318,7 +318,7 @@ class BaseInfluenceCalculator:
 
         return influence_value_dataset
 
-    def top_k(
+    def top_k(  # pylint: disable=R0913
             self,
             dataset_to_evaluate: tf.data.Dataset,
             train_set: tf.data.Dataset,

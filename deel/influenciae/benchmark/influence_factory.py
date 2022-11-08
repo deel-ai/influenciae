@@ -8,7 +8,9 @@ This will be useful for streamlining the benchmarks.
 """
 from abc import abstractmethod
 
+import numpy as np
 import tensorflow as tf
+from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
 
 from ..common import InfluenceModel, BaseInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP
@@ -20,8 +22,6 @@ from ..trac_in import TracIn
 from ..rps import RepresenterPointL2
 
 from ..types import Any, Union, Callable
-import numpy as np
-from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
 
 
 class InfluenceCalculatorFactory:
@@ -112,7 +112,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
             dataset_hessian = training_dataset
         else:
-            batch_size = training_dataset._batch_size.numpy()
+            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
             take_size = int(
                 np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
             dataset_hessian = training_dataset.take(take_size)
@@ -190,7 +190,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
             dataset_hessian = training_dataset
         else:
-            batch_size = training_dataset._batch_size.numpy()
+            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
             take_size = int(
                 np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
             dataset_hessian = training_dataset.take(take_size)
