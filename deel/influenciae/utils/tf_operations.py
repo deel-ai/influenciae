@@ -6,6 +6,7 @@
 Custom operations related to tensorflow objects
 """
 
+import numpy as np
 import tensorflow as tf
 
 from ..types import Union, Tuple, Optional
@@ -130,6 +131,94 @@ def default_process_batch(batch: Tuple[tf.Tensor, ...]) -> Tuple[tf.Tensor, tf.T
     sample_weight = None
 
     return model_inp, y_true, sample_weight
+
+
+def dataset_to_tensor(dataset: tf.data.Dataset) -> tf.Tensor:
+    """
+    Transforms a (batched) dataset into a tensor for easier manipulation.
+
+    Parameters
+    ----------
+    dataset
+        A batched TF dataset to transform into a tensor.
+
+    Returns
+    -------
+    tensor
+        A TF tensor with the evaluated dataset.
+    """
+    assert_batched_dataset(dataset)
+    if isinstance(dataset.element_spec, Tuple):
+        tensor = []
+        for i, elm in enumerate(dataset.element_spec):
+            tensor.append([z for z in dataset.map(lambda *w: w[i]).unbatch()])
+    else:
+        tensor = tf.concat([b for b in dataset], axis=0)
+
+    return tensor
+
+
+def extract_only_values(dataset: tf.data.Dataset) -> tf.Tensor:
+    """
+    Utility function to extract all the influence values from a dataset containing tuples (data-point, influence score).
+    The dataset much be batched before applying this operation.
+
+    Parameters
+    ----------
+    dataset
+        A batched TF dataset with tuples (data-point, influence score).
+
+    Returns
+    -------
+    influence_values
+        A tensor with only the dataset's influence values.
+    """
+    return dataset_to_tensor(dataset.map(lambda *inputs: inputs[1]))
+
+
+def array_to_dataset(
+        array: Union[np.ndarray, tf.Tensor, Tuple[np.ndarray, ...], Tuple[tf.Tensor, ...]],
+        batch_size: Optional[int] = None,
+        shuffle: bool = False,
+        buffer_size: int = 1000
+) -> tf.data.Dataset:
+    """
+    Converts a dataset in the form of a numpy array or tensor (in tuples when it contains the labels) into a
+    TF dataset, and if desired, shuffles and batches it for easier ingestion by other functions.
+
+    Parameters
+    ----------
+    array
+        Either a numpy array (or tensor) with the samples or a tuple with a set of samples and labels (or value
+        associated to them).
+    batch_size
+        An optional integer indicating the batch size. If None, the dataset won't be batched
+    shuffle
+        A boolean indicating whether the dataset should be shuffled.
+    buffer_size
+        An integer for both the shuffle operation and computing the prefetch size (when batching).
+
+    Returns
+    -------
+    dataset
+        A TF dataset with the data in the array, possibly shuffled, batched and prefetched.
+    """
+    if isinstance(array, np.ndarray):
+        array = tf.convert_to_tensor(array, dtype=tf.float32)
+    elif isinstance(array, Tuple) and isinstance(array[0], np.ndarray):
+        array = tf.stack(list(
+            zip(tf.convert_to_tensor(array[0], dtype=tf.float32), tf.convert_to_tensor(array[1], dtype=tf.float32))
+        ), axis=0)
+
+    dataset = tf.data.Dataset.from_tensor_slices(array)
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size)
+    if batch_size is not None:
+        assert batch_size > 0
+        assert buffer_size > 0
+        dataset = dataset.batch(batch_size).prefetch(buffer_size // batch_size)
+
+    return dataset
 
 
 def get_device(device: Optional[str]):
