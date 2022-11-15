@@ -8,13 +8,13 @@ influence of training data-points, as per:
 https://arxiv.org/abs/1811.09720
 """
 import tensorflow as tf
-
-from ..common import BaseInfluenceCalculator
-from ..types import Tuple
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.regularizers import L2
+
+from ..common import BaseInfluenceCalculator
+from ..types import Tuple, Callable
 
 from ..utils import assert_batched_dataset, BacktrackingLineSearch, dataset_size
 
@@ -161,14 +161,14 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             An integer with the amount of epochs to train the surrogate model
         """
         self.linear_layer = self._create_surrogate_model()
-        optimizer = BacktrackingLineSearch(batches_per_epoch=self.n_train / self.train_set._batch_size,
+        optimizer = BacktrackingLineSearch(batches_per_epoch=self.n_train / self.train_set._batch_size,  # pylint: disable=W0212
                                            scaling_factor=self.scaling_factor)  # the optimizer used in the paper's code
-        loss_function = self.model.compiled_loss._losses[0] if isinstance(self.model.compiled_loss._losses, list) \
-            else self.model.compiled_loss
+        loss_function = self.model.compiled_loss._losses[0] if \
+            isinstance(self.model.compiled_loss._losses, list) else self.model.compiled_loss  # pylint: disable=W0212
         mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
         self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
-        for epoch in range(epochs):
+        for _ in range(epochs):
             for x_batch, _ in self.train_set:
                 loss, grads, z_batch, y_target = self._learn_step_last_layer(x_batch, mse_loss)
                 optimizer.step(self.linear_layer, loss, z_batch, y_target, grads)
@@ -176,26 +176,25 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         self.linear_layer.compile(optimizer=optimizer, loss=loss_function)
 
     @tf.function
-    def _learn_step_last_layer(self, x_batch, mse_loss):
+    def _learn_step_last_layer(
+            self,
+            x_batch: tf.Tensor,
+            mse_loss: Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         """
-        Trains step for the L2-regularized surrogate linear model to predict like the model on the
-        training dataset.
+        Trains the L2-regularized surrogate linear model to predict like the model on the training
+        dataset for one optimizer step on a single batch.
+
         Parameters
         ----------
         x_batch
             A training sample wrt to which we wish to compute the gradients
         mse_loss
-            The mse loss
-                Returns
+            A callable that computes the MSE loss
+
+        Returns
         -------
-        loss
-            loss value of the linear model
-        gradients
-            gradients of the linear model
-        z_batch
-            latent space
-        y_target
-            the prediction of the original model
+        A tuple with (value of the loss, gradients of the linear model, the latent space of the batch, the prediction)
         """
         z_batch = self.feature_extractor(x_batch)
         y_target = self.model.layers[-1](z_batch)
@@ -237,6 +236,7 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             a training sample wrt to which we wish to compute the gradients
         y_batch
             label associated to the training sample
+
         Returns
         -------
         alpha
