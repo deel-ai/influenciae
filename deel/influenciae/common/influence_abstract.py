@@ -26,7 +26,6 @@ from ..types import Optional, Tuple
 from ..utils.tf_operations import map_to_device, get_device
 
 
-
 class CACHE(Enum):
     """
     Class for the options of where to cache intermediary results for optimizing computations.
@@ -36,34 +35,13 @@ class CACHE(Enum):
     NO_CACHE = 2
 
 
-class BaseInfluenceCalculator:
+class SelfInfluenceCalculator:
     """
-    The base implementation of an interface for all the influence calculators in the library.
-    All the methods included in deel-influenciae implement these basic functions, with
-    each their own notion of influence of a data-point on the model.
-
-    As the computation of the influence scores can be written as an inner product, we apply some
-    optimizations that allow us to scale to large datasets.
-
-    Please note that for some of the classes implementing this interface, the notion of influence
-    vector does not necessarily have the meaning of being the delta of the weights of the model
-    after the perturbation of the training dataset.
+    A basic interface for influence calculators whose influence score computation can't be
+    decomposed into an inner product between an "influence vector" reflecting the influence
+    of the training points and another vector related to a test point. In particular, it will
+    be used for RepresenterPointL2 and [WIP] the techniques based on adversarial attacks.
     """
-
-    @abstractmethod
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        """
-        Preprocess a sample to evaluate
-
-        Parameters
-        ----------
-        samples
-            sample to evaluate
-        Returns
-        -------
-        The preprocessed sample to evaluate
-        """
-        raise NotImplementedError()
 
     @abstractmethod
     def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
@@ -81,55 +59,6 @@ class BaseInfluenceCalculator:
             The influence score of each sample in the batch train_samples.
         """
         raise NotImplementedError()
-
-    @abstractmethod
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        """
-        Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
-        dataset) for a single batch of training samples.
-
-        Parameters
-        ----------
-        train_samples
-            A tuple with the batch of training samples (with their labels).
-
-        Returns
-        -------
-        influence_vector
-            A tensor with the influence vector for each individual point.
-        """
-        raise NotImplementedError()
-
-    def compute_influence_vector(
-            self,
-            train_set: tf.data.Dataset,
-            save_influence_vector_ds_path: Optional[str] = None,
-            device: Optional[str] = None
-    ) -> tf.data.Dataset:
-        """
-        Compute the influence vector for each sample of the provided (full or partial) model's training dataset.
-
-        Parameters
-        ----------
-        train_set
-            A TF dataset with the (full or partial) model's training dataset.
-        save_influence_vector_ds_path
-            The path to save or load the influence vector of the training dataset. If specified,
-            load the dataset if it has already been computed, otherwise, compute the influence vector and
-            then save it in the specified path.
-        device
-            Device where the computation will be executed
-
-        Returns
-        -------
-        A dataset containing the tuple: (batch of training samples, influence vector)
-        """
-        inf_vect_ds = map_to_device(train_set, lambda *batch: (batch, self._compute_influence_vector(batch)), device)
-        if save_influence_vector_ds_path is not None:
-            inf_vect = inf_vect_ds.map(lambda *batch: batch[-1])
-            self._save_dataset(inf_vect.unbatch(), save_influence_vector_ds_path)
-
-        return inf_vect_ds
 
     def compute_influence_values(self, train_set: tf.data.Dataset, device: Optional[str] = None) -> tf.data.Dataset:
         """
@@ -224,6 +153,118 @@ class BaseInfluenceCalculator:
         training_samples, influence_values = tf.squeeze(training_samples, axis=0), tf.squeeze(influence_values, axis=0)
 
         return training_samples, influence_values
+
+    def _save_dataset(self, dataset: tf.data.Dataset, load_or_save_path: str) -> None:
+        """
+        Save a dataset in the TF dataset format in the specified path.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to save
+        load_or_save_path
+            The path to save the dataset
+        """
+        tf.data.experimental.save(dataset, load_or_save_path)
+
+    def _load_dataset(self, dataset_path: str) -> tf.data.Dataset:
+        """
+        Loads a dataset in the TF format from the specified path.
+
+        Parameters
+        ----------
+        dataset_path
+            The path pointing to the file from which to load the dataset
+
+        Returns
+        -------
+        dataset
+            The target dataset
+        """
+        if path.exists(dataset_path):
+            dataset = tf.data.experimental.load(dataset_path)
+        else:
+            raise NotFoundErr(f"The dataset path: {dataset_path} was not found")
+        return dataset
+
+
+class BaseInfluenceCalculator(SelfInfluenceCalculator):
+    """
+    The base implementation of an interface for all the influence calculators in the library.
+    All the methods included in deel-influenciae implement these basic functions, with
+    each their own notion of influence of a data-point on the model.
+
+    As the computation of the influence scores can be written as an inner product, we apply some
+    optimizations that allow us to scale to large datasets.
+
+    Please note that for some of the classes implementing this interface, the notion of influence
+    vector does not necessarily have the meaning of being the delta of the weights of the model
+    after the perturbation of the training dataset.
+    """
+
+    @abstractmethod
+    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+        """
+        Preprocess a sample to evaluate
+
+        Parameters
+        ----------
+        samples
+            sample to evaluate
+        Returns
+        -------
+        The preprocessed sample to evaluate
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+        """
+        Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
+        dataset) for a single batch of training samples.
+
+        Parameters
+        ----------
+        train_samples
+            A tuple with the batch of training samples (with their labels).
+
+        Returns
+        -------
+        influence_vector
+            A tensor with the influence vector for each individual point.
+        """
+        raise NotImplementedError()
+
+    def compute_influence_vector(
+            self,
+            train_set: tf.data.Dataset,
+            save_influence_vector_ds_path: Optional[str] = None,
+            device: Optional[str] = None
+    ) -> tf.data.Dataset:
+        """
+        Compute the influence vector for each sample of the provided (full or partial) model's training dataset.
+
+        Parameters
+        ----------
+        train_set
+            A TF dataset with the (full or partial) model's training dataset.
+        save_influence_vector_ds_path
+            The path to save or load the influence vector of the training dataset. If specified,
+            load the dataset if it has already been computed, otherwise, compute the influence vector and
+            then save it in the specified path.
+        device
+            Device where the computation will be executed
+
+        Returns
+        -------
+        A dataset containing the tuple: (batch of training samples, influence vector)
+        """
+        inf_vect_ds = map_to_device(train_set, lambda *batch: (batch, self._compute_influence_vector(batch)), device)
+        if save_influence_vector_ds_path is not None:
+            inf_vect = inf_vect_ds.map(lambda *batch: batch[-1])
+            self._save_dataset(inf_vect.unbatch(), save_influence_vector_ds_path)
+
+        return inf_vect_ds
 
     @abstractmethod
     def _estimate_individual_influence_values_from_batch(
@@ -565,36 +606,3 @@ class BaseInfluenceCalculator:
             A tensor with the resulting influence value.
         """
         raise NotImplementedError()
-
-    def _save_dataset(self, dataset: tf.data.Dataset, load_or_save_path: str) -> None:
-        """
-        Save a dataset in the TF dataset format in the specified path.
-
-        Parameters
-        ----------
-        dataset
-            The dataset to save
-        load_or_save_path
-            The path to save the dataset
-        """
-        tf.data.experimental.save(dataset, load_or_save_path)
-
-    def _load_dataset(self, dataset_path: str) -> tf.data.Dataset:
-        """
-        Loads a dataset in the TF format from the specified path.
-
-        Parameters
-        ----------
-        dataset_path
-            The path pointing to the file from which to load the dataset
-
-        Returns
-        -------
-        dataset
-            The target dataset
-        """
-        if path.exists(dataset_path):
-            dataset = tf.data.experimental.load(dataset_path)
-        else:
-            raise NotFoundErr(f"The dataset path: {dataset_path} was not found")
-        return dataset
