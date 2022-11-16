@@ -9,7 +9,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.utils import to_categorical
 
-from deel.influenciae.common.influence_abstract import BaseInfluenceCalculator
+from deel.influenciae.common.base_influence import BaseInfluenceCalculator
 
 def almost_equal(arr1, arr2, epsilon=1e-6):
     """Ensure two array are almost equal at an epsilon"""
