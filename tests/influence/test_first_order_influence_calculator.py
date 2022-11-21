@@ -940,7 +940,7 @@ def test_compute_influence_values_group():
         influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
                                                         n_samples_for_hessian=25,
                                                         shuffle_buffer_size=25)
-        influence = influence_calculator.compute_influence_values_group(train_set.batch(25), test_set.batch(25))
+        influence = influence_calculator.estimate_influence_values_group(train_set.batch(25), test_set.batch(25))
         assert influence.shape == (1, 1)
         assert tf.reduce_max(tf.abs(influence - tf.transpose(ground_truth_influence_values_group))) < 1E-3
 
@@ -1056,7 +1056,7 @@ def test_cnn_shapes():
         # Test the group influence methods
         influence_group = influence_calculator.compute_influence_vector_group(train_set)
         assert influence_group.shape == (1, 650)
-        influence_group_values = influence_calculator.compute_influence_values_group(
+        influence_group_values = influence_calculator.estimate_influence_values_group(
             train_set,
             tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).take(50).batch(5)
         )

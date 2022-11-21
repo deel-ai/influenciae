@@ -169,7 +169,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
 
         return interactions.get_single_element()
 
-    def compute_influence_values_group(
+    def estimate_influence_values_group(
             self,
             group_train: tf.data.Dataset,
             group_to_evaluate: Optional[tf.data.Dataset] = None

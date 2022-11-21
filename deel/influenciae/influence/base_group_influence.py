@@ -100,7 +100,7 @@ class BaseGroupInfluenceCalculator(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def compute_influence_values_group(
+    def estimate_influence_values_group(
             self,
             group_train: tf.data.Dataset,
             group_to_evaluate: Optional[tf.data.Dataset] = None
