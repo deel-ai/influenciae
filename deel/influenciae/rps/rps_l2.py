@@ -24,6 +24,13 @@ class RepresenterPointL2(BaseInfluenceCalculator):
     A class implementing a method to compute the influence of training points through
     the representer point theorem for kernels.
 
+    It builds a kernel that approximates the model's last layer such that for a training
+    point x_i and a test point x_t with label y_t:
+
+    y_t = sum_i k(alpha_i, x_i, x_t)
+
+    Disclaimer: This method only works on classification problems!
+
     Parameters
     ----------
     model
@@ -60,7 +67,6 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         self.scaling_factor = scaling_factor
         self.epochs = epochs
         self.linear_layer = None
-        self.weight_matrix_ds = None
         self._train_last_layer(self.epochs)
 
     def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
@@ -79,12 +85,13 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         Returns
         -------
         influence_vectors
-            A tensor with the influence for each sample.
+            A tensor with a concatenation of the alpha weights and the feature maps for each sample.
+            This allows for optimizations to be put in place but is not really an influence vector
+            of any kind.
         """
         x_batch = self.feature_extractor(train_samples[:-1])
-        alpha = self._compute_gradients(x_batch, train_samples[-1])
-        x_batch = tf.reshape(x_batch, (tf.shape(x_batch)[0], -1))
-        influence_vectors = tf.repeat(tf.expand_dims(alpha, axis=1), tf.shape(x_batch)[-1], axis=-1) * x_batch
+        alpha = self._compute_alpha(x_batch, train_samples[-1])
+        influence_vectors = tf.concat((alpha, x_batch), axis=0)
 
         return influence_vectors
 
@@ -102,7 +109,10 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         evaluate_vect
             The preprocessed sample
         """
-        evaluate_vect = self.feature_extractor(samples[:-1])
+        x_batch = self.feature_extractor(samples[:-1])
+        y_t = tf.argmax(self.model(samples), axis=1)
+        evaluate_vect = tf.concat((x_batch, y_t), axis=0)
+
         return evaluate_vect
 
     def _estimate_influence_value_from_influence_vector(
@@ -119,12 +129,26 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             A tensor with a pre-processed sample to evaluate.
         influence_vector
             A tensor with the training influence vector.
+
         Returns
         -------
         influence_values
             A tensor with influence values for the (batch of) test samples.
         """
-        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
+        # In this case, the influence vector is simply the alpha vector
+        feature_maps_dim = preproc_test_sample.shape[1] - 1
+        alpha_indices = tf.range(0, influence_vector.shape[1] - feature_maps_dim, dtype=tf.int32)
+        feature_maps_train_indices = tf.range(influence_vector.shape[1] - feature_maps_dim, influence_vector.shape[1],
+                                              dtype=tf.int32)
+        feature_maps_test_indices = tf.range(0, feature_maps_dim, dtype=tf.int32)
+        labels_test_indices = feature_maps_dim + 1
+        alpha = tf.gather(influence_vector, alpha_indices, axis=1, batch_dims=1)
+        feature_maps_train = tf.gather(influence_vector, feature_maps_train_indices, axis=1)
+        feature_maps_test = tf.gather(preproc_test_sample, feature_maps_test_indices, axis=1)
+        labels_test = tf.gather(preproc_test_sample, labels_test_indices, axis=1)
+        influence_values = tf.gather(alpha, tf.argmax(labels_test, axis=1), axis=1, batch_dims=1) * \
+                           tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
+
         return influence_values
 
     def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
@@ -142,11 +166,20 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             A tensor with the self-influence of the training samples.
         """
         x_batch = self.feature_extractor(train_samples[:-1])
-        influence_values = self._compute_gradients(x_batch, train_samples[-1])
+        alpha = self._compute_alpha(x_batch, train_samples[-1])
 
-        influence_values = tf.expand_dims(influence_values, axis=1)
+        # If the problem is binary classification, take all the alpha values
+        # If multiclass, take only those that correspond to the prediction
+        out_shape = self.model.output_shape
+        if len(out_shape) == 1:
+            influence_values = alpha
+        elif out_shape[1] == 1:
+            influence_values = alpha
+        else:
+            indices = tf.argmax(tf.squeeze(self.model(train_samples[:-1])), axis=1)
+            influence_values = tf.gather(alpha, indices)
 
-        return influence_values
+        return tf.abs(influence_values)
 
     def _train_last_layer(self, epochs: int):
         """
@@ -225,10 +258,11 @@ class RepresenterPointL2(BaseInfluenceCalculator):
 
         return surrogate_model
 
-    def _compute_gradients(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+    def _compute_alpha(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         """
-        Computes the gradients of the loss wrt the network's embedding for the point in
-        the provided dataset.
+        Computes the alpha factor for the kernel approximation. This element gives a notion of
+        the resistance that each training data-point towards minimizing the norm of the linear
+        layer's weight matrix. This is essentially this method's notion of influence score.
 
         Parameters
         ----------
@@ -242,12 +276,19 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         alpha
             mean of the gradient
         """
-        logits = self.linear_layer(z_batch)
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(logits)
+            tape.watch(self.linear_layer.weights)
+            logits = self.linear_layer(z_batch)
             loss = self.linear_layer.compiled_loss(y_batch, logits)
-        alpha = tf.reduce_mean(tape.gradient(loss, logits), axis=1)
+        alpha = tape.jacobian(loss, self.linear_layer.weights)[0]
         alpha = tf.divide(alpha, -2. * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype))
+
+        # Now, divide each of the alpha_i by their feature maps
+        alpha = tf.multiply(
+            alpha,
+            tf.repeat(tf.expand_dims(tf.divide(tf.ones_like(z_batch), z_batch), axis=-1), alpha.shape[-1], axis=-1)
+        )  # Do the multiplication part of the inner product
+        alpha = tf.reduce_sum(alpha, axis=1)  # Now do the sum
 
         return alpha
 

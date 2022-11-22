@@ -43,40 +43,67 @@ def test_surrogate_model():
 
 def test_gradients():
     x_train = tf.random.normal((100, 32, 32, 3), dtype=tf.float32)
-    y_train = tf.random.categorical(tf.math.log([[0.5, 0.5]]), 100)
-    train_set = tf.data.Dataset.from_tensor_slices((x_train, tf.cast(tf.squeeze(y_train), tf.float32)))
+    y_train = tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100)
+    y_train = tf.one_hot(y_train, depth=4)
+    y_train = tf.cast(tf.squeeze(y_train, axis=0), dtype=tf.float32)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train))
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 4, "valid", activation='relu'),
         tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(1)
+        tf.keras.layers.Dense(4)
     ])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-2),
-        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True,
-                                                reduction=tf.keras.losses.Reduction.NONE),
+        loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True,
+                                                     reduction=tf.keras.losses.Reduction.NONE),
         metrics=['accuracy']
     )
     model.fit(train_set.shuffle(100).batch(32), epochs=40, verbose=0)
-    rps_l2 = RepresenterPointL2(model, train_set.batch(32), lambda_regularization=0.1)
+    lambda_regularization = 0.01
+    rps_l2 = RepresenterPointL2(model, train_set.batch(32), lambda_regularization=lambda_regularization)
     rps_l2._train_last_layer(100)
     surrogate_model = rps_l2.linear_layer
 
     # Compute gradients symbolically for the cross-entropy and compare to AD
-    preds = surrogate_model(rps_l2.feature_extractor(x_train))
-    ground_truth_gradients = tf.transpose(tf.nn.sigmoid(preds)) - tf.cast(y_train, tf.float32)
+    feature_maps = rps_l2.feature_extractor(x_train)
+    preds = surrogate_model(feature_maps)
+    # y * log ( logits) + (1-y) * log(1 + logits)
+    #
+
+    ground_truth_gradients = tf.matmul(tf.expand_dims(feature_maps, axis=-1),
+                                       tf.reshape(tf.nn.softmax(preds, axis=1) - y_train, (y_train.shape[0], 1, -1)))
+    print(tf.shape(ground_truth_gradients))
+    ground_truth_influence = tf.divide(ground_truth_gradients,
+                                       -2. * lambda_regularization * tf.cast(y_train.shape[0], tf.float32))
+    print(tf.shape(ground_truth_influence))
+    ground_truth_influence = tf.reduce_sum(
+        tf.multiply(
+            ground_truth_influence,
+            tf.repeat(tf.expand_dims(tf.divide(tf.ones_like(feature_maps), feature_maps), axis=-1),
+                      ground_truth_influence.shape[-1], axis=-1)
+            ),
+        axis=1
+    )
+    print(tf.shape(ground_truth_influence))
+
     gradients = []
-    for x, y in train_set.batch(16):
+    for x, y in train_set.batch(32):
         z = rps_l2.feature_extractor(x)
-        g = rps_l2._compute_gradients(z, y)
-        g = tf.multiply(g, -2. * rps_l2.lambda_regularization * tf.cast(rps_l2.n_train, tf.float32))
+        g = rps_l2._compute_alpha(z, y)
         gradients.append(g)
     gradients = tf.concat(gradients, axis=0)
-    assert gradients.shape == (100,)
-    assert tf.reduce_max(tf.abs(ground_truth_gradients - gradients)) < 1e-4
+
+    ###
+    print(f'grads = {gradients}')
+    print(f'gt grads = {ground_truth_influence}')
+    ###
+    assert gradients.shape == (100, 4)
+    assert tf.reduce_max(tf.abs(ground_truth_influence - gradients)) < 1e-4
 
 
 def test_influence_values():
+    # Test for binary classification first
     x_train = tf.random.normal((100, 32, 32, 3), dtype=tf.float32)
     y_train = tf.random.categorical(tf.math.log([[0.5, 0.5]]), 100)
     train_set = tf.data.Dataset.from_tensor_slices((x_train, tf.cast(tf.squeeze(y_train), tf.float32)))
@@ -99,10 +126,77 @@ def test_influence_values():
     surrogate_model = rps_l2.linear_layer
 
     # Compute influence values symbolically
-    preds = surrogate_model(rps_l2.feature_extractor(x_train))
-    ground_truth_gradients = tf.transpose(tf.nn.sigmoid(preds)) - tf.cast(y_train, tf.float32)
+    feature_maps = rps_l2.feature_extractor(x_train)
+    preds = surrogate_model(feature_maps)
+    ground_truth_gradients = tf.matmul(feature_maps, tf.nn.sigmoid(preds) - tf.cast(y_train, tf.float32),
+                                       transpose_a=True)
     ground_truth_influence = tf.divide(ground_truth_gradients,
-                                       -2. * lambda_regularization * tf.cast(y_train.shape[1], tf.float32))
+                                       -2. * lambda_regularization * tf.cast(y_train.shape[0], tf.float32))
+    ground_truth_influence = tf.reduce_sum(
+        tf.multiply(
+            tf.transpose(ground_truth_influence),
+            tf.divide(tf.ones_like(feature_maps), feature_maps)
+        ),
+        axis=1
+    )
+
+    ###
+    print(f'gradients shape = {ground_truth_gradients.shape}')
+    print(f'influence shape = {ground_truth_influence.shape}')
+    ###
+
+    # Compare to the values from AD
+    influence = rps_l2._compute_influence_values(train_set.batch(20))
+    ###
+    print(f'influence final = {influence.shape}')
+    ###
+
+    assert tf.reduce_max(tf.abs(ground_truth_influence - tf.squeeze(influence))) < 1e-3
+
+    # Now test for multi-class classification
+    y_train = tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100)
+    y_train = tf.one_hot(y_train, depth=4)
+    y_train = tf.cast(tf.squeeze(y_train, axis=0), dtype=tf.float32)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(32, 32, 3)),
+        tf.keras.layers.Conv2D(16, 3, 4, "valid", activation='relu'),
+        tf.keras.layers.GlobalAveragePooling2D(),
+        tf.keras.layers.Dense(4)
+    ])
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(1e-2),
+        loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True,
+                                                     reduction=tf.keras.losses.Reduction.NONE),
+        metrics=['accuracy']
+    )
+    model.fit(train_set.shuffle(100).batch(32), epochs=40, verbose=0)
+    lambda_regularization = 0.1
+    rps_l2 = RepresenterPointL2(model, train_set.batch(20), lambda_regularization=lambda_regularization)
+    rps_l2._train_last_layer(100)
+    surrogate_model = rps_l2.linear_layer
+
+    # Compute influence values symbolically
+    pred_indices = tf.argmax(model(x_train), axis=1)
+    feature_maps = rps_l2.feature_extractor(x_train)
+    preds = surrogate_model(feature_maps)
+    ground_truth_gradients = tf.matmul(tf.expand_dims(feature_maps, axis=-1),
+                                       tf.reshape(tf.expand_dims(tf.nn.softmax(preds, axis=1), axis=1) - tf.expand_dims(
+                                           y_train, axis=-1),
+                                                  (y_train.shape[0], 1, -1)))
+    gradient_indices = [0, 5, 10, 15]
+    ground_truth_gradients = tf.gather(ground_truth_gradients, gradient_indices, axis=-1)
+    ground_truth_influence = tf.divide(ground_truth_gradients,
+                                       -2. * lambda_regularization * tf.cast(y_train.shape[0], tf.float32))
+    ground_truth_influence = tf.reduce_sum(
+        tf.multiply(
+            ground_truth_influence,
+            tf.repeat(tf.expand_dims(tf.divide(tf.ones_like(feature_maps), feature_maps), axis=-1),
+                      ground_truth_influence.shape[-1], axis=-1)
+        ),
+        axis=1
+    )
+    ground_truth_influence = tf.gather(ground_truth_influence, pred_indices, axis=1, batch_dims=1)
 
     # Compare to the values from AD
     influence = rps_l2._compute_influence_values(train_set.batch(20))
