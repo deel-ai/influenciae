@@ -1,3 +1,7 @@
+# Copyright IRT Antoine de Saint Exupéry et Université Paul Sabatier Toulouse III - All
+# rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
+# CRIAQ and ANITI - https://www.deel.ai/
+# =====================================================================================
 """ResNet v1, v2, and segmentation models for Keras.
 
 # Reference
@@ -18,26 +22,33 @@ Implementation Adapted from: github.com/keras-team/keras-contrib
 """
 import six
 
-from tensorflow.keras.models import Model # pylint: disable=E0611
-from tensorflow.keras.layers import Input # pylint: disable=E0611
-from tensorflow.keras.layers import Activation # pylint: disable=E0611
-from tensorflow.keras.layers import Reshape # pylint: disable=E0611
-from tensorflow.keras.layers import Dense # pylint: disable=E0611
-from tensorflow.keras.layers import Conv2D # pylint: disable=E0611
-from tensorflow.keras.layers import MaxPooling2D # pylint: disable=E0611
-from tensorflow.keras.layers import GlobalMaxPooling2D # pylint: disable=E0611
-from tensorflow.keras.layers import GlobalAveragePooling2D # pylint: disable=E0611
-from tensorflow.keras.layers import Dropout # pylint: disable=E0611
-from tensorflow.keras.layers import Add # pylint: disable=E0611
-from tensorflow.keras.layers import BatchNormalization # pylint: disable=E0611
-from tensorflow.keras.layers import ReLU # pylint: disable=E0611
-from tensorflow.keras.regularizers import l2 # pylint: disable=E0611
-from tensorflow.keras import backend as K # pylint: disable=E0611
+from tensorflow.keras import Model
+from tensorflow.keras import backend as K
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.layers import (
+    Input,
+    Activation,
+    Reshape,
+    ReLU,
+    Dense,
+    Conv2D,
+    MaxPooling2D,
+    GlobalMaxPooling2D,
+    GlobalAveragePooling2D,
+    Dropout,
+    Add,
+    BatchNormalization
+)
 
 
 def _bn_relu(x, bn_name=None, relu_name=None):
-    """Helper to build a BN -> relu block
     """
+    Helper to build a BN -> relu block
+    """
+    if K.image_data_format() == 'channels_last':
+        CHANNEL_AXIS = 3
+    else:
+        CHANNEL_AXIS = 1
     norm = BatchNormalization(axis=CHANNEL_AXIS, name=bn_name)(x)
     return Activation("relu", name=relu_name)(norm)
 
@@ -45,15 +56,16 @@ def _bn_relu(x, bn_name=None, relu_name=None):
 def get_Conv2D(filters, kernel_size=(3, 3), padding='circular', activation=ReLU, use_bias=True, strides=(1, 1),
                name=None):
     """
-    TODO:Docs
+    Helper to build Convolutional layers
     """
     return Conv2D(filters=filters, kernel_size=kernel_size, padding=padding, activation=activation,
                    use_bias=use_bias, strides=strides, name=name)
 
 
 def _conv_bn_relu(**conv_params):
-    """Helper to build a conv -> BN -> relu residual unit activation function.
-       This is the original ResNet v1 scheme in https://arxiv.org/abs/1512.03385
+    """
+    Helper to build a conv -> BN -> relu residual unit activation function.
+    This is the original ResNet v1 scheme in https://arxiv.org/abs/1512.03385
     """
     filters = conv_params["filters"]
     kernel_size = conv_params["kernel_size"]
@@ -80,7 +92,8 @@ def _conv_bn_relu(**conv_params):
 
 
 def _bn_relu_conv(**conv_params):
-    """Helper to build a BN -> relu -> conv residual unit with full pre-activation
+    """
+    Helper to build a BN -> relu -> conv residual unit with full pre-activation
     function. This is the ResNet v2 scheme proposed in
     http://arxiv.org/pdf/1603.05027v2.pdf
     """
@@ -108,13 +121,23 @@ def _bn_relu_conv(**conv_params):
 
 
 def _shortcut(input_feature, residual, conv_name_base=None, bn_name_base=None):
-    """Adds a shortcut between input and residual block and merges them with "sum"
+    """
+    Adds a shortcut between input and residual block and merges them with "sum"
     """
     # Expand channels of shortcut to match residual.
     # Stride appropriately to match residual (width, height)
     # Should be int if network architecture is correctly configured.
     input_shape = K.int_shape(input_feature)
     residual_shape = K.int_shape(residual)
+    # Figure out the ordering of the channels
+    if K.image_data_format() == 'channels_last':
+        ROW_AXIS = 1
+        COL_AXIS = 2
+        CHANNEL_AXIS = 3
+    else:
+        CHANNEL_AXIS = 1
+        ROW_AXIS = 2
+        COL_AXIS = 3
     stride_width = int(round(input_shape[ROW_AXIS] / residual_shape[ROW_AXIS]))
     stride_height = int(round(input_shape[COL_AXIS] / residual_shape[COL_AXIS]))
     equal_channels = input_shape[CHANNEL_AXIS] == residual_shape[CHANNEL_AXIS]
@@ -144,13 +167,14 @@ def _residual_block(block_function, filters, blocks, stage,
                     transition_strides=None, transition_dilation_rates=None,
                     dilation_rates=None, is_first_layer=False, dropout=None,
                     residual_unit=_bn_relu_conv):
-    """Builds a residual block with repeating bottleneck blocks.
+    """
+    Builds a residual block with repeating bottleneck blocks.
 
-       stage: integer, current stage label, used for generating layer names
-       blocks: number of blocks 'a','b'..., current block label, used for generating
+    stage: integer, current stage label, used for generating layer names
+    blocks: number of blocks 'a','b'..., current block label, used for generating
             layer names
-       transition_strides: a list of tuples for the strides of each transition
-       transition_dilation_rates: a list of tuples for the dilation rate of each
+    transition_strides: a list of tuples for the strides of each transition
+    transition_dilation_rates: a list of tuples for the dilation rate of each
             transition
     """
     if transition_dilation_rates is None:
@@ -175,23 +199,25 @@ def _residual_block(block_function, filters, blocks, stage,
 
 
 def _block_name_base(stage, block):
-    """Get the convolution name base and batch normalization name base defined by
+    """
+    Get the convolution name base and batch normalization name base defined by
     stage and block.
 
     If there are less than 26 blocks they will be labeled 'a', 'b', 'c' to match the
     paper and keras and beyond 26 blocks they will simply be numbered.
     """
     if block < 27:
-        block = '%c' % (block + 97)  # 97 is the ascii number for lowercase 'a'
+        block = '%c' % (block + 97)  # 97 is the ascii number for lowercase 'a'  # pylint: disable=C0209
     conv_name_base = f'res{stage}{block}_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
+    bn_name_base = f'bn{stage}{block}_branch'
     return conv_name_base, bn_name_base
 
 
 def basic_block(filters, stage, block, transition_strides=(1, 1),
                 dilation_rate=(1, 1), is_first_block_of_first_layer=False, dropout=None,
                 residual_unit=_bn_relu_conv):
-    """Basic 3 X 3 convolution blocks for use on resnets with layers <= 34.
+    """
+    Basic 3 X 3 convolution blocks for use on resnets with layers <= 34.
     Follows improved proposed scheme in http://arxiv.org/pdf/1603.05027v2.pdf
     """
 
@@ -228,10 +254,12 @@ def basic_block(filters, stage, block, transition_strides=(1, 1),
 def bottleneck(filters, stage, block, transition_strides=(1, 1),
                dilation_rate=(1, 1), is_first_block_of_first_layer=False, dropout=None,
                residual_unit=_bn_relu_conv):
-    """Bottleneck architecture for > 34 layer resnet.
+    """
+    Bottleneck architecture for > 34 layer resnet.
     Follows improved proposed scheme in http://arxiv.org/pdf/1603.05027v2.pdf
 
-    Returns:
+    Returns
+    -------
         A final conv layer of filters * 4
     """
 
@@ -272,20 +300,6 @@ def bottleneck(filters, stage, block, transition_strides=(1, 1),
     return f
 
 
-def _handle_dim_ordering():
-    global ROW_AXIS
-    global COL_AXIS
-    global CHANNEL_AXIS
-    if K.image_data_format() == 'channels_last':
-        ROW_AXIS = 1
-        COL_AXIS = 2
-        CHANNEL_AXIS = 3
-    else:
-        CHANNEL_AXIS = 1
-        ROW_AXIS = 2
-        COL_AXIS = 3
-
-
 def _string_to_function(identifier):
     if isinstance(identifier, six.string_types):
         res = globals().get(identifier)
@@ -295,14 +309,16 @@ def _string_to_function(identifier):
     return identifier
 
 
-def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
+def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',  # pylint: disable=R0912 disable=R0913 disable=R0915
            repetitions=None, initial_filters=64, activation='softmax', include_top=True,
            input_tensor=None, dropout=None, transition_dilation_rate=(1, 1),
            initial_strides=(1, 1), initial_kernel_size=(3, 3), initial_pooling='max',
-           final_pooling='avg', top='classification'): # pylint: disable=R0912
-    """Builds a custom ResNet like architecture. Defaults to ResNet50 v2.
+           final_pooling='avg', top='classification'):
+    """
+    Builds a custom ResNet like architecture. Defaults to ResNet50 v2.
 
-    Args:
+    Parameters
+    ----------
         input_shape: optional shape tuple, only to be specified
             if `include_top` is False (otherwise the input shape
             has to be `(224, 224, 3)` (with `channels_last` dim ordering)
@@ -349,7 +365,8 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
             problems like the Pascal VOC dataset, and None to exclude these layers
             entirely.
 
-    Returns:
+    Returns
+    -------
         The keras `Model`.
     """
     if activation not in ['softmax', 'sigmoid', None]:
@@ -359,7 +376,6 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
     if repetitions is None:
         repetitions = [3, 4, 6, 3]
     # Determine proper input shape
-    _handle_dim_ordering()
     if len(input_shape) != 3:
         raise Exception("Input shape should be a tuple (nb_channels, nb_rows, nb_cols)")
 
@@ -378,21 +394,12 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
         residual_unit = _conv_bn_relu
     elif isinstance(residual_unit, six.string_types):
         residual_unit = _string_to_function(residual_unit)
-    else:
-        residual_unit = residual_unit
 
     # Permute dimension order if necessary
     if K.image_data_format() == 'channels_first':
         input_shape = (input_shape[1], input_shape[2], input_shape[0])
-    # Determine proper input shape
-    """
-    input_shape = _obtain_input_shape(input_shape,
-                                      default_size=32,
-                                      min_size=8,
-                                      data_format=K.image_data_format(),
-                                      require_flatten=include_top)
-    """
 
+    # Determine proper input shape
     img_input = Input(shape=input_shape, tensor=input_tensor)
     x = _conv_bn_relu(filters=initial_filters, kernel_size=initial_kernel_size,
                       strides=initial_strides)(

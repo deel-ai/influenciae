@@ -141,6 +141,32 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         sample_evaluate_grads = self.model.batch_jacobian_tensor(samples)
         return sample_evaluate_grads
 
+    def _estimate_individual_influence_values_from_batch(
+            self,
+            train_samples: Tuple[tf.Tensor, ...],
+            samples_to_evaluate: Tuple[tf.Tensor, ...]
+    ) -> tf.Tensor:
+        """
+        Estimate the (individual) influence scores of a single batch of samples with respect to
+        a batch of samples belonging to the model's training dataset.
+
+        Parameters
+        ----------
+        train_samples
+            A single batch of training samples (and their target values).
+        samples_to_evaluate
+            A single batch of samples of which we wish to compute the influence of removing the training
+            samples.
+
+        Returns
+        -------
+        A tensor containing the individual influence scores.
+        """
+        return self._estimate_influence_value_from_influence_vector(
+            self._preprocess_samples(samples_to_evaluate),
+            self._compute_influence_vector(train_samples)
+        )
+
     @tf.function
     def _estimate_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
                                                         influence_vector: tf.Tensor) -> tf.Tensor:

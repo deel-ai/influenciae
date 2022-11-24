@@ -15,7 +15,7 @@ influence and does so through the method presented in
 https://arxiv.org/abs/1911.00418
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import tensorflow as tf
 
 from ..common import InfluenceModel
@@ -25,7 +25,7 @@ from ..utils import dataset_size
 from ..types import Optional, Union
 
 
-class BaseGroupInfluenceCalculator(ABC):
+class BaseGroupInfluenceCalculator:
     """
     A base class for objects that calculate the different quantities related to influence
     functions for whole groups of data-points.

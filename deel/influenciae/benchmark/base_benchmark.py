@@ -15,7 +15,7 @@ import json
 
 import tensorflow as tf
 import numpy as np
-from tensorflow.keras.optimizers import Optimizer  # pylint: disable=E0611
+from tensorflow.keras.optimizers import Optimizer
 
 from .influence_factory import InfluenceCalculatorFactory
 from ..types import Tuple, Dict, Any, Optional, List
