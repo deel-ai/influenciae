@@ -5,9 +5,11 @@
 """
 Test CIFAR-10 Benchmark module
 """
+import numpy as np
+from tensorflow.keras.losses import Reduction, CategoricalCrossentropy
+
 from deel.influenciae.benchmark.influence_factory import TracInFactory, RPSLJEFactory, FirstOrderFactory, RPSL2Factory
 from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MislabelingDetectorEvaluator
-import numpy as np
 
 
 def test_first_order_exact():
@@ -99,7 +101,8 @@ def test_rps_l2():
                                                             take_batch=take_batch,
                                                             verbose_training=False)
 
-    influence_factory = RPSL2Factory(10.0)
+    influence_factory = RPSL2Factory(CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
+                                     lambda_regularization=10.0)
     result = cifar10_evaluator.evaluate(influence_factory=influence_factory, nbr_of_evaluation=2, verbose=False)
     assert np.shape(result[0]) == (2, take_batch)
     assert np.shape(result[1]) == (take_batch,)
