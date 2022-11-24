@@ -97,7 +97,6 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         """
         x_batch = self.feature_extractor(train_samples[:-1])
         alpha = self._compute_alpha(x_batch, train_samples[-1])
-        # influence_vectors = tf.concat((alpha, x_batch), axis=0)
 
         return alpha, x_batch
 
@@ -117,9 +116,34 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         """
         x_batch = self.feature_extractor(samples[:-1])
         y_t = tf.argmax(self.model(samples[:-1]), axis=1)
-        # evaluate_vect = tf.concat((x_batch, y_t), axis=0)
 
         return x_batch, y_t
+
+    def _estimate_individual_influence_values_from_batch(
+            self,
+            train_samples: Tuple[tf.Tensor, ...],
+            samples_to_evaluate: Tuple[tf.Tensor, ...]
+    ) -> tf.Tensor:
+        """
+        Estimate the (individual) influence scores of a single batch of samples with respect to
+        a batch of samples belonging to the model's training dataset.
+
+        Parameters
+        ----------
+        train_samples
+            A single batch of training samples (and their target values).
+        samples_to_evaluate
+            A single batch of samples of which we wish to compute the influence of removing the training
+            samples.
+
+        Returns
+        -------
+        A tensor containing the individual influence scores.
+        """
+        return self._estimate_influence_value_from_influence_vector(
+            self._preprocess_samples(samples_to_evaluate),
+            self._compute_influence_vector(train_samples)
+        )
 
     def _estimate_influence_value_from_influence_vector(
             self,
