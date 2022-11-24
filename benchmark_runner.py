@@ -1,6 +1,13 @@
+# Copyright IRT Antoine de Saint Exupéry et Université Paul Sabatier Toulouse III - All
+# rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
+# CRIAQ and ANITI - https://www.deel.ai/
+# =====================================================================================
+import argparse
+
+from tensorflow.keras.losses import CategoricalCrossentropy, Reduction
+
 from deel.influenciae.benchmark.influence_factory import TracInFactory, RPSLJEFactory, FirstOrderFactory, RPSL2Factory
 from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MislabelingDetectorEvaluator
-import argparse
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -80,7 +87,8 @@ if __name__ == '__main__':
         elif method_name == 'tracein':
             influence_factory = TracInFactory()
         elif method_name == 'rps_l2':
-            influence_factory = RPSL2Factory(args.lambda_regularization,
+            influence_factory = RPSL2Factory(CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
+                                             args.lambda_regularization,
                                              args.scaling_factor,
                                              args.layer_index,
                                              args.epochs_rpsl2)

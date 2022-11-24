@@ -10,7 +10,7 @@ from abc import abstractmethod
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
+from tensorflow.keras.losses import Loss, Reduction  # pylint: disable=E0611
 
 from ..common import InfluenceModel, BaseInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP
@@ -254,6 +254,8 @@ class RPSL2Factory(InfluenceCalculatorFactory):
 
     Attributes
     ----------
+    loss_function
+        The loss function with which the model was trained. This loss function MUST NOT be reduced.
     lambda_regularization
         The strength of the L2 regularization to add to the surrogate last layer.
     scaling_factor
@@ -266,7 +268,15 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         100 is chosen.
     """
 
-    def __init__(self, lambda_regularization: float, scaling_factor: float = 0.1, layer_index=-2, epochs: int = 100):
+    def __init__(
+            self,
+            loss_function: Union[Callable[[tf.Tensor, tf.Tensor], tf.Tensor], Loss],
+            lambda_regularization: float,
+            scaling_factor: float = 0.1,
+            layer_index=-2,
+            epochs: int = 100
+    ):
+        self.loss_function = loss_function
         self.lambda_regularization = lambda_regularization
         self.scaling_factor = scaling_factor
         self.epochs = epochs
@@ -293,6 +303,7 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         """
         influence_calculator = RepresenterPointL2(model,
                                                   training_dataset,
+                                                  self.loss_function,
                                                   self.lambda_regularization,
                                                   self.scaling_factor,
                                                   self.epochs,
