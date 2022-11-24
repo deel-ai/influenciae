@@ -118,9 +118,14 @@ def assert_inheritance(
     )
     iter_inf_vect = iter(inf_vect_ds)
     (batch_x, batch_y), inf_vect = next(iter_inf_vect)
-    assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
-    assert batch_y.shape == (5, 1) # (train_batch_size, *target_shape)
-    assert inf_vect.shape == (5, nb_params) # (train_batch_size, nb_params)
+    assert batch_x.shape == (5, 5, 5, 3)  # (train_batch_size, *input_shape)
+    assert batch_y.shape == (5, 1)  # (train_batch_size, *target_shape)
+    if isinstance(inf_vect, tuple):  # when testing rps_l2
+        inf_vect, z_batch = inf_vect
+        assert inf_vect.shape == (5, 1)
+        assert z_batch.shape == (5, 64)
+    else:
+        assert inf_vect.shape == (5, nb_params) # (train_batch_size, nb_params)
 
     # compute_influence_values_dataset
     inf_values_dataset = method.compute_influence_values(

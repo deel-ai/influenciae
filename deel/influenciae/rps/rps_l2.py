@@ -10,11 +10,11 @@ https://arxiv.org/abs/1811.09720
 import tensorflow as tf
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
-from tensorflow.keras.losses import MeanSquaredError
+from tensorflow.keras.losses import MeanSquaredError, Loss, Reduction
 from tensorflow.keras.regularizers import L2
 
 from ..common import BaseInfluenceCalculator
-from ..types import Tuple, Callable
+from ..types import Tuple, Callable, Union
 
 from ..utils import assert_batched_dataset, BacktrackingLineSearch, dataset_size
 
@@ -37,6 +37,8 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         A TF2 model that has already been trained
     train_set
         A batched TF dataset with the points with which the model was trained
+    loss_function
+        The loss function with which the model was trained. This loss function MUST NOT be reduced.
     lambda_regularization
         The coefficient for the regularization of the surrogate last layer that needs
         to be trained for this method
@@ -53,12 +55,16 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             self,
             model: Model,
             train_set: tf.data.Dataset,
+            loss_function: Union[Callable[[tf.Tensor, tf.Tensor], tf.Tensor], Loss],
             lambda_regularization: float,
             scaling_factor: float = 0.1,
             epochs: int = 100,
             layer_index: int = -2,
     ):
         assert_batched_dataset(train_set)
+        if hasattr(loss_function, 'reduction'):
+            assert loss_function.reduction == Reduction.NONE
+        self.loss_function = loss_function
         self.n_train = dataset_size(train_set)
         self.feature_extractor = Model(inputs=model.input, outputs=model.layers[layer_index].output)
         self.model = model
@@ -91,9 +97,9 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         """
         x_batch = self.feature_extractor(train_samples[:-1])
         alpha = self._compute_alpha(x_batch, train_samples[-1])
-        influence_vectors = tf.concat((alpha, x_batch), axis=0)
+        # influence_vectors = tf.concat((alpha, x_batch), axis=0)
 
-        return influence_vectors
+        return alpha, x_batch
 
     def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
@@ -110,10 +116,10 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             The preprocessed sample
         """
         x_batch = self.feature_extractor(samples[:-1])
-        y_t = tf.argmax(self.model(samples), axis=1)
-        evaluate_vect = tf.concat((x_batch, y_t), axis=0)
+        y_t = tf.argmax(self.model(samples[:-1]), axis=1)
+        # evaluate_vect = tf.concat((x_batch, y_t), axis=0)
 
-        return evaluate_vect
+        return x_batch, y_t
 
     def _estimate_influence_value_from_influence_vector(
             self,
@@ -135,19 +141,16 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         influence_values
             A tensor with influence values for the (batch of) test samples.
         """
-        # In this case, the influence vector is simply the alpha vector
-        feature_maps_dim = preproc_test_sample.shape[1] - 1
-        alpha_indices = tf.range(0, influence_vector.shape[1] - feature_maps_dim, dtype=tf.int32)
-        feature_maps_train_indices = tf.range(influence_vector.shape[1] - feature_maps_dim, influence_vector.shape[1],
-                                              dtype=tf.int32)
-        feature_maps_test_indices = tf.range(0, feature_maps_dim, dtype=tf.int32)
-        labels_test_indices = feature_maps_dim + 1
-        alpha = tf.gather(influence_vector, alpha_indices, axis=1, batch_dims=1)
-        feature_maps_train = tf.gather(influence_vector, feature_maps_train_indices, axis=1)
-        feature_maps_test = tf.gather(preproc_test_sample, feature_maps_test_indices, axis=1)
-        labels_test = tf.gather(preproc_test_sample, labels_test_indices, axis=1)
-        influence_values = tf.gather(alpha, tf.argmax(labels_test, axis=1), axis=1, batch_dims=1) * \
+        # Extract the different information inside the tuples
+        feature_maps_test, labels_test = preproc_test_sample
+        alpha, feature_maps_train = influence_vector
+
+        if len(alpha.shape) == 1 or (len(alpha.shape) == 2 and alpha.shape[1] == 1):
+            influence_values = alpha * tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
+        else:
+            influence_values = tf.gather(alpha, tf.argmax(labels_test, axis=1), axis=1, batch_dims=1) * \
                            tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
+        influence_values = tf.transpose(influence_values)
 
         return influence_values
 
@@ -173,11 +176,14 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         out_shape = self.model.output_shape
         if len(out_shape) == 1:
             influence_values = alpha
-        elif out_shape[1] == 1:
+        elif len(out_shape) == 2 and out_shape[1] == 1:
             influence_values = alpha
         else:
-            indices = tf.argmax(tf.squeeze(self.model(train_samples[:-1])), axis=1)
-            influence_values = tf.gather(alpha, indices)
+            if len(out_shape) > 2:
+                indices = tf.argmax(tf.squeeze(self.model(train_samples[:-1]), axis=-1), axis=1)
+            else:
+                indices = tf.argmax(self.model(train_samples[:-1]), axis=1)
+            influence_values = tf.gather(alpha, indices, axis=1, batch_dims=1)
 
         return tf.abs(influence_values)
 
@@ -196,8 +202,7 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         self.linear_layer = self._create_surrogate_model()
         optimizer = BacktrackingLineSearch(batches_per_epoch=self.n_train / self.train_set._batch_size,  # pylint: disable=W0212
                                            scaling_factor=self.scaling_factor)  # the optimizer used in the paper's code
-        loss_function = self.model.compiled_loss._losses[0] if \
-            isinstance(self.model.compiled_loss._losses, list) else self.model.compiled_loss  # pylint: disable=W0212
+        loss_function = self.loss_function
         mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
         self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
