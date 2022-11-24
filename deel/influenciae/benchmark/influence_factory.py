@@ -120,7 +120,6 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         if self.ihvp_mode == 'exact':
             ihvp_calculator = ExactIHVP(influence_model, dataset_hessian)
         elif self.ihvp_mode == 'cgd':
-            # TODO: feature extractor
             ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, self.feature_extractor, dataset_hessian,
                                                            self.n_cgd_iters)
         else:
@@ -198,7 +197,6 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         if self.ihvp_mode == 'exact':
             ihvp_calculator_factory = ExactIHVPFactory()
         elif self.ihvp_mode == 'cgd':
-            # TODO: feature extractor
             ihvp_calculator_factory = CGDIHVPFactory(self.feature_extractor, self.n_cgd_iters)
         else:
             raise Exception("unknown ihvp calculator=" + self.ihvp_mode)

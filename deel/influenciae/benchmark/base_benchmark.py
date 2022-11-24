@@ -15,7 +15,7 @@ import json
 
 import tensorflow as tf
 import numpy as np
-from tensorflow.keras.optimizers import Optimizer  # pylint: disable=E0611
+from tensorflow.keras.optimizers import Optimizer
 
 from .influence_factory import InfluenceCalculatorFactory
 from ..types import Tuple, Dict, Any, Optional, List
@@ -231,7 +231,6 @@ class MislabelingDetectorEvaluator:
                 file_writer = tf.summary.create_file_writer(path_to_save + "/" + method_name + "/seed" + str(index),
                                                             filename_suffix=experiment_name)
                 tf_writer = file_writer.as_default()
-                tf_writer.__enter__()
 
             tf.keras.backend.clear_session()
             self.set_seed(seed + index)
@@ -246,7 +245,6 @@ class MislabelingDetectorEvaluator:
                 self.test_batch_size,
                 log_path=None if path_to_save is None else path_to_save + "/" + method_name + "/seed" + str(index))
 
-            # TODO: add a shuffle avant???
             influence_calculator = influence_factory.build(
                 noisy_training_dataset.shuffle(1000).batch(self.influence_batch_size), model, data_train)
 
@@ -265,16 +263,13 @@ class MislabelingDetectorEvaluator:
                     acc_test) + " | roc=" + str(roc))
 
             if use_tensorboard:
-                tf.summary.scalar("roc_value", roc, index)
-                self.plot_tensorboard_roc(sorted_curve, "roc_curve")
+                with tf_writer:
+                    tf.summary.scalar("roc_value", roc, index)
+                    self.plot_tensorboard_roc(sorted_curve, "roc_curve")
 
             if path_to_save is not None:
                 curves_, mean_curve_, roc_ = self.__build(curves)
                 self.__save(path_to_save + "/" + method_name + "/data.npy", curves_, mean_curve_, roc_)
-
-            if use_tensorboard:
-                tf_writer.__exit__()
-                file_writer.close()
 
         curves, mean_curve, roc = self.__build(curves)
 

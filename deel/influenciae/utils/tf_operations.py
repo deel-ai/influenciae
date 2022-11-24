@@ -149,9 +149,7 @@ def dataset_to_tensor(dataset: tf.data.Dataset) -> tf.Tensor:
     """
     assert_batched_dataset(dataset)
     if isinstance(dataset.element_spec, Tuple):
-        tensor = []
-        for i, _ in enumerate(dataset.element_spec):
-            tensor.append(list(dataset.map(lambda *w: w[i]).unbatch()))  # pylint: disable=W0612
+        tensor = [list(dataset.map(lambda *w: w[i]).unbatch()) for i in range(len(dataset.element_spec))]  # pylint: disable=W0640
     else:
         tensor = tf.concat(list(dataset), axis=0)
 
