@@ -14,3 +14,7 @@ __version__ = '0.0.2'
 
 from . import influence
 from . import common
+from . import rps
+from . import trac_in
+from . import benchmark
+from . import plots

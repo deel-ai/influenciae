@@ -6,36 +6,19 @@ site_name: Influenciae
 
 nav:
   - Home: index.md
-  - Attributions methods:
-      - Saliency: api/saliency.md
-      - Gradient Input: api/gradient_input.md
-      - Occlusion sensitivity: api/occlusion.md
-      - Rise: api/rise.md
-      - Integrated Gradient: api/integrated_gradients.md
-      - SmoothGrad: api/smoothgrad.md
-      - Grad-CAM: api/grad_cam.md
-      - Grad-CAM++: api/grad_cam_pp.md
-      - DeconvNet: api/deconvnet.md
-      - Guided Backprop: api/guided_backpropagation.md
-      - SquareGrad: api/square_grad.md
-      - VarGrad: api/vargrad.md
-      - Lime: api/lime.md
-      - KernelSHAP: api/kernel_shap.md
-  - Concept based:
-      - Cav: api/cav.md
-      - Tcav: api/tcav.md
-  - Feature visualization: api/feature_viz.md
-  - Attributions metrics:
-      - Deletion: api/deletion.md
-      - Insertion: api/insertion.md
-      - MuFidelity: api/mu_fidelity.md
-      - AverageStability: api/avg_stability.md
-  - Contributing: contributing.md
+  - Influence Functions:
+      - First Order Influence Calculator: api/first_order_influence_calculator.md
+      - Second Order Influence Calculator: api/second_order_influence_calculator.md
+  - Representer Point Selection:
+      - Representer Point Selection - L2: api/rps_l2.md
+      - Representer Point Selection - LJE: api/rps_lje.md
+  - TracIn: api/tracin.md
+  - Benchmarks: api/benchmarks.md
 
 theme:
   name: "material"
-  logo: assets/x_logo.png
-  favicon: assets/x_logo.png
+  logo: assets/LogoInfluenciae.png
+  favicon: assets/LogoInfluenciae.png
   palette:
     - scheme: default
       primary: white
