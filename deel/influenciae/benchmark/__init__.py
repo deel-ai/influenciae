@@ -8,3 +8,4 @@ Benchmark module
 
 from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator
 from .influence_factory import InfluenceCalculatorFactory, FirstOrderFactory, RPSLJEFactory, TracInFactory
+from .cifar10_benchmark import Cifar10TrainingProcedure, Cifar10MislabelingDetectorEvaluator
