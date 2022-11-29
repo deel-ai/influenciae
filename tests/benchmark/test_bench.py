@@ -9,7 +9,7 @@ import numpy as np
 from tensorflow.keras.losses import Reduction, CategoricalCrossentropy
 
 from deel.influenciae.benchmark.influence_factory import TracInFactory, RPSLJEFactory, FirstOrderFactory, RPSL2Factory
-from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MislabelingDetectorEvaluator
+from deel.influenciae.benchmark import Cifar10MislabelingDetectorEvaluator
 
 
 def test_first_order_exact():

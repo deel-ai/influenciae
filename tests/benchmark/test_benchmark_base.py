@@ -1,9 +1,11 @@
-from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
-import tensorflow as tf
-from typing import Optional, Tuple, Any
-import numpy as np
 import os
 import shutil
+
+import tensorflow as tf
+import numpy as np
+
+from deel.influenciae.types import Optional, Tuple, Any
+from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
 
 
 class MockTrainingProcedure(BaseTrainingProcedure):
@@ -47,8 +49,9 @@ def test_noise():
 
     assert count - tf.shape(noise_indexes)[1] == 0
 
-    curve = evaluator._MislabelingDetectorEvaluator__compute_curve(sorted_influences_indexes=[2, 6, 3, 4, 5, 1, 7, 8, 9, 10],
-                                                            noisy_label_indexes=[6, 8])
+    curve = evaluator._MislabelingDetectorEvaluator__compute_curve(
+        sorted_influences_indexes=[2, 6, 3, 4, 5, 1, 7, 8, 9, 10], noisy_label_indexes=[6, 8]
+    )
     curve_expected = [0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0]
     assert np.max(np.abs(curve - curve_expected)) < 1E-6
 
