@@ -76,7 +76,8 @@ class SelfInfluenceCalculator:
 
         Returns
         -------
-        A dataset containing the tuple: (batch of training samples, influence score)
+        train_set
+            A dataset containing the tuple: (batch of training samples, influence score)
         """
         train_set = map_to_device(train_set, lambda *batch_data: (
             batch_data, self._compute_influence_value_from_batch(batch_data)), device)
@@ -130,12 +131,11 @@ class SelfInfluenceCalculator:
 
         Returns
         -------
-        A tuple containing:
-            training_samples
-                A tensor containing the k most influential samples of the training dataset for the model
-                provided
-            influences_values
-                The influence score corresponding to these k most influential samples
+        training_samples, influences_values
+            A tuple of tensor.
+            - training_samples: A tensor containing the k most influential samples of the training dataset for the model
+            provided.
+            - influences_values: The influence score corresponding to these k most influential samples.
         """
         assert_batched_dataset(train_set)
         elt_spec = train_set.element_spec[0]
@@ -257,7 +257,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         Returns
         -------
-        A dataset containing the tuple: (batch of training samples, influence vector)
+        inf_vect_ds
+            A dataset containing the tuple: (batch of training samples, influence vector)
         """
         inf_vect_ds = map_to_device(train_set, lambda *batch: (batch, self._compute_influence_vector(batch)), device)
         if save_influence_vector_ds_path is not None:
@@ -327,11 +328,11 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         Returns
         -------
-        A dataset containing the tuple:
-            batch of sample to evaluate
-            dataset:
-                batch of the training dataset
-                influence score
+        influence_value_dataset
+            A dataset containing the tuple: (samples_to_evaluate, dataset).
+
+            - samples_to_evaluate: The batch of sample to evaluate.
+            - dataset: Dataset containing tuples of batch of the training dataset and their influence score.
         """
         if not influence_vector_in_cache and load_influence_vector_path is None:
             warn("Warning: The computation is not efficient, thinks to use cache or disk save")
@@ -408,16 +409,15 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         Returns
         -------
-        A dataset containing the tuple:
-            samples_to_evaluate
-                Top-k samples to evaluate.
-            influence_values
-                Top-k influence values for each sample to evaluate.
-            training_samples
-                Top-k training sample for each sample to evaluate.
+        top_k_dataset
+            A dataset containing the tuple (samples_to_evaluate, influence_values, training_samples).
+
+            - samples_to_evaluate: Top-k samples to evaluate.
+            - influence_values: Top-k influence values for each sample to evaluate.
+            - training_samples: Top-k training sample for each sample to evaluate.
         """
         if not influence_vector_in_cache and load_influence_vector_ds_path is None:
-            warn("Warning: The computation is not efficience thinks to use cache or disk save")
+            warn("Warning: The computation is not efficient thinks to use cache or disk save")
 
         if influence_vector_in_cache == CACHE.MEMORY:
             load_influence_vector_ds_path = None

@@ -1,5 +1,8 @@
 # TracIn
 
+<sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub>[View source](https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/trac_in/tracin.py) |
 📰 [Original Paper](https://arxiv.org/abs/2002.08484)
 
 This method proposes an alternative for estimating influence without the need for expensive inverse

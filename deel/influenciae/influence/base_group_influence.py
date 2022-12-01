@@ -133,7 +133,7 @@ class BaseGroupInfluenceCalculator:
         raise NotImplementedError()
 
     @staticmethod
-    def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset):
+    def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset) -> int:
         """
         Assert that the datasets are compatible: that they contain the same number of points. Else,
         throw an error.

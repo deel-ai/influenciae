@@ -1,5 +1,8 @@
 # Second Order Influence Calculator
 
+<sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub>[View source](https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/influence/second_order_influence_calculator.py) |
 📰 [Original Paper](https://arxiv.org/abs/1911.00418)
 
 When working with groups of data, it can prove useful to take into account the pairwise interactions

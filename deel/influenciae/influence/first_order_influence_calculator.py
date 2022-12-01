@@ -32,6 +32,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     using a first-order approximation. This makes it ideal for individual points and small
     groups of data, as it does so (relatively) efficiently.
 
+    Notes
+    -----
     For estimating the influence of large groups of data, please refer to the
     SecondOrderInfluenceCalculator class, which also takes into account the pairwise interactions
     between the points inside these groups.
@@ -41,8 +43,10 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     - Influence values/Cook's distance: a measure of reliance of the model on the individual
       points or groups of points.
 
-    For individual points, the following paper is used: https://arxiv.org/abs/1703.04730
-    For groups of points, the following paper is used: https://arxiv.org/abs/1905.13289
+    For individual points, the following paper is used: 
+    [https://arxiv.org/abs/1703.04730](https://arxiv.org/abs/1703.04730).
+    For groups of points, the following paper is used:
+    [https://arxiv.org/abs/1905.13289](https://arxiv.org/abs/1905.13289)
 
     Parameters
     ----------
@@ -91,12 +95,12 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         Parameters
         ----------
-        v:
+        v
             The vector to normalize of shape [Features_Space, Batch_Size]
 
         Returns
         -------
-        v:
+        v
             The normalized vector if the normalize property is True, otherwise the input vector
         """
         if self.normalize:

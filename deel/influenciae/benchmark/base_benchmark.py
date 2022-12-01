@@ -68,6 +68,8 @@ class MislabelingDetectorEvaluator:
     to point out the most self-influential examples as being the (voluntarily added) mislabeled
     examples in the training dataset.
 
+    Notes
+    -----
     As such, the experiments will consist on training a model using the specified procedure on a
     noisy dataset, computing the self-influence of each of the training dataset's points, sorting
     them by it and seeing how fast we can find all the mislabeled examples. In an industrial setting,
@@ -75,7 +77,7 @@ class MislabelingDetectorEvaluator:
     considerable percentage of these samples by looking at a low percentage of the dataset (and thus,
     be done by a human operator).
 
-    Attributes
+    Parameters
     ----------
     training_dataset
             A TF dataset with all the data on which the model must be trained.
@@ -155,8 +157,9 @@ class MislabelingDetectorEvaluator:
             A boolean indicating if the results are to be progressively logged into tensorboard.
 
         Returns
-        ----------
-        A dictionary with the name of each method and its results.
+        -------
+        result
+            A dictionary with the name of each method and its results.
         """
         result = {}
         for name, influence_calculator_factory in influence_calculator_factories.items():
@@ -206,7 +209,8 @@ class MislabelingDetectorEvaluator:
 
         Returns
         -------
-        A tuple with the experience's results: (each of the individual curves, the mean curve, the ROC)
+        curves, mean_curve, roc
+            A tuple with the experience's results: (each of the individual curves, the mean curve, the ROC)
         """
         curves = []
 
@@ -283,7 +287,7 @@ class MislabelingDetectorEvaluator:
         return curves, mean_curve, roc
 
     @staticmethod
-    def plot_tensorboard_roc(curve: np.ndarray, experiment_name: str) -> None:
+    def plot_tensorboard_roc(curve: np.ndarray, experiment_name: str):
         """
         Plots a mislabeled samples detection ROC curve on tensorboard.
 
@@ -308,7 +312,8 @@ class MislabelingDetectorEvaluator:
 
         Returns
         -------
-        A tuple with: (curves in numpy array format, the mean curve, the roc value)
+        curves, mean_curve, roc
+            A tuple with: (curves in numpy array format, the mean curve, the roc value)
         """
         curves = np.asarray(curves)
         mean_curve = np.mean(curves, axis=0)
@@ -335,7 +340,7 @@ class MislabelingDetectorEvaluator:
         return roc
 
     @staticmethod
-    def set_seed(seed: int) -> None:
+    def set_seed(seed: int):
         """
         Sets all the random seeds on TensorFlow, numpy and python for traceability.
 
@@ -384,8 +389,9 @@ class MislabelingDetectorEvaluator:
 
         Returns
         -------
-        A tuple with the noisy dataset and a numpy array with the flipped labels (used for validation
-        during the evaluation).
+        noisy_dataset, noise_indexes
+            A tuple with the noisy dataset and a numpy array with the flipped labels (used for validation
+            during the evaluation).
         """
         dataset_size = tf.data.experimental.cardinality(self.training_dataset)
         noise_mask = np.random.uniform(size=(dataset_size,)) > self.mislabeling_ratio
@@ -436,7 +442,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
     A simple class to save models after optimizer updates. It will prove itself useful for tracing the
     different information to be able to use the TracIn method.
 
-    Attributes
+    Parameters
     ----------
     epochs_to_save
         A list of integers indicating on which epochs to save a model's checkpoint.
@@ -444,10 +450,6 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         The model's optimizer.
     saving_path
         An (optional) string for saving the results on the disk.
-    models
-        A list with the different model's checkpoints.
-    learning_rates
-        A list with the different learning rates at the different stage of the training process.
     """
 
     def __init__(self, epochs_to_save: List[int], optimizer: Optimizer, saving_path: Optional[str] = None, **kwargs):

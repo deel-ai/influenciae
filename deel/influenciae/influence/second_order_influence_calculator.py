@@ -110,8 +110,8 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
 
         Parameters
         ----------
-            dataset
-                A batched TF dataset containing the points we wish to remove
+        dataset
+            A batched TF dataset containing the points we wish to remove
 
         Returns
         -------
@@ -131,16 +131,16 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         products. Thus, it can also be a source of numerical instability when using an approximate version of an
         IHVP calculator.
 
-       Parameters
+        Parameters
         ----------
-            dataset
-                A batched TF dataset containing the points we wish to remove
+        dataset
+            A batched TF dataset containing the points we wish to remove
 
         Returns
         -------
         interactions
             A tensor containing the sum of all the interactions of each point we are removing with each other point
-             of the group
+            of the group
         """
         local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
             else ConjugateGradientDescentIHVP(

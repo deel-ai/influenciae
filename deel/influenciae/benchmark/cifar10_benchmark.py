@@ -36,7 +36,7 @@ class ConvNetCIFAR(Sequential):
     different influence calculation techniques. The feature extractor will either be a
     ResNet18, an EfficientNetB0 or a VGG-19.
 
-    Attributes
+    Parameters
     ----------
     model
         Either a string for the base model ('resnet', 'efficient_net' or 'vgg19'), or a TF
@@ -84,7 +84,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
     """
     A class for streamlining the process of training models on the CIFAR-10 dataset.
 
-    Attributes
+    Parameters
     ----------
     epochs
         An integer indicating for how long the model should be trained
@@ -153,8 +153,9 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
 
         Returns
         -------
-        A tuple with the model's:
-            (train accuracy, test accuracy, final model, the model saver information = None for now)
+        train_stats, test_stats, model, model_saver_information
+            A tuple with the model's train accuracy, test accuracy, final model and the model saver information set to
+            None for now
         """
         random_translation = tf.keras.layers.RandomTranslation(0.1, 0.1, fill_mode="nearest")
 
@@ -230,7 +231,7 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
     An implementation of the mislabeled sample detection benchmark on the CIFAR10 image classification
     dataset. Useful for streamlining the evaluation of the different influence calculator techniques.
 
-    Attributes
+    Parameters
     ----------
     epochs
         An integer indicating for how long the model should be trained
