@@ -95,7 +95,7 @@ class InverseHessianVectorProduct(ABC):
 
         Parameters
         ----------
-        group
+        group_batch
             A TF dataset containing the group of points of which we wish to compute the
             hessian-vector product.
         use_gradient
@@ -225,7 +225,7 @@ class ExactIHVP(InverseHessianVectorProduct):
             curr_hess = tf.concat(curr_hess, axis=-1)
             curr_hess = tf.reshape(curr_hess, shape=(len(grads), self.model.nb_params, -1))
             curr_hess = tf.reduce_sum(curr_hess, axis=0)
-            hess += curr_hess
+            hess += tf.cast(curr_hess, dtype=hess.dtype)
 
             return nb_elt, nb_batch_saw, hess
 
@@ -304,7 +304,7 @@ class ExactIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        group_batch
+        group
             A Tuple with a single batch of tensors containing the points of which we wish to
             compute the hessian-vector product.
         use_gradient
@@ -330,7 +330,7 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
     It is ideal for models containing a considerable amount of parameters. It does however trade memory for
     speed, as the calculations for estimating the inverse hessian operator are repeated for each sample.
 
-    Attributes
+    Parameters
     ----------
     model: InfluenceModel
         The TF2.X model implementing the InfluenceModel interface

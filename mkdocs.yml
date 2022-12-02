@@ -7,11 +7,11 @@ site_name: Influenciae
 nav:
   - Home: index.md
   - Influence Functions:
-      - First Order Influence Calculator: api/first_order_influence_calculator.md
-      - Second Order Influence Calculator: api/second_order_influence_calculator.md
+      - First Order Influence Calculator: api/influence/first_order_influence_calculator.md
+      - Second Order Influence Calculator: api/influence/second_order_influence_calculator.md
   - Representer Point Selection:
-      - Representer Point Selection - L2: api/rps_l2.md
-      - Representer Point Selection - LJE: api/rps_lje.md
+      - Representer Point Selection - L2: api/representer_point_selection/rps_l2.md
+      - Representer Point Selection - LJE: api/representer_point_selection/rps_lje.md
   - TracIn: api/tracin.md
   - Benchmarks: api/benchmarks.md
 
@@ -21,7 +21,7 @@ theme:
   favicon: assets/LogoInfluenciae.png
   palette:
     - scheme: default
-      primary: white
+      primary: dark
       accent: indigo
       toggle:
         icon: material/toggle-switch-off-outline
@@ -32,6 +32,7 @@ theme:
         name: Switch to light mode
   icon:
     repo: fontawesome/brands/github
+
 plugins:
   - numkdoc
   - search
@@ -40,7 +41,8 @@ markdown_extensions:
   - footnotes
   - extra
   - admonition
-  - pymdownx.arithmatex
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.highlight
   - pymdownx.superfences
   - codehilite
@@ -59,7 +61,8 @@ extra_css:
   - css/custom.css
 
 extra_javascript:
-  - https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
   - js/custom.js
 
 repo_name: "deel-ai/influenciae"

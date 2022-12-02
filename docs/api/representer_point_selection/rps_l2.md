@@ -1,5 +1,8 @@
 # Representer Point Selection - L2
 
+<sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub>[View source](https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/rps/rps_l2.py) |
 📰 [Original Paper](https://arxiv.org/abs/1811.09720)
 
 Using a completely different notion of influence than the techniques in modules `deel.influenciae.influence`

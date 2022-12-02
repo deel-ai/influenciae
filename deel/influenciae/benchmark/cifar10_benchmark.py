@@ -35,6 +35,7 @@ class ConvNetCIFAR(Sequential):
     A class with some convolutional neural network implementations on which to benchmark the
     different influence calculation techniques. The feature extractor will either be a
     ResNet18, an EfficientNetB0 or a VGG-19.
+
     Parameters
     ----------
     model
@@ -82,6 +83,7 @@ class ConvNetCIFAR(Sequential):
 class Cifar10TrainingProcedure(BaseTrainingProcedure):
     """
     A class for streamlining the process of training models on the CIFAR-10 dataset.
+
     Parameters
     ----------
     epochs
@@ -133,6 +135,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         Trains the desired model with the object's training schedule on the provided training dataset, and
         validates its performance on the test dataset. Optionally, it logs the results progressively
         using the tensorboard framework.
+
         Parameters
         ----------
         training_dataset
@@ -147,6 +150,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
             An integer specifying the batch size for the validation procedure.
         log_path
             An (optional) string with the path onto which to save the tensorboard logs.
+
         Returns
         -------
         train_stats, test_stats, model, model_saver_information
@@ -226,6 +230,7 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
     """
     An implementation of the mislabeled sample detection benchmark on the CIFAR10 image classification
     dataset. Useful for streamlining the evaluation of the different influence calculator techniques.
+
     Parameters
     ----------
     epochs
