@@ -8,9 +8,9 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import Reduction, MeanSquaredError, BinaryCrossentropy
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ExactFactory
+from deel.influenciae.common import ExactIHVP, ExactIHVPFactory
 
-from deel.influenciae.rps import RPSLJE
+from deel.influenciae.rps import RepresenterPointLJE
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 
 from ..utils_test import assert_inheritance
@@ -42,14 +42,14 @@ def test_compute_influence_vector():
     train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
-    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
-    ihvp_computed = rps_lje.compute_influence_vector((inputs_train, targets_train))
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+    ihvp_computed = rps_lje._compute_influence_vector((inputs_train, targets_train))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    vect = first_order._compute_influence_vector((inputs_train, targets_train))
     weight = model.layers[-1].weights[0]
     vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
     weight.assign(weight - vect)
@@ -57,7 +57,7 @@ def test_compute_influence_vector():
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
-    ihvp_expected = first_order.compute_influence_vector((inputs_train, targets_train))
+    ihvp_expected = first_order._compute_influence_vector((inputs_train, targets_train))
 
     assert tf.reduce_max(tf.abs((ihvp_computed - ihvp_expected) / ihvp_expected)) < 1E-2
 
@@ -92,14 +92,14 @@ def test_preprocess_sample_to_evaluate():
     train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
-    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
-    pre_evaluate_computed = rps_lje.preprocess_sample_to_evaluate((inputs_test, targets_test))
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+    pre_evaluate_computed = rps_lje._preprocess_samples((inputs_test, targets_test))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    vect = first_order._compute_influence_vector((inputs_train, targets_train))
     weight = model.layers[-1].weights[0]
     vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
     weight.assign(weight - vect)
@@ -107,7 +107,7 @@ def test_preprocess_sample_to_evaluate():
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
-    pre_evaluate_expected = first_order.preprocess_sample_to_evaluate((inputs_test, targets_test))
+    pre_evaluate_expected = first_order._preprocess_samples((inputs_test, targets_test))
 
     assert tf.reduce_max(tf.abs(pre_evaluate_computed - pre_evaluate_expected)) < 1E-3
 
@@ -142,16 +142,16 @@ def test_compute_influence_value_from_influence_vector():
     train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
-    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
-    v_test = rps_lje.preprocess_sample_to_evaluate((inputs_test, targets_test))
-    influence_vector = rps_lje.compute_influence_vector((inputs_test, targets_test))
-    influence_values_computed = rps_lje.compute_influence_value_from_influence_vector(v_test, influence_vector)
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+    v_test = rps_lje._preprocess_samples((inputs_test, targets_test))
+    influence_vector = rps_lje._compute_influence_vector((inputs_test, targets_test))
+    influence_values_computed = rps_lje._compute_influence_value_from_influence_vector(v_test, influence_vector)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    vect = first_order._compute_influence_vector((inputs_train, targets_train))
     weight = model.layers[-1].weights[0]
     vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
     weight.assign(weight - vect)
@@ -159,9 +159,9 @@ def test_compute_influence_value_from_influence_vector():
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
-    v_test = first_order.preprocess_sample_to_evaluate((inputs_test, targets_test))
-    influence_vector = first_order.compute_influence_vector((inputs_test, targets_test))
-    influence_values_expected = first_order.compute_influence_value_from_influence_vector(v_test, influence_vector)
+    v_test = first_order._preprocess_samples((inputs_test, targets_test))
+    influence_vector = first_order._compute_influence_vector((inputs_test, targets_test))
+    influence_values_expected = first_order._compute_influence_value_from_influence_vector(v_test, influence_vector)
 
     assert tf.reduce_max(
         tf.abs((influence_values_computed - influence_values_expected) / influence_values_expected)) < 1E-2
@@ -197,14 +197,14 @@ def test_compute_pairwise_influence_value():
     train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
-    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
-    influence_values_computed = rps_lje.compute_pairwise_influence_value((inputs_test, targets_test))
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+    influence_values_computed = rps_lje._compute_influence_value_from_batch((inputs_test, targets_test))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 
-    vect = first_order.compute_influence_vector((inputs_train, targets_train))
+    vect = first_order._compute_influence_vector((inputs_train, targets_train))
     weight = model.layers[-1].weights[0]
     vect = tf.reshape(tf.reduce_mean(vect, axis=0), tf.shape(weight))
     weight.assign(weight - vect)
@@ -212,7 +212,7 @@ def test_compute_pairwise_influence_value():
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
     ihvp_calculator = ExactIHVP(influence_model, train_dataset)
     first_order = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
-    influence_values_expected = first_order.compute_pairwise_influence_value((inputs_test, targets_test))
+    influence_values_expected = first_order._compute_influence_value_from_batch((inputs_test, targets_test))
 
     assert tf.reduce_max(
         tf.abs((influence_values_computed - influence_values_expected) / influence_values_expected)) < 1E-2
@@ -249,7 +249,7 @@ def test_inheritance():
     test_dataset = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_function)
-    rps_lje = RPSLJE(influence_model, train_dataset, ExactFactory(), target_layer=-1)
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
 
     method = rps_lje
 

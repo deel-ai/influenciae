@@ -36,7 +36,7 @@ def test_compute_ihvp_single_batch():
     # test the compute_ihvp_single_batch
     ihvp_list = []
     for batch in train_set.batch(1):
-        batch_ihvp = ihvp_calculator.compute_ihvp_single_batch(batch)
+        batch_ihvp = ihvp_calculator._compute_ihvp_single_batch(batch)
         assert batch_ihvp.shape == (2,1)
         ihvp_list.append(batch_ihvp)
     ihvp_batch = tf.concat(ihvp_list, axis=1)
@@ -48,7 +48,7 @@ def test_compute_ihvp_single_batch():
     # test the compute_ihvp_single_batch
     ihvp_list = []
     for batch in train_set.batch(1):
-        batch_ihvp = ihvp_calculator.compute_ihvp_single_batch(batch)
+        batch_ihvp = ihvp_calculator._compute_ihvp_single_batch(batch)
         assert batch_ihvp.shape == (2,1)
         ihvp_list.append(batch_ihvp)
     ihvp_batch = tf.concat(ihvp_list, axis=1)
@@ -82,7 +82,7 @@ def test_compute_hvp_single_batch():
     ihvp_calculator.hessian = tf.linalg.pinv(ihvp_calculator.inv_hessian)
     hvp_list = []
     for batch in train_set.batch(1):
-        batch_hvp = ihvp_calculator.compute_hvp_single_batch(batch)
+        batch_hvp = ihvp_calculator._compute_hvp_single_batch(batch)
         assert batch_hvp.shape == (2,1)
         hvp_list.append(batch_hvp)
     hvp_batch = tf.concat(hvp_list, axis=1)
@@ -94,7 +94,7 @@ def test_compute_hvp_single_batch():
     # test the compute_hvp_single_batch
     hvp_list = []
     for batch in train_set.batch(1):
-        batch_hvp = ihvp_calculator.compute_hvp_single_batch(batch)
+        batch_hvp = ihvp_calculator._compute_hvp_single_batch(batch)
         assert batch_hvp.shape == (2,1)
         hvp_list.append(batch_hvp)
     hvp_batch = tf.concat(hvp_list, axis=1)

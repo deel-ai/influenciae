@@ -15,20 +15,28 @@ from ..types import Callable, Optional, Union, List, Tuple
 
 ProcessBatchTypeAlias = Callable[[Tuple[tf.Tensor, ...]], Tuple[tf.Tensor, tf.Tensor, tf.Tensor]]
 
+
 class BaseInfluenceModel:
     """
-    A generic Tensorflow model wrapper for Influence functions.
+    A generic Tensorflow model wrapper for Influence functions that facilitates the access to the
+    weights for which these quantities are to be computed.
 
-    Parameters
+    Attributes
     ----------
     model
         Model used for computing influence score.
     weights_to_watch
-        List of the model weights to watch when computing gradients, jacobians & hessians
+        List of the model weights to watch when computing gradients, jacobians & hessians.
     loss_function
         Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
         apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
         for example.
+    process_batch_for_loss_fn
+        A callable for preprocessing the batch to transform it into a format that can be treated
+        by the algorithm: (inputs, label, sample weight).
+    weights_processed
+        A boolean indicating whether the weights are already in the right format to be ingested by
+        the class' methods or if they need to be processed beforehand.
     """
 
     def __init__(self,
@@ -45,7 +53,7 @@ class BaseInfluenceModel:
         self.model = model
         self.weights_processed = weights_processed
         if weights_to_watch is None:
-            weights_to_watch =[layer.weights for layer in model.layers]
+            weights_to_watch = [layer.weights for layer in model.layers]
             self.weights_processed = False
         # "flatten" the list of weights and remove empty weights
         self.weights = self.__process_weights_list(weights_to_watch)
@@ -56,7 +64,7 @@ class BaseInfluenceModel:
 
     def __call__(self, inps: tf.Tensor) -> tf.Tensor:
         """
-        Forward of the original model
+        Computes the forward of the original model
 
         Parameters
         ----------
@@ -70,10 +78,21 @@ class BaseInfluenceModel:
         """
         return self.model(inps)
 
-    def __process_weights_list(self, weights_to_watch):
+    def __process_weights_list(self, weights_to_watch: Union[tf.Tensor, List[tf.Tensor]]) -> List[tf.Tensor]:
         """
         Ensure a proper formatting of the weights
         TODO: Improve it, cause list(itertools.chain(*weights_to_watch)) is not idempotent
+
+        Parameters
+        ----------
+        weights_to_watch
+            A collection of weights for which we wish to compute the influence function in some unspecified
+            format
+
+        Returns
+        -------
+        processed_weights
+            A list with the weights in the right format for them to be ingested by the rest of the class' methods
         """
         if self.weights_processed:
             return weights_to_watch
@@ -88,7 +107,7 @@ class BaseInfluenceModel:
         Returns
         -------
         layers
-            The layers of the original model
+            The layers of the original model.
         """
         return self.model.layers
 
@@ -98,22 +117,27 @@ class BaseInfluenceModel:
         model: tf.keras.Model,
         loss_function: Callable,
         batch: Tuple[tf.Tensor, ...],
-        process_batch_for_loss_fn: ProcessBatchTypeAlias) -> tf.Tensor:
+        process_batch_for_loss_fn: ProcessBatchTypeAlias
+    ) -> tf.Tensor:
         """
         Computes the model's loss for a single batch of samples.
 
         Parameters
         ----------
         model
-            Model used for computing influence score.
+            The model used for computing the influence score.
         loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+            The reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
-            TODO: rewrite doc
+            A batch of tuples of sets of inputs and their corresponding outputs.
+        process_batch_for_loss_fn
+            A callable for preprocessing the batch to transform it into a format that can be treated
+            by the algorithm: (inputs, label, sample weight).
+
         Returns
         -------
         loss_values
-            Loss values for each inputs (i.e not reduced).
+            The loss values for each input (i.e. not reduced).
         """
         model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
         return loss_function(y_true, model(model_inp), sample_weight)
@@ -128,16 +152,19 @@ class BaseInfluenceModel:
         Parameters
         ----------
         model
-            Model used for computing influence score.
+            The model used for computing the influence score.
         loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+            The reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
-            TODO
+            A batch of tuples of sets of inputs and their corresponding outputs.
+        process_batch_for_loss_fn
+            A callable for preprocessing the batch to transform it into a format that can be treated
+            by the algorithm: (inputs, label, sample weight).
 
         Returns
         -------
         jacobian
-            Jacobian matrix for the set of inputs.
+            The jacobian matrix for the set of inputs.
         """
         model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
         batch_size = tf.shape(y_true)[0]
@@ -162,16 +189,19 @@ class BaseInfluenceModel:
         Parameters
         ----------
         model
-            Model used for computing influence score.
+            The model used for computing the influence score.
         loss_function
-            Reduction-less loss function to calculate influence (e.g. cross-entropy).
+            Reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
-            TODO: Docs
+            A batch of tuples of sets of inputs and their corresponding outputs.
+        process_batch_for_loss_fn
+            A callable for preprocessing the batch to transform it into a format that can be treated
+            by the algorithm: (inputs, label, sample weight).
 
         Returns
         -------
         gradient
-            Gradient vector for the set of inputs.
+            The gradient vector for the set of inputs.
         """
         model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
         with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -192,7 +222,7 @@ class BaseInfluenceModel:
         Parameters
         ----------
         batch
-            TODO: Docs
+            A batch of tuples of sets of inputs and their corresponding outputs.
 
         Returns
         -------
@@ -234,7 +264,7 @@ class BaseInfluenceModel:
         Parameters
         ----------
         batch
-            TODO: Docs
+            A batch of tuples of sets of inputs and their corresponding outputs.
 
         Returns
         -------
@@ -242,7 +272,6 @@ class BaseInfluenceModel:
             Matrix of the first-order partial derivative of the loss function wrt the
             start_layer weights.
         """
-
         jacobians = BaseInfluenceModel._jacobian(self.model, self.weights, self.loss_function,
                                              batch, self.process_batch_for_loss_fn)
 
@@ -282,7 +311,7 @@ class BaseInfluenceModel:
         Parameters
         ----------
         batch
-            TODO: Docs
+            A batch of tuples of sets of inputs and their corresponding outputs.
 
         Returns
         -------
@@ -319,10 +348,11 @@ class BaseInfluenceModel:
 
         return gradients
 
+
 class InfluenceModel(BaseInfluenceModel):
     """
     A Tensorflow model wrapper for Influence functions which only require the first layer
-    index or name from which we will watch the weights (e.g you ignore the feature extractor).
+    index or name from which we will watch the weights (e.g. one decides to ignore the feature extractor).
 
     Parameters
     ----------
@@ -339,7 +369,8 @@ class InfluenceModel(BaseInfluenceModel):
         apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
         for example.
     process_batch_for_loss_fn
-        TODO: docs
+        A callable for preprocessing the batch to transform it into a format that can be treated
+        by the algorithm: (inputs, label, sample weight).
     """
     def __init__(self,
                  model: tf.keras.Model,
@@ -373,7 +404,7 @@ class InfluenceModel(BaseInfluenceModel):
         Returns
         -------
         weights
-            A flatten list of weights between the start_layer and the last_layer layers in model
+            A flatten list of weights between the start_layer and the last_layer layers in model.
         """
         # get an id value for the start_layer parameter
         if start_layer is None:
@@ -422,7 +453,7 @@ class InfluenceModel(BaseInfluenceModel):
         Returns
         -------
         layer_id
-            Id (e.g -2, -3...)of the layer found.
+            Id (e.g. -2, -3...) of the layer found.
         """
         for layer_id in range(2, len(model.layers)):
             layer = model.layers[-layer_id]
