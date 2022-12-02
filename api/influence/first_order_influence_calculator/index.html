@@ -1,0 +1,973 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      <link rel="icon" href="../../../assets/LogoAlt.png">
+      <meta name="generator" content="mkdocs-1.3.0, mkdocs-material-8.3.9">
+    
+    
+      
+        <title>First Order Influence Calculator - Influenciae</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.1d29e8d0.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.cbb835fc.min.css">
+        
+      
+      
+    
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../css/custom.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="dark" data-md-color-accent="indigo">
+  
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&"object"==typeof palette.color)for(var key of Object.keys(palette.color))document.body.setAttribute("data-md-color-"+key,palette.color[key])</script>
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#first-order-influence-calculator" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Influenciae" class="md-header__button md-logo" aria-label="Influenciae" data-md-component="logo">
+      
+  <img src="../../../assets/LogoAlt.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Influenciae
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              First Order Influence Calculator
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      <form class="md-header__option" data-md-component="palette">
+        
+          
+          
+          <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="dark" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+          
+            <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 6H7c-3.31 0-6 2.69-6 6s2.69 6 6 6h10c3.31 0 6-2.69 6-6s-2.69-6-6-6zm0 10H7c-2.21 0-4-1.79-4-4s1.79-4 4-4h10c2.21 0 4 1.79 4 4s-1.79 4-4 4zM7 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+            </label>
+          
+        
+          
+          
+          <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="" data-md-color-accent=""  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_2">
+          
+            <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 7H7a5 5 0 0 0-5 5 5 5 0 0 0 5 5h10a5 5 0 0 0 5-5 5 5 0 0 0-5-5m0 8a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3Z"/></svg>
+            </label>
+          
+        
+      </form>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" aria-label="Clear" tabindex="-1">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/deel-ai/influenciae" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.1.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    deel-ai/influenciae
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Influenciae" class="md-nav__button md-logo" aria-label="Influenciae" data-md-component="logo">
+      
+  <img src="../../../assets/LogoAlt.png" alt="logo">
+
+    </a>
+    Influenciae
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/deel-ai/influenciae" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.1.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    deel-ai/influenciae
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        Home
+      </a>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+    
+  
+  
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_2" type="checkbox" id="__nav_2" checked>
+      
+      
+      
+      
+        <label class="md-nav__link" for="__nav_2">
+          Influence Functions
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Influence Functions" data-md-level="1">
+        <label class="md-nav__title" for="__nav_2">
+          <span class="md-nav__icon md-icon"></span>
+          Influence Functions
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+    
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" data-md-toggle="toc" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          First Order Influence Calculator
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        First Order Influence Calculator
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#notebooks" class="md-nav__link">
+    Notebooks
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#FirstOrderInfluenceCalculator" class="md-nav__link">
+    FirstOrderInfluenceCalculator
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../second_order_influence_calculator/" class="md-nav__link">
+        Second Order Influence Calculator
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_3" type="checkbox" id="__nav_3" >
+      
+      
+      
+      
+        <label class="md-nav__link" for="__nav_3">
+          Representer Point Selection
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Representer Point Selection" data-md-level="1">
+        <label class="md-nav__title" for="__nav_3">
+          <span class="md-nav__icon md-icon"></span>
+          Representer Point Selection
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../representer_point_selection/rps_l2/" class="md-nav__link">
+        Representer Point Selection - L2
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../representer_point_selection/rps_lje/" class="md-nav__link">
+        Representer Point Selection - LJE
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tracin/" class="md-nav__link">
+        TracIn
+      </a>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        Benchmarks
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#notebooks" class="md-nav__link">
+    Notebooks
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#FirstOrderInfluenceCalculator" class="md-nav__link">
+    FirstOrderInfluenceCalculator
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          <div class="md-content" data-md-component="content">
+            <article class="md-content__inner md-typeset">
+              
+                
+  <a href="https://github.com/deel-ai/influenciae/edit/master/docs/api/influence/first_order_influence_calculator.md" title="Edit this page" class="md-content__button md-icon">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25Z"/></svg>
+  </a>
+
+
+
+<h1 id="first-order-influence-calculator">First Order Influence Calculator<a class="headerlink" href="#first-order-influence-calculator" title="Permanent link">&para;</a></h1>
+<p><sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub><a href="https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/influence/first_order_influence_calculator.py">View source</a> |
+📰 <a href="https://arxiv.org/abs/1703.04730">Original Paper</a> |
+📰 <a href="https://arxiv.org/abs/1905.13289">Paper Groups</a> |
+📰 <a href="https://arxiv.org/abs/2003.11630">Paper RelatIF</a> |</p>
+<p>This method is an implementation of the famous technique introduced by Koh &amp; Liang in 2017. 
+In essence, by performing a first-order taylor approximation, it proposes that the influence 
+function of a neural network model can be computed as follows:</p>
+<div class="arithmatex">\[ \mathcal{I} (z) \approx H_{\hat{\theta}}^{-1} \, \nabla_\theta \ell (\hat{\theta}, z), \]</div>
+<p>where <span class="arithmatex">\(H_{\hat{\theta}}^{-1}\)</span> is the inverse of the mean hessian of the loss wrt the model's parameters
+over the whole dataset, <span class="arithmatex">\(\ell\)</span> is the loss function with which the model was trained and <span class="arithmatex">\(z\)</span>, a point
+we wish to leave out of the training dataset.</p>
+<p>In particular, this computation is carried out by the <code>InverseHessianVectorProduct</code> class, which allows
+to do it in different ways, with each implementation having its pros and cons.</p>
+<p>It can be used to compute the self-influence of individual and groups of points, and the influence of
+training points (or groups) on other test points (or groups).</p>
+<p>It also implements the RelatIF technique, which can be computed by setting the <code>normalize</code> attribute
+to <code>True</code>.</p>
+<h2 id="notebooks">Notebooks<a class="headerlink" href="#notebooks" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link"><strong>Getting started</strong></a></li>
+<li>Using First order influence calculator <strong>WIP</strong></li>
+</ul>
+<h2 class="numkdoc" id="FirstOrderInfluenceCalculator"><code>FirstOrderInfluenceCalculator</code><a class="headerlink" href="#FirstOrderInfluenceCalculator" title="Permanent link">&para;</a></h2>
+<p>A class implementing the necessary methods to compute the different influence quantities
+using a first-order approximation. This makes it ideal for individual points and small
+groups of data, as it does so (relatively) efficiently.
+<br></p>
+<h4 class="numkdoc" id="__init__"><code>__init__(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> model</span>: <span class='parameter-type'> deel.influenciae.common.model_wrappers.InfluenceModel</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> dataset</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> ihvp_calculator</span>: <span class='parameter-type'> Union[str, deel.influenciae.common.inverse_hessian_vector_product.InverseHessianVectorProduct, deel.influenciae.common.inverse_hessian_vector_product.IHVPCalculator] = 'exact'</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> n_samples_for_hessian</span>: <span class='parameter-type'> Optional[int] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> shuffle_buffer_size</span>: <span class='parameter-type'> Optional[int] = 10000</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; normalize=False)</code><a class="headerlink" href="#__init__" title="Permanent link">&para;</a></h4>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>model</span></strong>            : <span class='parameter-type'>deel.influenciae.common.model_wrappers.InfluenceModel</span> </p>
+<ul>
+<li><p> The TF2.X model implementing the InfluenceModel interface.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>dataset</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A batched TF dataset containing the training dataset over which we will estimate the inverse-hessian-vector product.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>ihvp_calculator</span></strong>            : <span class='parameter-type'>Union[str, deel.influenciae.common.inverse_hessian_vector_product.InverseHessianVectorProduct, deel.influenciae.common.inverse_hessian_vector_product.IHVPCalculator] = 'exact'</span> </p>
+<ul>
+<li><p> Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator object or an InverseHessianVectorProduct object.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>n_samples_for_hessian</span></strong>            : <span class='parameter-type'>Optional[int] = None</span> </p>
+<ul>
+<li><p> An integer indicating the amount of samples to take from the provided train dataset.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>shuffle_buffer_size</span></strong>            : <span class='parameter-type'>Optional[int] = 10000</span> </p>
+<ul>
+<li><p> An integer indicating the buffer size of the train dataset's shuffle operation -- when choosing the amount of samples for the hessian.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>normalize</span></strong>            : <span class='parameter-type'>normalize=False</span> </p>
+<ul>
+<li><p> Implement "RelatIF: Identifying Explanatory Training Examples via Relative Influence" https://arxiv.org/pdf/2003.11630.pdf if True, compute the relative influence by normalizing the influence function.</p> </li>
+</ul>
+</li>
+</ul>
+<h4 class="numkdoc" id="assert_compatible_datasets"><code>assert_compatible_datasets(<span class='parameter-name'>dataset_a</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> dataset_b</span>: <span class='parameter-type'> tf.Dataset) -&gt; int</span></code><a class="headerlink" href="#assert_compatible_datasets" title="Permanent link">&para;</a></h4>
+<p>Assert that the datasets are compatible: that they contain the same number of points. Else,
+throw an error.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>dataset_a</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> First batched tensorflow dataset to check.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>dataset_b</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> Second batched tensorflow dataset to check.</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>size</span></strong>            : <span class='parameter-type'>int</span> </p>
+<ul>
+<li><p> The size of the dataset.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="compute_influence_values"><code>compute_influence_values(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> train_set</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> device</span>: <span class='parameter-type'> Optional[str] = None) -&gt; tf.Dataset</span></code><a class="headerlink" href="#compute_influence_values" title="Permanent link">&para;</a></h4>
+<p>Compute the influence score for each sample of the provided (full or partial) model's training dataset.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A TF dataset with the (full or partial) model's training dataset.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>device</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> Device where the computation will be executed</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A dataset containing the tuple: (batch of training samples, influence score)</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="compute_influence_vector"><code>compute_influence_vector(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> train_set</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> save_influence_vector_ds_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> device</span>: <span class='parameter-type'> Optional[str] = None) -&gt; tf.Dataset</span></code><a class="headerlink" href="#compute_influence_vector" title="Permanent link">&para;</a></h4>
+<p>Compute the influence vector for each sample of the provided (full or partial) model's training dataset.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A TF dataset with the (full or partial) model's training dataset.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>save_influence_vector_ds_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to save or load the influence vector of the training dataset. If specified, load the dataset if it has already been computed, otherwise, compute the influence vector and then save it in the specified path.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>device</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> Device where the computation will be executed</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>inf_vect_ds</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A dataset containing the tuple: (batch of training samples, influence vector)</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="compute_influence_vector_group"><code>compute_influence_vector_group(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> group</span>: <span class='parameter-type'> tf.Dataset) -&gt; tf.Tensor</span></code><a class="headerlink" href="#compute_influence_vector_group" title="Permanent link">&para;</a></h4>
+<p>Computes the influence function vector -- an estimation of the weights difference when
+removing the points -- of the whole group of points.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>group</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A batched TF dataset containing the group of points of which we wish to compute the influence of removal.</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>influence_group</span></strong>            : <span class='parameter-type'>tf.Tensor</span> </p>
+<ul>
+<li><p> A tensor containing one vector for the whole group.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="compute_top_k_from_training_dataset"><code>compute_top_k_from_training_dataset(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> train_set</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> k</span>: <span class='parameter-type'> int</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; order: deel.influenciae.utils.sorted_dict.ORDER = <ORDER.DESCENDING: 2>) -&gt; Tuple[tf.Tensor, tf.Tensor]</code><a class="headerlink" href="#compute_top_k_from_training_dataset" title="Permanent link">&para;</a></h4>
+<p>Compute the k most influential data-points of the model's training dataset by computing
+Cook's distance for each point individually.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A TF dataset containing the points on which the model was trained.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>k</span></strong>            : <span class='parameter-type'>int</span> </p>
+<ul>
+<li><p> An integer with the number of most important samples we wish to keep</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>order</span></strong>            : <span class='parameter-type'>2&gt;</span> </p>
+<ul>
+<li><p> Either ORDER.DESCENDING or ORDER.ASCENDING depending on if we wish to find the top-k or bottom-k samples, respectively.</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>training_samples, influences_values</span></strong>            : <span class='parameter-type'>Tuple[tf.Tensor, tf.Tensor]</span> </p>
+<ul>
+<li><p> A tuple of tensor.</p><p> - training_samples: A tensor containing the k most influential samples of the training dataset for the model provided.</p><p> - influences_values: The influence score corresponding to these k most influential samples.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="estimate_influence_values_group"><code>estimate_influence_values_group(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> group_train</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> group_to_evaluate</span>: <span class='parameter-type'> Optional[tf.Dataset] = None) -&gt; tf.Tensor</span></code><a class="headerlink" href="#estimate_influence_values_group" title="Permanent link">&para;</a></h4>
+<p>Computes Cook's distance of the whole group of points provided, giving measure of the
+influence that the group carries on the model's weights.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>group_train</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A batched TF dataset containing the group of points we wish to remove.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>group_to_evaluate</span></strong>            : <span class='parameter-type'>Optional[tf.Dataset] = None</span> </p>
+<ul>
+<li><p> A batched TF dataset containing the group of points with respect to whom we wish to measure the influence of removing the training points.</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>influence_values_group</span></strong>            : <span class='parameter-type'>tf.Tensor</span> </p>
+<ul>
+<li><p> A tensor containing one influence value for the whole group.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="estimate_influence_values_in_batches"><code>estimate_influence_values_in_batches(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> dataset_to_evaluate</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> train_set</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; influence_vector_in_cache: deel.influenciae.common.base_influence.CACHE = <CACHE.MEMORY: 0>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> load_influence_vector_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> save_influence_vector_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> save_influence_value_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> device</span>: <span class='parameter-type'> Optional[str] = None) -&gt; tf.Dataset</span></code><a class="headerlink" href="#estimate_influence_values_in_batches" title="Permanent link">&para;</a></h4>
+<p>Estimates the influence that each point in the provided training dataset has on each of the test points.
+This can provide some insights as to what makes the model predict a certain way for the given test points,
+and thus presents data-centric explanations.
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>dataset_to_evaluate</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A TF dataset containing the test samples for which to compute the effect of removing each of the provided training points (individually).</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A TF dataset containing the model's training dataset (partial or full).</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>influence_vector_in_cache</span></strong>            : <span class='parameter-type'>0&gt;</span> </p>
+<ul>
+<li><p> An enum indicating if intermediary values are to be cached (either in memory or on the disk) or not.</p><p> Options include CACHE.MEMORY (0) for caching in memory, CACHE.DISK (1) for the disk and CACHE.NO_CACHE (2) for no optimization.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>load_influence_vector_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to load the influence vectors (if they have already been calculated).</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>save_influence_vector_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to save the computed influence vector.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>save_influence_value_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to save the computed influence values.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>device</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> Device where the computation will be executed</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>influence_value_dataset</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A dataset containing the tuple: (samples_to_evaluate, dataset).</p><p>  - samples_to_evaluate: The batch of sample to evaluate.</p><p> - dataset: Dataset containing tuples of batch of the training dataset and their influence score.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+<h4 class="numkdoc" id="top_k"><code>top_k(<span class='parameter-self'>self</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> dataset_to_evaluate</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> train_set</span>: <span class='parameter-type'> tf.Dataset</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> k</span>: <span class='parameter-type'> int = 5</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> nearest_neighbors</span>: <span class='parameter-type'> deel.influenciae.utils.nearest_neighbors.BaseNearestNeighbors = <deel.influenciae.utils.nearest_neighbors.LinearNearestNeighbors object at 0x000001FEFEBCDDC0></span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; influence_vector_in_cache: deel.influenciae.common.base_influence.CACHE = <CACHE.MEMORY: 0>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> load_influence_vector_ds_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> save_influence_vector_ds_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> save_top_k_ds_path</span>: <span class='parameter-type'> Optional[str] = None</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; order: deel.influenciae.utils.sorted_dict.ORDER = <ORDER.DESCENDING: 2>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> d_type</span>: <span class='parameter-type'> tensorflow.python.framework.dtypes.DType = tf.float32</span>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class='parameter-name'> device</span>: <span class='parameter-type'> Optional[str] = None) -&gt; tf.Dataset</span></code><a class="headerlink" href="#top_k" title="Permanent link">&para;</a></h4>
+<p>Find the top-k closest elements for each element of dataset to evaluate in the training dataset
+The method will return a dataset containing a tuple of:
+    (Top-k influence values for each sample to evaluate, Top-k training sample for each sample to evaluate)
+<br></p>
+<p><strong>Parameters</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>dataset_to_evaluate</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> The dataset which contains the samples which will be compare to the training dataset</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>train_set</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> The dataset used to train the model.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>k</span></strong>            : <span class='parameter-type'>int = 5</span> </p>
+<ul>
+<li><p> the number of most influence samples to retain in training dataset</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>nearest_neighbors</span></strong>            : <span class='parameter-type'>deel.influenciae.utils.nearest_neighbors.BaseNearestNeighbors = <deel.influenciae.utils.nearest_neighbors.LinearNearestNeighbors object at 0x000001FEFEBCDDC0></span> </p>
+<ul>
+<li><p> The nearest neighbor method. The default method is a linear search</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>influence_vector_in_cache</span></strong>            : <span class='parameter-type'>0&gt;</span> </p>
+<ul>
+<li><p> An enum indicating if intermediary values are to be cached (either in memory or on the disk) or not.</p><p> Options include CACHE.MEMORY (0) for caching in memory, CACHE.DISK (1) for the disk and CACHE.NO_CACHE (2) for no optimization.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>load_influence_vector_ds_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to load the influence vectors (if they have already been calculated).</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>save_influence_vector_ds_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to save the computed influence vector.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>save_top_k_ds_path</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> The path to save the result of the computation of the top-k elements</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>order</span></strong>            : <span class='parameter-type'>2&gt;</span> </p>
+<ul>
+<li><p> Either ORDER.DESCENDING or ORDER.ASCENDING depending on if we wish to find the top-k or bottom-k samples, respectively.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>d_type</span></strong>            : <span class='parameter-type'>tensorflow.python.framework.dtypes.DType = tf.float32</span> </p>
+<ul>
+<li><p> The data-type of the tensors.</p> </li>
+</ul>
+</li>
+<li>
+<p><strong><span class='parameter-name'>device</span></strong>            : <span class='parameter-type'>Optional[str] = None</span> </p>
+<ul>
+<li><p> Device where the computation will be executed</p> </li>
+</ul>
+</li>
+</ul>
+<p><strong>Return</strong></p>
+<ul>
+<li>
+<p><strong><span class='parameter-name'>top_k_dataset</span></strong>            : <span class='parameter-type'>tf.Dataset</span> </p>
+<ul>
+<li><p> A dataset containing the tuple (samples_to_evaluate, influence_values, training_samples).</p><p>  - samples_to_evaluate: Top-k samples to evaluate.</p><p> - influence_values: Top-k influence values for each sample to evaluate.</p><p> - training_samples: Top-k training sample for each sample to evaluate.</p> </li>
+</ul>
+</li>
+</ul>
+<p><br></p>
+
+              
+            </article>
+            
+          </div>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+    <nav class="md-footer__inner md-grid" aria-label="Footer" >
+      
+        
+        <a href="../../.." class="md-footer__link md-footer__link--prev" aria-label="Previous: Home" rel="prev">
+          <div class="md-footer__button md-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+          </div>
+          <div class="md-footer__title">
+            <div class="md-ellipsis">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              Home
+            </div>
+          </div>
+        </a>
+      
+      
+        
+        <a href="../second_order_influence_calculator/" class="md-footer__link md-footer__link--next" aria-label="Next: Second Order Influence Calculator" rel="next">
+          <div class="md-footer__title">
+            <div class="md-ellipsis">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              Second Order Influence Calculator
+            </div>
+          </div>
+          <div class="md-footer__button md-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"/></svg>
+          </div>
+        </a>
+      
+    </nav>
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    <script id="__config" type="application/json">{"base": "../../..", "features": [], "search": "../../../assets/javascripts/workers/search.b97dbffb.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.config.lang": "en", "search.config.pipeline": "trimmer, stopWordFilter", "search.config.separator": "[\\s\\-]+", "search.placeholder": "Search", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version.title": "Select version"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.6c7ad80a.min.js"></script>
+      
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../../js/custom.js"></script>
+      
+    
+  </body>
+</html>
