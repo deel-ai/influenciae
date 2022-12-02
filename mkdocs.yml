@@ -17,8 +17,8 @@ nav:
 
 theme:
   name: "material"
-  logo: assets/LogoInfluenciae.png
-  favicon: assets/LogoInfluenciae.png
+  logo: assets/LogoAlt.png
+  favicon: assets/LogoAlt.png
   palette:
     - scheme: default
       primary: dark

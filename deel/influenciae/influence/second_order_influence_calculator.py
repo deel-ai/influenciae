@@ -31,11 +31,14 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     points, consider using the first order alternative if the computational cost is
     too high.
 
+    Notes
+    -----
     The methods currently implemented are available to evaluate groups of points:
-    - Influence function vectors: the weights difference when removing groups of points
+    - Influence function vectors: the weights difference when removing groups of points.
     - Influence values/Cook's distance: a measure of reliance of the model on the group of points.
 
-    This implementation is based on the following paper: https://arxiv.org/abs/1911.00418
+    This implementation is based on the following paper:
+    [https://arxiv.org/abs/1911.00418](https://arxiv.org/abs/1911.00418)
 
     Parameters
     ----------
@@ -53,19 +56,22 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
     """
+    def __init__(
+            self,
+            model: InfluenceModel,
+            dataset: tf.data.Dataset,
+            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
+            n_samples_for_hessian: Optional[int] = None,
+            shuffle_buffer_size: Optional[int] = 10000
+    ):
 
-    def __init__(self,
-                 model: InfluenceModel,
-                 dataset: tf.data.Dataset,
-                 ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
-                 n_samples_for_hessian: Optional[int] = None,
-                 shuffle_buffer_size: Optional[int] = 10000):
-
-        super().__init__(model,
-                         dataset,
-                         ihvp_calculator,
-                         n_samples_for_hessian,
-                         shuffle_buffer_size)
+        super().__init__(
+            model,
+            dataset,
+            ihvp_calculator,
+            n_samples_for_hessian,
+            shuffle_buffer_size
+        )
 
         self.train_size = dataset_size(dataset)
 

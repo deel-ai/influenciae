@@ -1,4 +1,28 @@
-# Influenciae
+<div align="center">
+    <img src="docs/assets/banner.png" width="75%" alt="Influenciae" align="center" />
+</div>
+<br>
+
+<div align="center">
+    <a href="#">
+        <img src="https://img.shields.io/badge/Python-3.6, 3.7, 3.8-efefef">
+    </a>
+    <a href="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml">
+        <img alt="PyLint" src="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml/badge.svg">
+    </a>
+    <a href="https://github.com/deel-ai/influenciae/actions/workflows/tests.yml">
+        <img alt="Tox" src="https://github.com/deel-ai/influenciae/actions/workflows/tests.yml/badge.svg">
+    </a>
+    <a href="https://github.com/deel-ai/influenciae/actions/workflows/publish.yml">
+        <img alt="Pypi" src="https://github.com/deel-ai/influenciae/actions/workflows/publish.yml/badge.svg">
+    </a>
+    <a href="#">
+        <img src="https://img.shields.io/badge/License-MIT-efefef">
+    </a>
+    <br>
+    <a href="https://deel-ai.github.io/influenciae/"><strong>Explore Influenciae docs »</strong></a>
+</div>
+<br>
 
 Influenciae is a Python toolkit dedicated to computing influence values for the discovery of potentially problematic samples in a dataset and the generation of data-centric explanations for deep learning models. In this library based on Tensorflow, we gather state-of-the-art methods for estimating the importance of training samples and their influence on test data-points for validating the quality of datasets and of the models trained on them.
 
@@ -19,7 +43,7 @@ We propose some hands-on tutorials to get familiar with the library and it's API
 Influenciae requires a version of python higher than 3.6 and several libraries, including Tensorflow and Numpy. Installation can be done using Pypi:
 
 ```python
-pip install deel-influenciae
+pip install influenciae
 ```
 
 Once Influenciae is installed, there are two major applications for the different modules (that all follow the same API).
@@ -136,6 +160,10 @@ More from the DEEL project:
 
 <img align="right" src="https://www.deel.ai/wp-content/uploads/2021/05/logo-DEEL.png" width="25%">
 This project received funding from the French ”Investing for the Future – PIA3” program within the Artificial and Natural Intelligence Toulouse Institute (ANITI). The authors gratefully acknowledge the support of the <a href="https://www.deel.ai/"> DEEL </a> project.
+
+## 👨‍🎓 Creators
+
+This library was first created as a research tool by [Agustin-Martin PICARD](mailto:agustin-martin.picard@irt-saintexupery.com) in the context of the DEEL project with the help of [David Vigouroux](mailto:david.vigouroux@irt-saintexupery.com) and [Thomas FEL](http://thomasfel.fr). Later on, [Lucas Hervier](https://github.com/lucashervier) joined the team to transform the code base as a practical user-(almost)-friendly and efficient tool.
 
 ## 📝 License
 

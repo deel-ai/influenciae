@@ -30,6 +30,8 @@ class BaseGroupInfluenceCalculator:
     A base class for objects that calculate the different quantities related to influence
     functions for whole groups of data-points.
 
+    Notes
+    -----
     The methods currently implemented are available to evaluate groups of points:
     - Influence function vectors: the weights difference when removing entire groups of points.
     - Influence values/Cook's distance: a measure of reliance of the model on the entire group.
