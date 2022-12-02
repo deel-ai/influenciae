@@ -3,7 +3,16 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Abstract Group Influence module
+Module implementing the necessary functions for computing influence functions on
+groups of data -- i.e. performing approximate hold-one-out of groups of data-points
+as a whole instead of individually. The theoretical validity of this implementation
+was discussed in https://arxiv.org/abs/1905.13289 , with positive results.
+
+We propose two classes that implement this interface: the FirstOrderInfluenceCalculator
+(using the technique proposed in https://arxiv.org/abs/1905.13289) and the
+SecondOrderInfluenceCalculator, that is only available for calculating groups'
+influence and does so through the method presented in
+https://arxiv.org/abs/1911.00418
 """
 
 from abc import ABC, abstractmethod
@@ -18,13 +27,12 @@ from ..types import Optional, Union
 
 class BaseGroupInfluenceCalculator(ABC):
     """
-    A base class for objets that calculate the different quantities related to the influence
-    functions.
+    A base class for objects that calculate the different quantities related to influence
+    functions for whole groups of data-points.
 
-    The methods currently implemented are available to evaluate one or a group of point(s):
-    - Influence function vectors: the weights difference when removing point(s)
-    - Influence values/Cook's distance: a measure of reliance of the model on the individual
-      point(s)
+    The methods currently implemented are available to evaluate groups of points:
+    - Influence function vectors: the weights difference when removing entire groups of points.
+    - Influence values/Cook's distance: a measure of reliance of the model on the entire group.
 
     Parameters
     ----------

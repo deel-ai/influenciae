@@ -3,7 +3,14 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Second order Influence module
+Module implementing a second order approximation for groups of data-points, where
+pairwise interactions of how holding out one sample affects another in the group
+that's being held out are now taken into account. This method was originally
+presented in https://arxiv.org/abs/1911.00418 and it is supposed to greatly improve
+the accuracy of the influence estimations for big groups of data.
+
+Disclaimer: this method can be very computationally expensive, especially when calculating
+the influence for a large number of weights.
 """
 import tensorflow as tf
 
@@ -17,12 +24,16 @@ from ..types import Optional
 class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     """
     A class implementing the necessary methods to compute the different influence quantities
-    using the second-order approximation.
+    (only for groups) using a second-order approximation, thus allowing us to take into
+    account the pairwise interactions between points inside the group. For small groups of
+    points, consider using the first order alternative if the computational cost is
+    too high.
 
-    The methods currently implemented are available to evaluate one or a group of point(s):
-    - Influence function vectors: the weights difference when removing point(s)
-    - Influence values/Cook's distance: a measure of reliance of the model on the individual
-      point(s)
+    The methods currently implemented are available to evaluate groups of points:
+    - Influence function vectors: the weights difference when removing groups of points
+    - Influence values/Cook's distance: a measure of reliance of the model on the group of points.
+
+    This implementation is based on the following paper: https://arxiv.org/abs/1911.00418
 
     Parameters
     ----------
@@ -139,7 +150,6 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         interactions = interactions.map(lambda x: x*ds_size)
 
         return interactions.get_single_element()
-
 
     def compute_influence_values_group(
             self,
