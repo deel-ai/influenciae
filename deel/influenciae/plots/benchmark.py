@@ -2,6 +2,10 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+"""
+Module for creating the visualizations for better understanding the results obtained
+through the benchmark module.
+"""
 import os
 from typing import Dict, Tuple, Optional
 

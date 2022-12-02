@@ -119,7 +119,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_vector
             A tensor with the influence vector for each individual point. Shape will be (batch_size, nb_weights).
         """
-        influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)
+        influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)  # pylint: disable=W0212
         influence_vector = self._normalize_if_needed(influence_vector)
         influence_vector = tf.transpose(influence_vector)
         return influence_vector
