@@ -11,13 +11,13 @@ with open("README.md", encoding="utf-8") as fh:
 setup(
     name="Influenciae",
     version="0.0.2",
-    description="Influence Function toolbox for Tensorflow 2",
+    description="A Tensorflow Toolbox for Influence Functions",
     long_description=README,
     long_description_content_type="text/markdown",
     author="DEEL Core Team",
     author_email="agustin-martin.picard@irt-saintexupery.com",
     license="MIT",
-    install_requires=['tensorflow>=2.3.0', 'numpy', 'matplotlib'],
+    install_requires=['tensorflow>=2.7.0', 'numpy', 'matplotlib'],
     extras_require={
         "tests": ["pytest", "pylint"],
         "docs": ["mkdocs", "mkdocs-material", "numkdoc"],

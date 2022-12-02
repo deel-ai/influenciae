@@ -43,7 +43,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     - Influence values/Cook's distance: a measure of reliance of the model on the individual
       points or groups of points.
 
-    For individual points, the following paper is used: 
+    For individual points, the following paper is used:
     [https://arxiv.org/abs/1703.04730](https://arxiv.org/abs/1703.04730).
     For groups of points, the following paper is used:
     [https://arxiv.org/abs/1905.13289](https://arxiv.org/abs/1905.13289)

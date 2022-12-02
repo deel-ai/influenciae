@@ -8,10 +8,10 @@ influence of training data-points, as per:
 https://arxiv.org/abs/1811.09720
 """
 import tensorflow as tf
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Dense
-from tensorflow.keras.losses import MeanSquaredError, Loss, Reduction
-from tensorflow.keras.regularizers import L2
+from tensorflow.keras import Model #pylint:  disable=E0611
+from tensorflow.keras.layers import Input, Dense #pylint:  disable=E0611
+from tensorflow.keras.losses import MeanSquaredError, Loss, Reduction #pylint:  disable=E0611
+from tensorflow.keras.regularizers import L2 #pylint:  disable=E0611
 
 from ..common import BaseInfluenceCalculator
 from ..types import Tuple, Callable, Union
