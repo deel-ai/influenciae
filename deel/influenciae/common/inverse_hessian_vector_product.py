@@ -25,7 +25,7 @@ class InverseHessianVectorProduct(ABC):
     """
     An interface for classes that perform hessian-vector products.
 
-    Attributes
+    Parameters
     ----------
     model
        A TF model following the InfluenceModel interface whose weights we wish to use for the calculation of
@@ -113,7 +113,6 @@ class InverseHessianVectorProduct(ABC):
         """
         Computes the hessian-vector product of a group of points.
 
-
         Parameters
         ----------
         group
@@ -142,6 +141,8 @@ class ExactIHVP(InverseHessianVectorProduct):
     compute its Moore-Penrose pseudo-inverse (for numerical stability) and the multiply it
     by the gradients.
 
+    Notes
+    -----
     To speed up the algorithm, the hessian matrix is calculated once at instantiation.
 
     For models with a considerable amount of weights, this implementation may be infeasible
@@ -187,7 +188,9 @@ class ExactIHVP(InverseHessianVectorProduct):
         Compute the (pseudo)-inverse of the hessian matrix wrt to the model's parameters using
         backward-mode AD.
 
-        Disclaimer: this implementation trades memory usage for speed, so it can be quite
+        Disclaimer
+        ----------
+        This implementation trades memory usage for speed, so it can be quite
         memory intensive, especially when dealing with big models.
 
         Parameters
@@ -327,23 +330,25 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
     automatic differentiation and Conjugate Gradient Descent to estimate the product directly, without needing to
     calculate the hessian matrix or invert it.
 
+    Notes
+    -----
     It is ideal for models containing a considerable amount of parameters. It does however trade memory for
     speed, as the calculations for estimating the inverse hessian operator are repeated for each sample.
 
     Parameters
     ----------
-    model: InfluenceModel
+    model
         The TF2.X model implementing the InfluenceModel interface
-    extractor_layer:
+    extractor_layer
         An integer indicating the position of the last layer of the feature extraction network.
-    train_dataset: tf.data.Dataset
+    train_dataset
         The TF dataset, already batched and containing only the samples we wish to use for the computation of the
         hessian matrix
+    n_cgd_iters
+        The maximum amount of CGD iterations to perform when estimating the inverse-hessian
     feature_extractor
         If the feature extraction model is not Sequential, the full TF graph must be provided for the computation of
         the different feature maps.
-    n_cgd_iters: Optional[int]
-        The maximum amount of CGD iterations to perform when estimating the inverse-hessian
     """
     def __init__(
             self,
@@ -388,12 +393,12 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        dataset: tf.data.Dataset
+        dataset
             The TF dataset whose feature maps we wish to extract using the model's first layers
 
         Returns
         -------
-        feature_map_dataset: tf.data.Dataset
+        feature_map_dataset
             A TF dataset with the pairs (feature_maps, labels), batched using the same batch_size as the one provided
             as input
         """
@@ -501,16 +506,16 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        x: tf.Tensor
+        x
             The gradient vector to be multiplied by the hessian matrix.
-        feature_maps_hessian_current: tf.Tensor
+        feature_maps_hessian_current
             The current feature map for the hessian calculation.
-        y_hessian_current: tf.Tensor
+        y_hessian_current
             The label corresponding to the current feature map.
 
         Returns
         -------
-        hessian_vector_product: tf.Tensor
+        hessian_vector_product
             A tf.Tensor containing the result of the hessian-vector product for a given input point and one pair
             feature map-label.
         """
@@ -567,12 +572,12 @@ class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
 
         Parameters
         ----------
-        x_initial: tf.Tensor
+        x_initial
             The point of the dataset over which this product will be computed
 
         Returns
         -------
-        hessian_vector_product: tf.Tensor
+        hessian_vector_product
             Tensor with the hessian-vector product
         """
         x = self._reshape_vector(x_initial, self.model.weights)

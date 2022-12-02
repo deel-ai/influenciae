@@ -22,10 +22,10 @@ Implementation Adapted from: github.com/keras-team/keras-contrib
 """
 import six
 
-from tensorflow.keras import Model
-from tensorflow.keras import backend as K
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.layers import (
+from tensorflow.keras import Model  #pylint:  disable=E0611
+from tensorflow.keras import backend as K  #pylint:  disable=E0611
+from tensorflow.keras.regularizers import l2  #pylint:  disable=E0611
+from tensorflow.keras.layers import ( #pylint:  disable=E0611
     Input,
     Activation,
     Reshape,
