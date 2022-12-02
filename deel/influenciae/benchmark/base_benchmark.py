@@ -15,7 +15,11 @@ import json
 
 import tensorflow as tf
 import numpy as np
+<<<<<<< HEAD
 from tensorflow.keras.optimizers import Optimizer
+=======
+from tensorflow.keras.optimizers import Optimizer  # pylint: disable=E0611
+>>>>>>> c0151e3 (plot benchmark: move to plots sub-package and rename for clarity)
 
 from .influence_factory import InfluenceCalculatorFactory
 from ..types import Tuple, Dict, Any, Optional, List
@@ -471,3 +475,4 @@ class ModelsSaver(tf.keras.callbacks.Callback):
             if self.saving_path is not None:
                 tf.data.experimental.save(f"{self.saving_path}/model_ep_{epoch:.6d}")
                 np.save(f"{self.saving_path}/learning_rates", np.array(self.learning_rates), allow_pickle=True)
+
