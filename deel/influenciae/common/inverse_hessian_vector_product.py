@@ -36,7 +36,6 @@ class InverseHessianVectorProduct(ABC):
     """
     def __init__(self, model: InfluenceModel, train_dataset: Optional[tf.data.Dataset]):
         if train_dataset is not None:
-            #assert_batched_dataset(train_dataset)
             self.cardinality = train_dataset.cardinality()
 
         self.model = model
@@ -238,8 +237,7 @@ class ExactIHVP(InverseHessianVectorProduct):
 
         hessian = hess / tf.cast(nb_elt, dtype=hess.dtype)
 
-        with tf.device('/CPU:0'):
-            return tf.linalg.pinv(hessian)
+        return tf.linalg.pinv(hessian)
 
     @tf.function
     def _compute_ihvp_single_batch(self, group_batch: Tuple[tf.Tensor, ...], use_gradient: bool = True) -> tf.Tensor:

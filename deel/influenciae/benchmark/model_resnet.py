@@ -93,7 +93,6 @@ def _bn_relu_conv(**conv_params):
     relu_name = conv_params.setdefault("relu_name", None)
     kernel_initializer = conv_params.setdefault("kernel_initializer", "he_normal")
     padding = conv_params.setdefault("padding", "same")
-    isLipschitz = conv_params.setdefault("isLipschitz", False)
     kernel_regularizer = conv_params.setdefault("kernel_regularizer", l2(1.e-4))
 
     def f(x):
@@ -184,7 +183,7 @@ def _block_name_base(stage, block):
     """
     if block < 27:
         block = '%c' % (block + 97)  # 97 is the ascii number for lowercase 'a'
-    conv_name_base = 'res' + str(stage) + block + '_branch'
+    conv_name_base = f'res{stage}{block}_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
     return conv_name_base, bn_name_base
 
@@ -291,7 +290,7 @@ def _string_to_function(identifier):
     if isinstance(identifier, six.string_types):
         res = globals().get(identifier)
         if not res:
-            raise ValueError('Invalid {}'.format(identifier))
+            raise ValueError(f'Invalid {identifier}')
         return res
     return identifier
 
@@ -300,7 +299,7 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
            repetitions=None, initial_filters=64, activation='softmax', include_top=True,
            input_tensor=None, dropout=None, transition_dilation_rate=(1, 1),
            initial_strides=(1, 1), initial_kernel_size=(3, 3), initial_pooling='max',
-           final_pooling='avg', top='classification'):
+           final_pooling='avg', top='classification'): # pylint: disable=R0912
     """Builds a custom ResNet like architecture. Defaults to ResNet50 v2.
 
     Args:
@@ -360,13 +359,6 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
     if repetitions is None:
         repetitions = [3, 4, 6, 3]
     # Determine proper input shape
-    """
-    input_shape = _obtain_input_shape(input_shape,
-                                      default_size=32,
-                                      min_size=8,
-                                      data_format=K.image_data_format(),
-                                      require_flatten=include_top)
-    """
     _handle_dim_ordering()
     if len(input_shape) != 3:
         raise Exception("Input shape should be a tuple (nb_channels, nb_rows, nb_cols)")
@@ -436,9 +428,9 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
         x = Conv2D(classes, (1, 1), activation='linear', padding='same')(x)
 
         if K.image_data_format() == 'channels_first':
-            channel, row, col = input_shape
+            _, row, col = input_shape
         else:
-            row, col, channel = input_shape
+            row, col, _ = input_shape
 
         x = Reshape((row * col, classes))(x)
         x = Activation(activation)(x)
@@ -450,35 +442,3 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
 
     model = Model(inputs=img_input, outputs=x)
     return model
-
-
-'''
-def ResNet18(input_shape, classes):
-    """ResNet with 18 layers and v2 residual units
-    """
-    return ResNet(input_shape, classes, basic_block, repetitions=[2, 2, 2, 2])
-
-
-def ResNet34(input_shape, classes):
-    """ResNet with 34 layers and v2 residual units
-    """
-    return ResNet(input_shape, classes, basic_block, repetitions=[3, 4, 6, 3])
-
-
-def ResNet50(input_shape, classes):
-    """ResNet with 50 layers and v2 residual units
-    """
-    return ResNet(input_shape, classes, bottleneck, repetitions=[3, 4, 6, 3])
-
-
-def ResNet101(input_shape, classes):
-    """ResNet with 101 layers and v2 residual units
-    """
-    return ResNet(input_shape, classes, bottleneck, repetitions=[3, 4, 23, 3])
-
-
-def ResNet152(input_shape, classes):
-    """ResNet with 152 layers and v2 residual units
-    """
-    return ResNet(input_shape, classes, bottleneck, repetitions=[3, 8, 36, 3])
-'''

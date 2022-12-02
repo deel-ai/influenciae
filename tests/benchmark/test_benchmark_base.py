@@ -12,9 +12,6 @@ class MockTrainingProcedure(BaseTrainingProcedure):
             self, training_dataset: tf.data.Dataset, test_dataset: tf.data.Dataset,
             train_batch_size: int = 128, test_batch_size: int = 128,
             log_path: Optional[str] = None) -> Tuple[float, float, tf.keras.Model, Any]:
-        """
-        TODO
-        """
         raise NotImplementedError
 
 
@@ -50,7 +47,7 @@ def test_noise():
 
     assert count - tf.shape(noise_indexes)[1] == 0
 
-    curve = evaluator._MissingLabelEvaluator__compute_curve(sorted_influences_indexes=[2, 6, 3, 4, 5, 1, 7, 8, 9, 10],
+    curve = evaluator._MislabelingDetectorEvaluator__compute_curve(sorted_influences_indexes=[2, 6, 3, 4, 5, 1, 7, 8, 9, 10],
                                                             noisy_label_indexes=[6, 8])
     curve_expected = [0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0]
     assert np.max(np.abs(curve - curve_expected)) < 1E-6
@@ -60,7 +57,7 @@ def test_noise():
     mean_curve = np.mean(curves, axis=0)
     roc = np.mean(mean_curve)
 
-    evaluator._MissingLabelEvaluator__save("./tmp_test_bench_base/exp1", curves, mean_curve, roc)
+    evaluator._MislabelingDetectorEvaluator__save("./tmp_test_bench_base/exp1", curves, mean_curve, roc)
 
     result = np.load(os.path.join("./tmp_test_bench_base/exp1.npy"), allow_pickle=True)
     shutil.rmtree("./tmp_test_bench_base/")

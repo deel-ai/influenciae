@@ -9,7 +9,7 @@ Custom operations related to tensorflow objects
 import numpy as np
 import tensorflow as tf
 
-from ..types import Union, Tuple, Optional
+from ..types import Union, Tuple, Optional, Callable
 
 
 def find_layer(model: tf.keras.Model, layer: Union[str, int]) -> tf.keras.layers.Layer:
@@ -150,10 +150,10 @@ def dataset_to_tensor(dataset: tf.data.Dataset) -> tf.Tensor:
     assert_batched_dataset(dataset)
     if isinstance(dataset.element_spec, Tuple):
         tensor = []
-        for i, elm in enumerate(dataset.element_spec):
-            tensor.append([z for z in dataset.map(lambda *w: w[i]).unbatch()])
+        for i, _ in enumerate(dataset.element_spec):
+            tensor.append(list(dataset.map(lambda *w: w[i]).unbatch()))  # pylint: disable=W0612
     else:
-        tensor = tf.concat([b for b in dataset], axis=0)
+        tensor = tf.concat(list(dataset), axis=0)
 
     return tensor
 
@@ -221,18 +221,52 @@ def array_to_dataset(
     return dataset
 
 
-def get_device(device: Optional[str]):
+def get_device(device: Optional[str]) -> str:
+    """
+    Gets the name of the device to use. If there are any available GPUs, it will use the first one
+    in the system, otherwise, it will use the CPU.
+
+    Parameters
+    ----------
+    device
+        A string specifying the device on which to run the computations. If None, it will search
+        for available GPUs, and if none are found, it will return the first CPU.
+
+    Returns
+    -------
+    device
+        A string with the name of the device on which to run the computations.
+    """
     if device is not None:
         return device
-    else:
-        physical_devices = tf.config.list_physical_devices('GPU')
-        if physical_devices is None or len(physical_devices) == 0:
-            return 'cpu:0'
-        else:
-            return 'GPU:0'
+
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if physical_devices is None or len(physical_devices) == 0:
+        return 'cpu:0'
+    return 'GPU:0'
 
 
-def map_to_device(dataset: tf.data.Dataset, map_fun, device: Optional[str]):
+def map_to_device(dataset: tf.data.Dataset, map_fun: Callable, device: Optional[str] = None) -> tf.data.Dataset:
+    """
+    Performs a map function on the preferred device. If none is specified, the first available GPU is
+    chosen, and if there aren't any, the computations are done on the CPU.
+
+    Parameters
+    ----------
+    dataset
+        The dataset on which to apply the map function.
+    map_fun
+        A callable with the function to be applied to the whole CPU.
+    device
+        An (optional) string with the device on which to perform the map function.
+        If none is specified, the first available GPU is chosen, and if there aren't any, the
+        computations are done on the CPU.
+
+    Returns
+    -------
+    mapped_dataset
+        The dataset with the map function applied to it.
+    """
     device = get_device(device)
 
     def map_fun_device(*args):
