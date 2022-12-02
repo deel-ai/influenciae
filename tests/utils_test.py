@@ -93,14 +93,14 @@ def assert_inheritance(
     train_batch = next(iter_train)
 
     # compute_influence_values_from_tensor
-    inf_val_from_tensor = method.compute_influence_values_from_tensor(
+    inf_val_from_tensor = method._compute_individual_influence_values_from_batch(
         train_samples=train_batch,
         samples_to_evaluate=test_batch
     )
     assert inf_val_from_tensor.shape == (10, 5) # (test_batch_size, train_batch_size)
 
     # compute_influence_values_for_sample_to_evaluate
-    batch_samples, iter_inf_val_sample_ds = method.compute_influence_values_for_sample_to_evaluate(
+    batch_samples, iter_inf_val_sample_ds = method._compute_influence_values_in_batches(
         train_set,
         test_batch
     )
@@ -110,7 +110,7 @@ def assert_inheritance(
     assert inf_val_test_batch.shape == (10, 5) # (test_batch_size, len train_set)
 
     # compute_influence_values_for_dataset_to_evaluate
-    inf_val_dataset = method.compute_influence_values_for_dataset_to_evaluate(
+    inf_val_dataset = method.compute_influence_values_in_batches(
         test_set,
         train_set
     )
@@ -125,7 +125,7 @@ def assert_inheritance(
     assert batch_inf.shape == (10, 5) # (test_batch_size, train_batch_size)
 
     # compute_influence_vector_dataset
-    inf_vect_ds = method.compute_influence_vector_dataset(
+    inf_vect_ds = method.compute_influence_vector(
         train_set
     )
     iter_inf_vect = iter(inf_vect_ds)
@@ -135,7 +135,7 @@ def assert_inheritance(
     assert inf_vect.shape == (5, nb_params) # (train_batch_size, nb_params)
 
     # compute_influence_values_dataset
-    inf_values_dataset = method.compute_influence_values_dataset(
+    inf_values_dataset = method.compute_influence_values(
         train_set
     )
     iter_inf_val_ds = iter(inf_values_dataset)
@@ -145,7 +145,7 @@ def assert_inheritance(
     assert batch_inf.shape == (5, 1) # (train_batch_size, 1)
 
     # compute_influence_values
-    inf_values = method.compute_influence_values(
+    inf_values = method._compute_influence_values(
         train_set
     )
     assert inf_values.shape == (10,1)
@@ -159,7 +159,7 @@ def assert_inheritance(
     assert top_k_inf_val.shape == (3,)
 
     # top_k
-    _, top_k_inf_val, top_k_samples = method.top_k(
+    _, top_k_inf_val, top_k_samples = method._top_k_from_batch(
         test_batch,
         train_set,
         k=3,
@@ -169,7 +169,7 @@ def assert_inheritance(
     assert top_k_samples.shape == (10, 3, 5, 5, 3) # (test_batch_size, k, *input_shape)
 
     # top_k_dataset
-    top_k_dataset = method.top_k_dataset(
+    top_k_dataset = method.top_k(
         test_set,
         train_set,
         k=3,

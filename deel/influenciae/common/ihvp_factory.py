@@ -3,7 +3,10 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-TODO: Docs
+Module defining the interface and classes that implement factories for objects of
+class InverseHessianVectorProduct. This will prove itself useful for creating
+the objects necessary for computing the different (I)HVPs in second order influence
+functions.
 """
 from abc import abstractmethod
 
@@ -14,31 +17,70 @@ from .inverse_hessian_vector_product import InverseHessianVectorProduct, ExactIH
 
 from ..types import Union, Optional
 
+
 class InverseHessianVectorProductFactory:
     """
-    TODO: Docs
+    The base interface for InverseHessianVectorProduct factories.
     """
     @abstractmethod
     def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
         """
-        TODO: Docs
+        Creates an instance of an InverseHessianVectorProduct class with the provided
+        parameters.
+
+        Parameters
+        ----------
+        model_influence
+            A TF model implementing the InfluenceModel interface.
+        dataset
+            A TF dataset object containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        ihvp
+            An instance of an InverseHessianVectorProduct class.
         """
         raise NotImplementedError()
 
-class ExactFactory(InverseHessianVectorProductFactory):
+
+class ExactIHVPFactory(InverseHessianVectorProductFactory):
     """
-    TODO: Docs
+    A factory for instantiating ExactIHVP objects.
     """
     def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
         """
-        TODO: Docs
+        Creates an instance of the ExactIHVP class for a given model
+        implementing the InfluenceModel interface and its (full or partial) training dataset.
+
+        Parameters
+        ----------
+        model_influence
+            A TF model implementing the InfluenceModel interface
+        dataset
+            A TF dataset containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        exact_ihvp
+            An instance of the ExactIHVP class.
         """
         return ExactIHVP(model_influence, dataset)
 
 
-class CGDFactory(InverseHessianVectorProductFactory):
+class CGDIHVPFactory(InverseHessianVectorProductFactory):
     """
-    TODO: Docs
+    A factory for instantiating ConjugateGradientDescentIHVP objects.
+
+    Attributes
+    ----------
+    feature_extractor
+        Either a TF feature-extractor model or the index of the layer of a whole model
+        which will be cut into two for computing the influence vectors and scores.
+    n_cgd_iters
+        An integer specifying the amount of iterations of the optimizer to run before
+        (prematurely) considering the optimization completed.
+    extractor_layer
+        The cutoff layer for the feature extractor, if specified in TF model format.
     """
     def __init__(
         self,
@@ -51,14 +93,27 @@ class CGDFactory(InverseHessianVectorProductFactory):
             self.extractor_layer = feature_extractor
             self.feature_extractor = None
         else:
-            assert extractor_layer is not None, "If you provide a model as a feature extractor you should provide the \
-                id of the last extracted layer"
+            assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
+                                                "provide the id of the last extracted layer"
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
     def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
         """
-        TODO: Docs
+        Creates an instance of the ConjugateGradientDescentIHVP class for the provided model and its
+        corresponding (full or partial) training dataset.
+
+        Parameters
+        ----------
+        model_influence
+            A TF model implementing the InfluenceModel interface.
+        dataset
+            A TF dataset containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        cgd_ihvp
+            An instance of the ConjugateGradientDescentIHVP class
         """
         return ConjugateGradientDescentIHVP(
             model_influence,
