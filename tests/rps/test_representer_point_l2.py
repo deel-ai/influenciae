@@ -105,7 +105,7 @@ def test_influence_values():
                                        -2. * lambda_regularization * tf.cast(y_train.shape[1], tf.float32))
 
     # Compare to the values from AD
-    influence = rps_l2.compute_influence_values(train_set.batch(20))
+    influence = rps_l2._compute_influence_values(train_set.batch(20))
 
     assert tf.reduce_max(tf.abs(tf.transpose(ground_truth_influence) - influence)) < 1e-3
 

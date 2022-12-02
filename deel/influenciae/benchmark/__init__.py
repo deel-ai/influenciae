@@ -6,5 +6,5 @@
 Benchmark module
 """
 
-from .base_benchmark import BaseTrainingProcedure, MissingLabelEvaluator, Display
+from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator, Display
 from .influence_factory import InfluenceCalculatorFactory, FirstOrderFactory, RPSLJEFactory, TracInFactory

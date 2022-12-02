@@ -1,4 +1,4 @@
-from deel.influenciae.benchmark.base_benchmark import MissingLabelEvaluator, BaseTrainingProcedure
+from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
 import tensorflow as tf
 from typing import Optional, Tuple, Any
 import numpy as np
@@ -29,14 +29,14 @@ def test_noise():
     training_dataset = tf.data.Dataset.from_tensor_slices((x, y))  # .batch(100)
 
     misslabeling_ratio = 0.1
-    evaluator = MissingLabelEvaluator(training_dataset,
-                                      test_dataset=None,
-                                      training_procedure=MockTrainingProcedure(),
-                                      nb_classes=class_nbr,
-                                      misslabeling_ratio=misslabeling_ratio,
-                                      train_batch_size=128,
-                                      test_batch_size=128,
-                                      config=None)
+    evaluator = MislabelingDetectorEvaluator(training_dataset,
+                                             test_dataset=None,
+                                             training_procedure=MockTrainingProcedure(),
+                                             nb_classes=class_nbr,
+                                             mislabeling_ratio=misslabeling_ratio,
+                                             train_batch_size=128,
+                                             test_batch_size=128,
+                                             config=None)
 
     noisy_dataset, noise_indexes = evaluator.build_noisy_training_dataset()
 
