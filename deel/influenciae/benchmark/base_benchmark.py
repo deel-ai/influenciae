@@ -15,7 +15,7 @@ import json
 
 import tensorflow as tf
 import numpy as np
-from tensorflow.keras.optimizers import Optimizer
+from tensorflow.keras.optimizers import Optimizer # pylint: disable=E0611
 
 from .influence_factory import InfluenceCalculatorFactory
 from ..types import Tuple, Dict, Any, Optional, List
@@ -41,6 +41,7 @@ class BaseTrainingProcedure:
         Trains the model on the training dataset using a given size for the batches, and
         performs validation on the test dataset, eventually saving the model in the provided
         path (if not None).
+
         Parameters
         ----------
         training_dataset
@@ -53,6 +54,7 @@ class BaseTrainingProcedure:
             An integer with the size of the batches on which to perform the validation.
         log_path
             An (optional) string specifying where to save the model (if desired).
+
         Returns
         -------
         A tuple with: (the train accuracy, the test accuracy, the final model, the information from the model saver)
@@ -65,6 +67,7 @@ class MislabelingDetectorEvaluator:
     A class implementing a benchmarking pipeline for influence calculators based on their capacity
     to point out the most self-influential examples as being the (voluntarily added) mislabeled
     examples in the training dataset.
+
     Notes
     -----
     As such, the experiments will consist on training a model using the specified procedure on a
@@ -73,6 +76,7 @@ class MislabelingDetectorEvaluator:
     the derivative of this curve close to zero will be paramount, as this means that we can find a
     considerable percentage of these samples by looking at a low percentage of the dataset (and thus,
     be done by a human operator).
+
     Parameters
     ----------
     training_dataset
@@ -135,6 +139,7 @@ class MislabelingDetectorEvaluator:
         """
         Performs the whole benchmark for a group of influence calculator techniques and a number of
         evaluations for each of them (for statistical significance).
+
         Parameters
         ----------
         influence_calculator_factories
@@ -150,6 +155,7 @@ class MislabelingDetectorEvaluator:
             A boolean indicating whether progress is reported in stdout or not.
         use_tensorboard
             A boolean indicating if the results are to be progressively logged into tensorboard.
+
         Returns
         -------
         result
@@ -183,6 +189,7 @@ class MislabelingDetectorEvaluator:
         """
         Performs one benchmark evaluation over one influence calculator technique the specified number
         of times (for statistical significance).
+
         Parameters
         ----------
         influence_factory
@@ -199,6 +206,7 @@ class MislabelingDetectorEvaluator:
             A boolean indicating if the results are to be progressively logged into tensorboard.
         method_name
             An optional string with the experience's name.
+
         Returns
         -------
         curves, mean_curve, roc
@@ -282,6 +290,7 @@ class MislabelingDetectorEvaluator:
     def plot_tensorboard_roc(curve: np.ndarray, experiment_name: str):
         """
         Plots a mislabeled samples detection ROC curve on tensorboard.
+
         Parameters
         ----------
         curve
@@ -295,6 +304,7 @@ class MislabelingDetectorEvaluator:
     def __build(self, curves: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.float]:
         """
         Formats the curves, computes the mean curve and the ROC.
+
         Parameters
         ----------
         curves
@@ -314,10 +324,12 @@ class MislabelingDetectorEvaluator:
     def _compute_roc(curve: np.array) -> np.float:
         """
         Computes the ROC value of the curve.
+
         Parameters
         ----------
         curve
             A numpy array with a curve.
+
         Returns
         -------
         roc
@@ -330,6 +342,7 @@ class MislabelingDetectorEvaluator:
     def set_seed(seed: int):
         """
         Sets all the random seeds on TensorFlow, numpy and python for traceability.
+
         Parameters
         ----------
         seed
@@ -344,12 +357,14 @@ class MislabelingDetectorEvaluator:
         """
         Computes the mislabeled sample detection curve using the indices of the samples sorted
         by their self-influence and the ground-truth indices of the target points.
+
         Parameters
         ----------
         sorted_influences_indexes
             A numpy array with the sample's indices sorted by their self-influence.
         noisy_label_indexes
             A numpy array with the dataset's mislabeled examples' ground-truth.
+
         Returns
         -------
         curve
@@ -370,6 +385,7 @@ class MislabelingDetectorEvaluator:
         effectively impact the model's capacity to predict correctly on the test set, as it will
         need to learn to use spurious correlations to attain the 100% accuracy on the training
         dataset.
+
         Returns
         -------
         noisy_dataset, noise_indexes
@@ -402,6 +418,7 @@ class MislabelingDetectorEvaluator:
     def __save(path_to_save: str, curves: np.array, mean_curve: np.array, roc: np.float) -> None:
         """
         Saves an evaluation's results to the disk.
+
         Parameters
         ----------
         path_to_save
@@ -423,6 +440,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
     """
     A simple class to save models after optimizer updates. It will prove itself useful for tracing the
     different information to be able to use the TracIn method.
+
     Parameters
     ----------
     epochs_to_save
@@ -449,6 +467,7 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         """
         Save the relevant training information (model, learning rate, save to disk if desired)
         after a training epoch.
+
         Parameters
         ----------
         epoch

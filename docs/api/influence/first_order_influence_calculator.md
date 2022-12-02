@@ -1,8 +1,11 @@
 # First Order Influence Calculator
 
-📰 [Original Paper](https://arxiv.org/abs/1703.04730)
-📰 [Paper Groups](https://arxiv.org/abs/1905.13289)
-📰 [Paper RelatIF](https://arxiv.org/abs/2003.11630)
+<sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub>[View source](https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/influence/first_order_influence_calculator.py) |
+📰 [Original Paper](https://arxiv.org/abs/1703.04730) |
+📰 [Paper Groups](https://arxiv.org/abs/1905.13289) |
+📰 [Paper RelatIF](https://arxiv.org/abs/2003.11630) |
 
 This method is an implementation of the famous technique introduced by Koh & Liang in 2017. 
 In essence, by performing a first-order taylor approximation, it proposes that the influence 
@@ -25,7 +28,7 @@ to `True`.
 
 ## Notebooks
 
-- [Getting started](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
+- [**Getting started**](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
 - Using First order influence calculator **WIP**
 
 {{deel.influenciae.influence.first_order_influence_calculator.FirstOrderInfluenceCalculator}}

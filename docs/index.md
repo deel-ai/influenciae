@@ -1,4 +1,4 @@
-# deel-Influenciae
+# Influenciae
 
 Influenciae is a Python toolkit dedicated to computing influence values for the discovery of potentially problematic samples in a dataset and the generation of data-centric explanations for deep learning models. In this library based on Tensorflow, we gather state-of-the-art methods for estimating the importance of training samples and their influence on test data-points for validating the quality of datasets and of the models trained on them.
 
@@ -6,13 +6,13 @@ Influenciae is a Python toolkit dedicated to computing influence values for the 
 
 We propose some hands-on tutorials to get familiar with the library and it's API:
 
-- Getting Started [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
-- Benchmarking with Mislabeled sample detection (WIP)
-- Using the first order influence calculator (WIP)
-- Using the second order influence calculator (WIP)
-- Using TracIn (WIP)
-- Using Representer Point Selection - L2 (RPS_L2)
-- Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE)
+- [**Getting Started**](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
+- Benchmarking with Mislabeled sample detection (**WIP**)
+- Using the first order influence calculator (**WIP**)
+- Using the second order influence calculator (**WIP**)
+- Using TracIn (**WIP**)
+- Using Representer Point Selection - L2 (RPS_L2) (**WIP**)
+- Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE) (**WIP**)
 
 ## 🚀 Quick Start
 
@@ -23,6 +23,7 @@ pip install deel-influenciae
 ```
 
 Once Influenciae is installed, there are two major applications for the different modules (that all follow the same API).
+So, except for group-specific functions that are only available on the `influence` module, all the classes are able to compute self-influence values, the influence with one point w.r.t. another, as well as find the top-k samples for both of these situations.
 
 ### Discovering influential examples
 
@@ -43,7 +44,7 @@ data_and_influence_dataset = influence_calculator.compute_influence_values(train
 # dataset is too large
 ```
 
-This is also explained more in depth in the getting started tutotial [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
+This is also explained more in depth in the [Getting Started tutotial](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
 
 ### Explaining neural networks through their training data
 
@@ -65,7 +66,7 @@ data_and_influence_dataset = influence_calculator.estimate_influence_values_in_b
 # dataset is too large
 ```
 
-This is also explained more in depth in the getting started tutorial [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
+This is also explained more in depth in the [Getting Started tutorial](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
 
 ### Determining the influence of groups of samples
 

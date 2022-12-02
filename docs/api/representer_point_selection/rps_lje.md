@@ -1,5 +1,8 @@
 # Representer Point Selection - Local Jacobian Expansion
 
+<sub>
+    <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" width="20">
+</sub>[View source](https://github.com/deel-ai/influenciae/blob/main/deel/influenciae/rps/rps_lje.py) |
 📰 [Original Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf)
 
 Introduced as an improvement over [Representer Point Selection - L2](https://arxiv.org/abs/1811.09720), this

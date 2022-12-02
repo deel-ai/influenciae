@@ -18,20 +18,23 @@ from ..types import Union, List, Tuple
 class TracIn(BaseInfluenceCalculator):
     """
     A class implementing an influence score based on TracIn method proposed in
-    https://arxiv.org/pdf/2002.08484.pdf
+    [https://arxiv.org/pdf/2002.08484.pdf](https://arxiv.org/pdf/2002.08484.pdf)
 
+    Notes
+    -----
     This method traces the gradients of each of the training data-points as a means to
     compute their influence in the model. In practice, instead of saving the gradients
     at each epoch, the model's checkpoints are used, with the checkpoint frequency
     allowing for a trade-off between the precision of the computed influence and its
     computational cost.
 
-    Attributes
+    Parameters
     ----------
     models
         A list of TF2.X models implementing the InfluenceModel interface at different steps (epochs)
         of the training
-    learning_rates: Learning rate or list of learning rates used during the training.
+    learning_rates
+        Learning rate or list of learning rates used during the training.
         If learning_rates is a list, it should have the same size as the amount of models
     """
     def __init__(self, models: List[InfluenceModel], learning_rates: Union[float, List[float]]):
