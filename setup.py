@@ -23,7 +23,7 @@ setup(
         "docs": ["mkdocs", "mkdocs-material", "numkdoc"],
     },
     packages=setuptools.find_namespace_packages(include=["deel.*"]),
-    python_requires=">=3.6",
+    python_requires=">=3.7",
     classifiers=[
         "Development Status :: 4 - Beta",
         "License :: OSI Approved :: MIT License",
