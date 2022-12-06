@@ -17,7 +17,7 @@ setup(
     author="DEEL Core Team",
     author_email="agustin-martin.picard@irt-saintexupery.com",
     license="MIT",
-    install_requires=['tensorflow>=2.7.0', 'numpy', 'matplotlib'],
+    install_requires=['tensorflow >=2.7.0, <2.10.0', 'numpy', 'matplotlib'],
     extras_require={
         "tests": ["pytest", "pylint"],
         "docs": ["mkdocs", "mkdocs-material", "numkdoc"],

@@ -683,7 +683,7 @@ def test_compute_influence_values_for_dataset_to_evaluate():
     inf_vect = tf.concat(inf_vect, axis=0)
     assert almost_equal(inf_vect, tf.transpose(gt_inf_vec), epsilon=1E-3)
 
-    list_dir = os.listdir("test_temp/influence_values_ds")
+    list_dir = sorted(os.listdir("test_temp/influence_values_ds"))
 
     influence_values = []
     for path, eval_batch in zip(list_dir, test_set.batch(5)):
