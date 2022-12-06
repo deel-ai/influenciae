@@ -1,11 +1,14 @@
 <div align="center">
-    <img src="./assets/banner.png" width="75%" alt="Influenciae" align="center" />
+    <img src="./assets/banner2.png" width="75%" alt="Influenciae" align="center" />
 </div>
 <br>
 
 <div align="center">
     <a href="#">
-        <img src="https://img.shields.io/badge/Python-3.6, 3.7, 3.8-efefef">
+        <img src="https://img.shields.io/badge/Python-3.7, 3.8, 3.9, 3.10-efefef">
+    </a>
+    <a href="#tf">
+        <img src="https://img.shields.io/badge/TensorFlow-2.7, 2.8, 2.9-00458A">
     </a>
     <a href="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml">
         <img alt="PyLint" src="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml/badge.svg">
