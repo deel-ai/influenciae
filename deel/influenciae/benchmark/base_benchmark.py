@@ -492,4 +492,3 @@ class ModelsSaver(tf.keras.callbacks.Callback):
                 np.save(f"{self.saving_path}/learning_rates", np.array(self.learning_rates), allow_pickle=True)
                 with open(f"{self.saving_path}/logs.json", "w", encoding='utf8') as f:
                     json.dump(logs, f)
-
