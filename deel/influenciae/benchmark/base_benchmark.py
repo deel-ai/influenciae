@@ -301,7 +301,7 @@ class MislabelingDetectorEvaluator:
         for i, c in enumerate(curve):
             tf.summary.scalar(experiment_name, c, i)
 
-    def __build(self, curves: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.float]:
+    def __build(self, curves: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Formats the curves, computes the mean curve and the ROC.
 
@@ -321,7 +321,7 @@ class MislabelingDetectorEvaluator:
         return curves, mean_curve, roc
 
     @staticmethod
-    def _compute_roc(curve: np.array) -> np.float:
+    def _compute_roc(curve: np.array) -> float:
         """
         Computes the ROC value of the curve.
 
