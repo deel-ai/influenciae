@@ -247,6 +247,8 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
         An integer with the size of the batches on which to train the model.
     test_batch_size
         An integer with the size of the batches on which to perform the validation.
+    influence_batch_size
+        An integer with the size of the batches for performing the different operations
     epochs_to_save
         A list of integers for the eventual saving of the model's checkpoints and training information.
         Useful for computing influence-related quantities using TracIn.
