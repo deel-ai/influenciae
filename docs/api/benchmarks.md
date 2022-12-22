@@ -19,7 +19,7 @@ benchmarking, and an implementation on the popular CIFAR10 image-classification 
 
 ## Notebooks
 
-- **WIP**
+- [**Benchmarking with Mislabeled sample detection**](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing)
 
 {{deel.influenciae.benchmark.cifar10_benchmark.Cifar10TrainingProcedure}}
 

@@ -27,7 +27,7 @@ a certain efficiency once the surrogate model has been learned.
 
 ## Notebooks
 
-- **WIP**
+- [**Using Representer Point Selection - L2 (RPS_L2)**](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing)
 
 
 {{deel.influenciae.rps.rps_l2.RepresenterPointL2}}

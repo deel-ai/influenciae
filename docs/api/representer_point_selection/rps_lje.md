@@ -23,6 +23,6 @@ so efficiently.
 
 ## Notebooks
 
-- **WIP**
+- [**Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE)**](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing)
 
 {{deel.influenciae.rps.rps_lje.RepresenterPointLJE}}
