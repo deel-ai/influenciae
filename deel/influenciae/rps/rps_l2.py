@@ -310,12 +310,20 @@ class RepresenterPointL2(BaseInfluenceCalculator):
             logits = self.linear_layer(z_batch)
             loss = self.linear_layer.compiled_loss(y_batch, logits)
         alpha = tape.jacobian(loss, self.linear_layer.weights)[0]
-        alpha = tf.divide(alpha, -2. * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype))
+        alpha = tf.divide(
+            alpha,
+            -2. * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype) + tf.constant(1e-5, dtype=alpha.dtype)
+        )
 
         # Now, divide each of the alpha_i by their feature maps
         alpha = tf.multiply(
             alpha,
-            tf.repeat(tf.expand_dims(tf.divide(tf.ones_like(z_batch), z_batch), axis=-1), alpha.shape[-1], axis=-1)
+            tf.repeat(
+                tf.expand_dims(
+                    tf.divide(tf.ones_like(z_batch), z_batch + tf.constant(1e-5, dtype=alpha.dtype)),
+                    axis=-1),
+                alpha.shape[-1], axis=-1
+            )
         )  # Do the multiplication part of the inner product
         alpha = tf.reduce_sum(alpha, axis=1)  # Now do the sum
 
