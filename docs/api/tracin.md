@@ -21,6 +21,6 @@ but does require to provide some of the model's checkpoints and the learning rat
 
 ## Notebooks
 
-- **WIP**
+- [**Using TracIn**](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing)
 
 {{deel.influenciae.trac_in.tracin.TracIn}}

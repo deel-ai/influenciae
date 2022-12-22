@@ -29,6 +29,6 @@ to `True`.
 ## Notebooks
 
 - [**Getting started**](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
-- Using First order influence calculator **WIP**
+- [**Using the first order influence calculator**](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)
 
 {{deel.influenciae.influence.first_order_influence_calculator.FirstOrderInfluenceCalculator}}

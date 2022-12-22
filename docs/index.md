@@ -30,20 +30,20 @@ Influenciae is a Python toolkit dedicated to computing influence values for the 
 
 We propose some hands-on tutorials to get familiar with the library and it's API:
 
-- [**Getting Started**](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
-- Benchmarking with Mislabeled sample detection (**WIP**)
-- Using the first order influence calculator (**WIP**)
-- Using the second order influence calculator (**WIP**)
-- Using TracIn (**WIP**)
-- Using Representer Point Selection - L2 (RPS_L2) (**WIP**)
-- Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE) (**WIP**)
+- [**Getting Started**](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) </sub>
+- [**Benchmarking with Mislabeled sample detection**](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing) </sub>
+- [**Using the first order influence calculator**](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) </sub>
+- [**Using the second order influence calculator**](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) </sub>
+- [**Using TracIn**](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) </sub>
+- [**Using Representer Point Selection - L2 (RPS_L2)**](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) </sub>
+- [**Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE)**](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) </sub>
 
 ## 🚀 Quick Start
 
-Influenciae requires a version of python higher than 3.6 and several libraries, including Tensorflow and Numpy. Installation can be done using Pypi:
+Influenciae requires a version of python 3.7 or higher and several libraries, including Tensorflow and Numpy. Installation can be done using Pypi:
 
 ```python
-pip install deel-influenciae
+pip install influenciae
 ```
 
 Once Influenciae is installed, there are two major applications for the different modules (that all follow the same API).
@@ -68,7 +68,7 @@ data_and_influence_dataset = influence_calculator.compute_influence_values(train
 # dataset is too large
 ```
 
-This is also explained more in depth in the [Getting Started tutotial](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
+This is also explained more in depth in the [Getting Started tutotial](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) </sub>
 
 ### Explaining neural networks through their training data
 
@@ -90,7 +90,7 @@ data_and_influence_dataset = influence_calculator.estimate_influence_values_in_b
 # dataset is too large
 ```
 
-This is also explained more in depth in the [Getting Started tutorial](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link) </sub>
+This is also explained more in depth in the [Getting Started tutorial](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) </sub>
 
 ### Determining the influence of groups of samples
 
@@ -130,15 +130,15 @@ data_and_influence_dataset = influence_calculator.estimate_influence_values_grou
 
 All the influence calculation methods work on Tensorflow models trained for any sort of task and on any type of data. Visualization functionality is implemented for image datasets only (for the moment).
 
-| **Influence Method**                                    | Source                                    |                                      Tutorial                                      |
-|:--------------------------------------------------------| :---------------------------------------- |:----------------------------------------------------------------------------------:|
-| Influence Functions                                     | [Paper](https://arxiv.org/abs/1703.04730)  |                                        WIP                                         |
-| RelatIF                                                 | [Paper](https://arxiv.org/pdf/2003.11630.pdf)  |                                        WIP                                         |
-| Influence Functions  (first order, groups)              | [Paper](https://arxiv.org/abs/1905.13289)  |                                        WIP                                         |
-| Influence Functions  (second order, groups)             | [Paper](https://arxiv.org/abs/1911.00418)  | WIP  |
-| Representer Point Selection  (L2)                       | [Paper](https://arxiv.org/abs/1811.09720)  | WIP  |
-| Representer Point Selection  (Local Jacobian Expansion) | [Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf)  | WIP  |
-| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)  | WIP  |
+| **Influence Method**                                    | Source                                    |                                                                               Tutorial                                                                               |
+|:--------------------------------------------------------| :---------------------------------------- |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+| Influence Functions                                     | [Paper](https://arxiv.org/abs/1703.04730)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
+| RelatIF                                                 | [Paper](https://arxiv.org/pdf/2003.11630.pdf)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
+| Influence Functions  (first order, groups)              | [Paper](https://arxiv.org/abs/1905.13289)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
+| Influence Functions  (second order, groups)             | [Paper](https://arxiv.org/abs/1911.00418)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing)  |
+| Representer Point Selection  (L2)                       | [Paper](https://arxiv.org/abs/1811.09720)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing)  |
+| Representer Point Selection  (Local Jacobian Expansion) | [Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing)  |
+| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing)  |
 
 ## 👀 See Also
 
@@ -163,7 +163,7 @@ This project received funding from the French ”Investing for the Future – PI
 
 ## 👨‍🎓 Creators
 
-This library was first created as a research tool by [Agustin-Martin PICARD](mailto:agustin-martin.picard@irt-saintexupery.com) in the context of the DEEL project with the help of [David Vigouroux](mailto:david.vigouroux@irt-saintexupery.com) and [Thomas FEL](http://thomasfel.fr). Later on, [Lucas Hervier](https://github.com/lucashervier) joined the team to transform (at least attempt) the code base as a practical user-(almost)-friendly and efficient tool.
+This library was first created as a research tool by [Agustin Martin PICARD](mailto:agustin-martin.picard@irt-saintexupery.com) in the context of the DEEL project with the help of [David Vigouroux](mailto:david.vigouroux@irt-saintexupery.com) and [Thomas FEL](http://thomasfel.fr). Later on, [Lucas Hervier](https://github.com/lucashervier) joined the team to transform (at least attempt) the code base as a practical user-(almost)-friendly and efficient tool.
 
 ## 📝 License
 

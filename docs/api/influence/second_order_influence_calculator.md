@@ -20,6 +20,6 @@ computations are carried out by objects from the class `InverseHessianVectorProd
 
 ## Notebooks
 
-- **WIP**
+- [**Using the second order influence calculator**](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing)
 
 {{deel.influenciae.influence.second_order_influence_calculator.SecondOrderInfluenceCalculator}}
