@@ -415,7 +415,7 @@ class MislabelingDetectorEvaluator:
         return noisy_dataset, noise_indexes
 
     @staticmethod
-    def __save(path_to_save: str, curves: np.array, mean_curve: np.array, roc: np.float) -> None:
+    def __save(path_to_save: str, curves: np.array, mean_curve: np.array, roc: float) -> None:
         """
         Saves an evaluation's results to the disk.
 
