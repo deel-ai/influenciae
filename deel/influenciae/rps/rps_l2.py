@@ -172,8 +172,8 @@ class RepresenterPointL2(BaseInfluenceCalculator):
         if len(alpha.shape) == 1 or (len(alpha.shape) == 2 and alpha.shape[1] == 1):
             influence_values = alpha * tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
         else:
-            influence_values = tf.gather(alpha, tf.argmax(labels_test, axis=1), axis=1, batch_dims=1) * \
-                           tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
+            influence_values = tf.gather(alpha, labels_test, axis=1, batch_dims=1) * \
+                               tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
         influence_values = tf.transpose(influence_values)
 
         return influence_values
