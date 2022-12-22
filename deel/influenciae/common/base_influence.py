@@ -143,6 +143,8 @@ class SelfInfluenceCalculator:
 
         for batch in train_set:
             influence_values = self._compute_influence_value_from_batch(batch)
+            if len(influence_values.shape) == 1:
+                influence_values = tf.expand_dims(influence_values, axis=-1)
             batch_sorted_dict.add_all(tf.expand_dims(batch[0], axis=0), tf.transpose(influence_values))
 
         best_samples, best_values = batch_sorted_dict.get()
