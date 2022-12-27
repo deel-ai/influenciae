@@ -433,7 +433,7 @@ class MislabelingDetectorEvaluator:
         dirname = os.path.dirname(path_to_save)
         if not os.path.exists(dirname):
             os.makedirs(dirname)
-        np.save(path_to_save, (curves, mean_curve, roc), allow_pickle=True)
+        np.save(path_to_save, np.array((curves, mean_curve, roc), dtype=object), allow_pickle=True)
 
 
 class ModelsSaver(tf.keras.callbacks.Callback):
@@ -492,4 +492,3 @@ class ModelsSaver(tf.keras.callbacks.Callback):
                 np.save(f"{self.saving_path}/learning_rates", np.array(self.learning_rates), allow_pickle=True)
                 with open(f"{self.saving_path}/logs.json", "w", encoding='utf8') as f:
                     json.dump(logs, f)
-
