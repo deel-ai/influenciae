@@ -12,8 +12,8 @@ from enum import Enum
 from argparse import ArgumentError
 
 import tensorflow as tf
-from tensorflow.keras import Model # pylint: disable=E0611
-from tensorflow.keras.models import Sequential # pylint: disable=E0611
+from tensorflow.keras import Model  # pylint: disable=E0611
+from tensorflow.keras.models import Sequential  # pylint: disable=E0611
 
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 
@@ -322,6 +322,155 @@ class ExactIHVP(InverseHessianVectorProduct):
         if self.hessian is None:
             self.hessian = tf.linalg.pinv(self.inv_hessian)
         return super().compute_hvp(group, use_gradient)
+
+
+class ForwardOverBackwardHVP:
+    """
+    A class for efficiently computing Hessian-vector products using forward-over-backward
+    auto-differentiation.
+    This module is used for the approximate IHVP calculations (CGD and LISSA).
+
+    Parameters
+    ----------
+    model
+        A TF model following the InfluenceModel interface.
+    train_dataset
+        A (batched) TF dataset with the data-points that will be used for the hessian.
+    weights
+        The target weights on which to calculate the HVP.
+    """
+    def __init__(
+            self,
+            model: InfluenceModel,
+            train_dataset: tf.data.Dataset,
+            weights: Optional[List[tf.Tensor]] = None
+    ):
+        self.model = model
+        self.train_dataset = train_dataset
+        self.cardinality = train_dataset.cardinality()
+
+        if weights is None:
+            self.weights = model.weights
+        else:
+            self.weights = weights
+
+    @staticmethod
+    def _reshape_vector(grads: tf.Tensor, weights: tf.Tensor) -> List[tf.Tensor]:
+        """
+        Reshapes the gradient vector to the right shape for being input into the HVP computation.
+
+        Parameters
+        ----------
+        grads
+            A tensor with the computed gradients.
+        weights
+            A tensor with the target weights.
+
+        Returns
+        -------
+        grads_reshape
+            A list with the gradients in the right shape.
+        """
+        grads_reshape = []
+        index = 0
+        for w in weights:
+            shape = tf.shape(w)
+            size = tf.reduce_prod(shape)
+            g = grads[index:(index + size)]
+            grads_reshape.append(tf.reshape(g, shape))
+            index += size
+        return grads_reshape
+
+    @tf.function
+    def _sub_call(
+            self,
+            x: tf.Tensor,
+            feature_maps_hessian_current: tf.Tensor,
+            y_hessian_current: tf.Tensor
+    ) -> tf.Tensor:
+        """
+        Performs the hessian-vector product for a single feature map.
+
+        Parameters
+        ----------
+        x
+            The gradient vector to be multiplied by the hessian matrix.
+        feature_maps_hessian_current
+            The current feature map for the hessian calculation.
+        y_hessian_current
+            The label corresponding to the current feature map.
+
+        Returns
+        -------
+        hessian_vector_product
+            A tf.Tensor containing the result of the hessian-vector product for a given input point and one pair
+            feature map-label.
+        """
+        with tf.autodiff.ForwardAccumulator(
+                self.weights,
+                # The "vector" in Hessian-vector product.
+                x) as acc:
+            with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+                tape.watch(self.weights)
+                loss = self.model.loss_function(y_hessian_current, self.model(feature_maps_hessian_current))
+            backward = tape.jacobian(loss, self.weights)
+        hessian_vector_product = acc.jvp(backward)
+
+        hvp = [tf.reshape(hessian_vp, shape=(-1,)) for hessian_vp in hessian_vector_product]
+        hvp = tf.concat(hvp, axis=0)
+
+        weight = tf.cast(tf.shape(feature_maps_hessian_current)[0], dtype=hvp.dtype)
+
+        hvp = hvp * weight
+
+        return hvp
+
+    def __call__(self, x_initial: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the mean hessian-vector product for a given feature map over a set of points.
+
+        Parameters
+        ----------
+        x_initial
+            The point of the dataset over which this product will be computed
+
+        Returns
+        -------
+        hessian_vector_product
+            Tensor with the hessian-vector product
+        """
+        x = self._reshape_vector(x_initial, self.model.weights)
+
+        hvp_init = tf.zeros((self.model.nb_params,), dtype=x_initial.dtype)
+        dataset_iterator = iter(self.train_dataset)
+
+        def body_func(i, hessian_vector_product, nb_hessian):
+            features_block, labels_block = next(dataset_iterator)
+
+            def batched_hvp(elt):
+                f, l = elt
+                hessian_product_current = self._sub_call(x, tf.expand_dims(f, axis=0), tf.expand_dims(l, axis=0))
+
+                return hessian_product_current
+
+            hessian_vector_product_inner = tf.reduce_sum(
+                tf.map_fn(fn=batched_hvp, elems=[features_block, labels_block], fn_output_signature=x_initial.dtype),
+                axis=0
+            )
+
+            hessian_vector_product += hessian_vector_product_inner
+            return (i + 1, hessian_vector_product, nb_hessian + tf.shape(features_block)[0])
+
+        _, hessian_vector_product, nb_hessian = tf.while_loop(
+            cond=lambda i, _, __: i < self.cardinality,
+            body=body_func,
+            loop_vars=[tf.constant(0, dtype=tf.int64), hvp_init, tf.constant(0, dtype=tf.int32)]
+        )
+
+        hessian_vector_product = tf.reshape(hessian_vector_product, (self.model.nb_params, 1)) / tf.cast(nb_hessian,
+                                                                                                         dtype=hessian_vector_product.dtype)
+
+        return hessian_vector_product
 
 
 class ConjugateGradientDescentIHVP(InverseHessianVectorProduct):
