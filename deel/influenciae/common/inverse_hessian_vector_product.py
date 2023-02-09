@@ -17,7 +17,7 @@ from tensorflow.keras.models import Sequential  # pylint: disable=E0611
 
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 
-from ..types import Optional, Union, Tuple, List
+from ..types import Optional, Union, Tuple, List, Callable
 from ..utils import assert_batched_dataset, dataset_size, conjugate_gradients_solve, map_to_device
 
 
@@ -670,12 +670,83 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
         super().__init__(iterative_function, model, extractor_layer, train_dataset, n_cgd_iters, feature_extractor)
 
 
+class LissaIHVP(IterativeIHVP):
+    """
+    A class that approximately computes inverse-hessian-vector products leveraging forward-over-backward
+    automatic differentiation and lissa [https://arxiv.org/pdf/1703.04730.pdf , https://arxiv.org/pdf/1602.03943.pdf]
+    to estimate the product directly, without needing to calculate the hessian matrix or invert it.
+
+    [A^{-1}v]_{j+1} = v + (I - (A + d * I))[A^{-1}v]_j * v
+
+    Notes
+    -----
+    It is ideal for models containing a considerable amount of parameters. It does however trade memory for
+    speed, as the calculations for estimating the inverse hessian operator are repeated for each sample.
+
+    Parameters
+    ----------
+    model
+        The TF2.X model implementing the InfluenceModel interface
+    extractor_layer
+        An integer indicating the position of the last layer of the feature extraction network.
+    train_dataset
+        The TF dataset, already batched and containing only the samples we wish to use for the computation of the
+        hessian matrix
+    n_cgd_iters
+        The maximum amount of CGD iterations to perform when estimating the inverse-hessian
+    feature_extractor
+        If the feature extraction model is not Sequential, the full TF graph must be provided for the computation of
+        the different feature maps.
+    damping
+        A damping parameter to regularize a nearly singular operator.
+    scale
+        A rescaling factor to verify the hypothesis of norm(operator / scale) < 1.
+    """
+    def __init__(
+            self,
+            model: InfluenceModel,
+            extractor_layer: Union[int, str],
+            train_dataset: tf.data.Dataset,
+            n_cgd_iters: Optional[int] = 100,
+            feature_extractor: Optional[Model] = None,
+            damping: float = 1e-4,
+            scale: float = 10.
+    ):
+        super().__init__(self.lissa, model, extractor_layer, train_dataset, n_cgd_iters, feature_extractor)
+        self.damping = tf.convert_to_tensor(damping, dtype=tf.float32)
+        self.scale = tf.convert_to_tensor(scale, dtype=tf.float32)
+
+    def lissa(self, operator: Callable, v: tf.Tensor, maxiter: int):
+        """
+        Parameters
+        ----------
+        operator
+            The hvp operator
+        v
+            The vector where the inversion of the operator shall be proceeded
+        maxiter
+            Number of iteration of the algorithm
+        Returns
+        -------
+        ihvp_result
+            A tensor containing the inversion operator
+        """
+        _, ihvp_result = tf.while_loop(lambda index, ihvp: index < maxiter,
+                                       lambda index, ihvp: (index + 1, v + tf.cast(1. - self.damping, dtype=tf.float32) * ihvp - operator(ihvp) / self.scale),
+                                       [tf.constant(0, dtype=tf.int32), v],
+                                       parallel_iterations=1)
+        ihvp_result /= self.scale
+
+        return ihvp_result
+
+
 class IHVPCalculator(Enum):
     """
     Inverse Hessian Vector Product Calculator interface.
     """
     Exact = ExactIHVP
     Cgd = ConjugateGradientDescentIHVP
+    Lissa = LissaIHVP
 
     @staticmethod
     def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
@@ -693,9 +764,11 @@ class IHVPCalculator(Enum):
         ivhp_calculator
             IHVPCalculator object.
         """
-        assert ihvp_calculator in ['exact', 'cgd'], "Only 'exact' and 'cgd' inverse hessian " \
-                                                    "vector product calculators are supported."
+        assert ihvp_calculator in ['exact', 'cgd', 'lissa'], "Only 'exact', 'lissa' and 'cgd' inverse hessian " \
+                                                             "vector product calculators are supported."
         if ihvp_calculator == 'exact':
             return IHVPCalculator.Exact
+        elif ihvp_calculator == 'lissa':
+            return IHVPCalculator.Lissa
 
         return IHVPCalculator.Cgd
