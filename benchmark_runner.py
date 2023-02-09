@@ -43,12 +43,12 @@ if __name__ == '__main__':
 
     # Methods parameters
     parser.add_argument("-ihvp_mode", default='exact', type=str, help="Inverse hessian product computation method",
-                        choices=['exact', 'cgd'])
+                        choices=['exact', 'cgd', 'lissa'])
     parser.add_argument("-start_layer", default=-1, type=int,
                         help="Starting layer index for the weights and bias collection.")
     parser.add_argument("-dataset_hessian_size", default=2000, type=int,
                         help="The number of samples used for hessian expectation estimation")
-    parser.add_argument("-n_cgd_iters", default=100, type=int, help="Number of iterations for cgd")
+    parser.add_argument("-n_opt_iters", default=100, type=int, help="Number of iterations for the optimizer")
     parser.add_argument("-feature_extractor", default=-1, type=int, help="End layer index for the feature extractor")
     parser.add_argument("-lambda_regularization", default=1E-4, type=float, help="L2 regularization for rps L2")
     parser.add_argument("-scaling_factor", default=0.1, type=float, help="Scaling factor for rps L2")
@@ -81,7 +81,7 @@ if __name__ == '__main__':
             influence_factory = FirstOrderFactory(ihvp_mode=args.ihvp_mode,
                                                   start_layer=args.start_layer,
                                                   dataset_hessian_size=args.dataset_hessian_size,
-                                                  n_cgd_iters=args.n_cgd_iters,
+                                                  n_opt_iters=args.n_opt_iters,
                                                   feature_extractor=args.feature_extractor)
 
         elif method_name == 'tracein':
@@ -96,7 +96,7 @@ if __name__ == '__main__':
             influence_factory = RPSLJEFactory(ihvp_mode=args.ihvp_mode,
                                               start_layer=args.start_layer,
                                               dataset_hessian_size=args.dataset_hessian_size,
-                                              n_cgd_iters=args.n_cgd_iters,
+                                              n_opt_iters=args.n_opt_iters,
                                               feature_extractor=args.feature_extractor
                                               )
         else:

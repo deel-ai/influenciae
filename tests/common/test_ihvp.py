@@ -57,7 +57,7 @@ def test_compute_ihvp_single_batch():
 
     ## LissaIHVP
     ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                scale=4., damping=1e-4, n_cgd_iters=200)
+                                scale=4., damping=1e-4, n_opt_iters=200)
 
     # test the compute_ihvp_single_batch
     ihvp_list = []
@@ -116,7 +116,7 @@ def test_compute_hvp_single_batch():
 
     ## LissaIHVP
     ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                scale=4., damping=1e-4, n_cgd_iters=200)
+                                scale=4., damping=1e-4, n_opt_iters=200)
 
     # test the compute_hvp_single_batch
     hvp_list = []
@@ -376,7 +376,7 @@ def test_lissa_ihvp():
 
     # Compute the IHVP using auto-diff and check shapes
     ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                damping=1e-4, scale=4., n_cgd_iters=200)
+                                damping=1e-4, scale=4., n_opt_iters=200)
     ihvp = ihvp_calculator.compute_ihvp(train_set.batch(5))
     ihvp_list = []
     for elt in ihvp:

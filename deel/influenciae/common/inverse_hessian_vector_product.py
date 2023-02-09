@@ -493,7 +493,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
     train_dataset
         The TF dataset, already batched and containing only the samples we wish to use for the computation of the
         hessian matrix
-    n_cgd_iters
+    n_opt_iters
         The maximum amount of CGD iterations to perform when estimating the inverse-hessian
     feature_extractor
         If the feature extraction model is not Sequential, the full TF graph must be provided for the computation of
@@ -505,11 +505,11 @@ class IterativeIHVP(InverseHessianVectorProduct):
             model: InfluenceModel,
             extractor_layer: Union[int, str],
             train_dataset: tf.data.Dataset,
-            n_cgd_iters: Optional[int] = 100,
+            n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Model] = None,
     ):
         super().__init__(model, train_dataset)
-        self.n_cgd_iters = n_cgd_iters
+        self.n_opt_iters = n_opt_iters
         self._batch_shape_tensor = None
         self.extractor_layer = extractor_layer
 
@@ -587,7 +587,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         def cgd_func(single_grad):
             inv_hessian_vect_product = self.iterative_function(self.hessian_vector_product,
                                                                tf.expand_dims(single_grad, axis=-1),
-                                                               self.n_cgd_iters)
+                                                               self.n_opt_iters)
             return inv_hessian_vect_product
 
         ihvp_list = tf.map_fn(fn=cgd_func, elems=grads)
@@ -651,7 +651,7 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
     train_dataset
         The TF dataset, already batched and containing only the samples we wish to use for the computation of the
         hessian matrix
-    n_cgd_iters
+    n_opt_iters
         The maximum amount of CGD iterations to perform when estimating the inverse-hessian
     feature_extractor
         If the feature extraction model is not Sequential, the full TF graph must be provided for the computation of
@@ -662,12 +662,12 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
             model: InfluenceModel,
             extractor_layer: Union[int, str],
             train_dataset: tf.data.Dataset,
-            n_cgd_iters: Optional[int] = 100,
+            n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Model] = None,
     ):
         iterative_function = lambda operator, v, maxiter: conjugate_gradients_solve(operator, v, x0=None,
-                                                                                    maxiter=self.n_cgd_iters)
-        super().__init__(iterative_function, model, extractor_layer, train_dataset, n_cgd_iters, feature_extractor)
+                                                                                    maxiter=self.n_opt_iters)
+        super().__init__(iterative_function, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
 
 
 class LissaIHVP(IterativeIHVP):
@@ -692,7 +692,7 @@ class LissaIHVP(IterativeIHVP):
     train_dataset
         The TF dataset, already batched and containing only the samples we wish to use for the computation of the
         hessian matrix
-    n_cgd_iters
+    n_opt_iters
         The maximum amount of CGD iterations to perform when estimating the inverse-hessian
     feature_extractor
         If the feature extraction model is not Sequential, the full TF graph must be provided for the computation of
@@ -707,12 +707,12 @@ class LissaIHVP(IterativeIHVP):
             model: InfluenceModel,
             extractor_layer: Union[int, str],
             train_dataset: tf.data.Dataset,
-            n_cgd_iters: Optional[int] = 100,
+            n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Model] = None,
             damping: float = 1e-4,
             scale: float = 10.
     ):
-        super().__init__(self.lissa, model, extractor_layer, train_dataset, n_cgd_iters, feature_extractor)
+        super().__init__(self.lissa, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
         self.damping = tf.convert_to_tensor(damping, dtype=tf.float32)
         self.scale = tf.convert_to_tensor(scale, dtype=tf.float32)
 
