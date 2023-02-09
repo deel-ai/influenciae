@@ -13,7 +13,12 @@ from abc import abstractmethod
 import tensorflow as tf
 
 from .model_wrappers import InfluenceModel
-from .inverse_hessian_vector_product import InverseHessianVectorProduct, ExactIHVP, ConjugateGradientDescentIHVP
+from .inverse_hessian_vector_product import (
+    InverseHessianVectorProduct,
+    ExactIHVP,
+    ConjugateGradientDescentIHVP,
+    LissaIHVP
+)
 
 from ..types import Union, Optional
 
@@ -121,4 +126,71 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
             dataset,
             self.n_cgd_iters,
             self.feature_extractor,
+        )
+
+
+class LissaIHVPFactory(InverseHessianVectorProductFactory):
+    """
+    A factory for instantiating LissaIHVP objects.
+
+    Attributes
+    ----------
+    feature_extractor
+        Either a TF feature-extractor model or the index of the layer of a whole model
+        which will be cut into two for computing the influence vectors and scores.
+    n_cgd_iters
+        An integer specifying the amount of iterations of the optimizer to run before
+        (prematurely) considering the optimization completed.
+    extractor_layer
+        The cutoff layer for the feature extractor, if specified in TF model format.
+    damping
+        A damping parameter to regularize a nearly singular operator.
+    scale
+        A rescaling factor to verify the hypothesis of norm(operator / scale) < 1.
+    """
+    def __init__(
+        self,
+        feature_extractor: Union[int, tf.keras.Model] = -1,
+        n_cgd_iters: int = 100,
+        extractor_layer: Optional[Union[str, int]] = None,
+        damping: float = 1e-4,
+        scale: float = 10.
+    ):
+        self.n_cgd_iters = n_cgd_iters
+        self.damping = damping
+        self.scale = scale
+        if isinstance(feature_extractor, int):
+            self.extractor_layer = feature_extractor
+            self.feature_extractor = None
+        else:
+            assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
+                                                "provide the id of the last extracted layer"
+            self.extractor_layer = extractor_layer
+            self.feature_extractor = feature_extractor
+
+    def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
+        """
+        Creates an instance of the ConjugateGradientDescentIHVP class for the provided model and its
+        corresponding (full or partial) training dataset.
+
+        Parameters
+        ----------
+        model_influence
+            A TF model implementing the InfluenceModel interface.
+        dataset
+            A TF dataset containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        cgd_ihvp
+            An instance of the ConjugateGradientDescentIHVP class
+        """
+        return LissaIHVP(
+            model_influence,
+            self.extractor_layer,
+            dataset,
+            self.n_cgd_iters,
+            self.feature_extractor,
+            self.damping,
+            self.scale
         )

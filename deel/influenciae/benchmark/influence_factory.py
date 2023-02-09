@@ -13,8 +13,8 @@ import tensorflow as tf
 from tensorflow.keras.losses import Loss, Reduction  # pylint: disable=E0611
 
 from ..common import InfluenceModel, BaseInfluenceCalculator
-from ..common import ExactIHVP, ConjugateGradientDescentIHVP
-from ..common import ExactIHVPFactory, CGDIHVPFactory
+from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
+from ..common import ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
 
 from ..influence import FirstOrderInfluenceCalculator
 from ..rps import RepresenterPointLJE
@@ -64,7 +64,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
     dataset_hessian_size
         An integer for the amount of samples that should go into the computation of the hessian matrix. By
         default, the entire training dataset is used.
-    n_cgd_iters
+    n_opt_iters
         An integer indicating how many iterations of the Conjugate Gradient Descent algorithm should be run
         before prematurely stopping the optimization.
     feature_extractor
@@ -72,18 +72,18 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         embeddings of the samples. Used if ihvp_mode == 'cgd'.
     """
 
-    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_cgd_iters=100,
+    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
                  feature_extractor: Union[int, tf.keras.Model] = -1,
                  loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
                      from_logits=True, reduction=Reduction.NONE)
                  ):
         self.start_layer = start_layer
         self.ihvp_mode = ihvp_mode
-        self.n_cgd_iters = n_cgd_iters
+        self.n_opt_iters = n_opt_iters
         self.feature_extractor = feature_extractor
         self.dataset_hessian_size = dataset_hessian_size
         self.loss_function = loss_function
-        assert self.ihvp_mode in ['exact', 'cgd']
+        assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               train_info: Any) -> FirstOrderInfluenceCalculator:
@@ -116,7 +116,10 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
             ihvp_calculator = ExactIHVP(influence_model, dataset_hessian)
         elif self.ihvp_mode == 'cgd':
             ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, self.feature_extractor, dataset_hessian,
-                                                           self.n_cgd_iters)
+                                                           self.n_opt_iters)
+        elif self.ihvp_mode == 'lissa':
+            ihvp_calculator = LissaIHVP(influence_model, self.feature_extractor, dataset_hessian, self.n_opt_iters,
+                                        damping=1e-4, scale=5.)
         else:
             raise Exception("unknown ihvp calculator=" + self.ihvp_mode)
 
@@ -138,7 +141,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
     dataset_hessian_size
         An integer for the amount of samples that should go into the computation of the hessian matrix. By
         default, the entire training dataset is used.
-    n_cgd_iters
+    n_opt_iters
         An integer indicating how many iterations of the Conjugate Gradient Descent algorithm should be run
         before prematurely stopping the optimization.
     feature_extractor
@@ -146,18 +149,18 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         embeddings of the samples. Used if ihvp_mode == 'cgd'.
     """
 
-    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_cgd_iters=100,
+    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
                  feature_extractor: Union[int, tf.keras.Model] = -1,
                  loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
                      from_logits=True, reduction=Reduction.NONE)
                  ):
         self.start_layer = start_layer
         self.ihvp_mode = ihvp_mode
-        self.n_cgd_iters = n_cgd_iters
+        self.n_opt_iters = n_opt_iters
         self.feature_extractor = feature_extractor
         self.dataset_hessian_size = dataset_hessian_size
         self.loss_function = loss_function
-        assert self.ihvp_mode in ['exact', 'cgd']
+        assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               train_info: Any) -> RepresenterPointLJE:
@@ -189,7 +192,9 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         if self.ihvp_mode == 'exact':
             ihvp_calculator_factory = ExactIHVPFactory()
         elif self.ihvp_mode == 'cgd':
-            ihvp_calculator_factory = CGDIHVPFactory(self.feature_extractor, self.n_cgd_iters)
+            ihvp_calculator_factory = CGDIHVPFactory(self.feature_extractor, self.n_opt_iters)
+        elif self.ihvp_mode == 'lissa':
+            ihvp_calculator_factory = LissaIHVPFactory(self.feature_extractor, self.n_opt_iters, damping=1e-4, scale=5.)
         else:
             raise Exception("unknown ihvp calculator=" + self.ihvp_mode)
 

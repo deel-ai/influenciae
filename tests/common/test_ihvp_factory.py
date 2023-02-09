@@ -10,10 +10,11 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
-from deel.influenciae.common import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory
+from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
+from deel.influenciae.common import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
 
 from ..utils_test import almost_equal
+
 
 def test_exact_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
@@ -32,6 +33,7 @@ def test_exact_factory():
     assert isinstance(ihvp_from_factory, ExactIHVP)
 
     assert almost_equal(ihvp.inv_hessian, ihvp_from_factory.inv_hessian, epsilon=1e-3)
+
 
 def test_cgd_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
@@ -54,7 +56,6 @@ def test_cgd_factory():
     assert ihvp.extractor_layer == ihvp_from_factory.extractor_layer
     assert len(ihvp.feature_extractor.layers) == len(ihvp_from_factory.feature_extractor.layers)
     assert ihvp.weights == ihvp_from_factory.weights
-    assert ihvp.n_hessian == ihvp_from_factory.n_hessian
     for ihvp_batch, factory_batch in zip(ihvp.train_set, ihvp_from_factory.train_set):
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
@@ -69,7 +70,6 @@ def test_cgd_factory():
     assert ihvp.extractor_layer == ihvp_from_factory.extractor_layer
     assert len(ihvp.feature_extractor.layers) == len(ihvp_from_factory.feature_extractor.layers)
     assert ihvp.weights == ihvp_from_factory.weights
-    assert ihvp.n_hessian == ihvp_from_factory.n_hessian
     for ihvp_batch, factory_batch in zip(ihvp.train_set, ihvp_from_factory.train_set):
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
@@ -78,3 +78,48 @@ def test_cgd_factory():
     feature_extractor = Sequential(model.layers[:1])
     with pytest.raises(AssertionError):
         cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
+
+
+def test_lissa_factory():
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    inputs = tf.random.normal((25, 1, 3))
+    target = tf.random.normal((25, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
+
+    n_lissa_iters = 100
+
+    # case 1
+    feature_extractor = Sequential(model.layers[:1])
+    ihvp = LissaIHVP(influence_model, 1, train_set, n_lissa_iters, feature_extractor)
+    lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters, 1)
+    assert isinstance(lissa_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = lissa_factory.build(influence_model, train_set)
+    assert ihvp.extractor_layer == ihvp_from_factory.extractor_layer
+    assert len(ihvp.feature_extractor.layers) == len(ihvp_from_factory.feature_extractor.layers)
+    assert ihvp.weights == ihvp_from_factory.weights
+    for ihvp_batch, factory_batch in zip(ihvp.train_set, ihvp_from_factory.train_set):
+        assert almost_equal(ihvp_batch[0], factory_batch[0])
+        assert almost_equal(ihvp_batch[1], factory_batch[1])
+
+    # case 2
+    feature_extractor = 1
+    ihvp = LissaIHVP(influence_model, 1, train_set, n_lissa_iters, None)
+    lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
+    assert isinstance(lissa_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = lissa_factory.build(influence_model, train_set)
+    assert ihvp.extractor_layer == ihvp_from_factory.extractor_layer
+    assert len(ihvp.feature_extractor.layers) == len(ihvp_from_factory.feature_extractor.layers)
+    assert ihvp.weights == ihvp_from_factory.weights
+    for ihvp_batch, factory_batch in zip(ihvp.train_set, ihvp_from_factory.train_set):
+        assert almost_equal(ihvp_batch[0], factory_batch[0])
+        assert almost_equal(ihvp_batch[1], factory_batch[1])
+
+    # case 3
+    feature_extractor = Sequential(model.layers[:1])
+    with pytest.raises(AssertionError):
+        lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
