@@ -6,7 +6,15 @@ import argparse
 
 from tensorflow.keras.losses import CategoricalCrossentropy, Reduction
 
-from deel.influenciae.benchmark.influence_factory import TracInFactory, RPSLJEFactory, FirstOrderFactory, RPSL2Factory
+from deel.influenciae.benchmark.influence_factory import (
+    TracInFactory,
+    RPSLJEFactory,
+    FirstOrderFactory,
+    RPSL2Factory,
+    WeightsBoundaryCalculatorFactory,
+    SampleBoundaryCalculatorFactory,
+    ArnoldiCalculatorFactory
+)
 from deel.influenciae.benchmark.cifar10_benchmark import Cifar10MislabelingDetectorEvaluator
 
 if __name__ == '__main__':
@@ -39,7 +47,8 @@ if __name__ == '__main__':
     parser.add_argument("-nbr_of_evaluation", default=10, type=int, help="Nbr of seeds used to bench a method")
 
     parser.add_argument("-method_name", default='influence_first_order', metavar=str, help="methods to benchmark",
-                        choices=['influence_first_order', 'tracein', 'rps_lje', 'rps_l2'], required=True)
+                        choices=['influence_first_order', 'tracein', 'rps_lje', 'rps_l2', 'boundary_weights',
+                                 'boundary_sample', 'arnoldi'], required=True)
 
     # Methods parameters
     parser.add_argument("-ihvp_mode", default='exact', type=str, help="Inverse hessian product computation method",
@@ -54,6 +63,12 @@ if __name__ == '__main__':
     parser.add_argument("-scaling_factor", default=0.1, type=float, help="Scaling factor for rps L2")
     parser.add_argument("-layer_index", default=-2, type=int, help="Layer index for rps L2")
     parser.add_argument("-epochs_rpsl2", default=100, type=int, help="Epochs to train the dense layer for rps L2")
+    parser.add_argument("-boundary_iter", default=100, type=int, help="Number of iterations to found the boundary")
+    parser.add_argument("-subspace_dim", default=200, type=int, help="Arnoldi method - subspace projection")
+    parser.add_argument("-k_largest_eig_vals", default=100, type=int,
+                        help="Arnoldi method - number of top eigenvalues to keep")
+    parser.add_argument("-force_hermitian", default=False, type=bool,
+                        help="Arnoldi method - force matrix to be hermitian before eigenvalue computation")
 
     parser.add_argument("-take_batch", default=-1, type=int, help="For debug, keep only a part of the dataset")
 
@@ -99,6 +114,16 @@ if __name__ == '__main__':
                                               n_opt_iters=args.n_opt_iters,
                                               feature_extractor=args.feature_extractor
                                               )
+        elif method_name == 'boundary_weights':
+            influence_factory = WeightsBoundaryCalculatorFactory(step_nbr=args.boundary_iter)
+        elif method_name == 'boundary_sample':
+            influence_factory = SampleBoundaryCalculatorFactory(step_nbr=args.boundary_iter)
+        elif method_name == 'scaling_up':
+            influence_factory = ArnoldiCalculatorFactory(subspace_dim=args.subspace_dim,
+                                                         force_hermitian=args.force_hermitian,
+                                                         k_largest_eig_vals=args.k_largest_eig_vals,
+                                                         start_layer=args.start_layer,
+                                                         dataset_hessian_size=args.dataset_hessian_size)
         else:
             raise Exception('Unknown method to benchmark=' + method_name)
 
