@@ -10,16 +10,17 @@ from abc import abstractmethod
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.losses import Loss, Reduction  # pylint: disable=E0611
+from tensorflow.keras.losses import Loss, Reduction, CategoricalCrossentropy  # pylint: disable=E0611
 
 from ..common import InfluenceModel, BaseInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from ..common import ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
 
-from ..influence import FirstOrderInfluenceCalculator
+from ..influence import FirstOrderInfluenceCalculator, ArnoldiInfluenceCalculator
 from ..rps import RepresenterPointLJE
 from ..trac_in import TracIn
 from ..rps import RepresenterPointL2
+from ..boundary_based import WeightsBoundaryCalculator, SampleBoundaryCalculator
 
 from ..types import Any, Union, Callable
 
@@ -35,6 +36,7 @@ class InfluenceCalculatorFactory:
         """
         Builds an instance of an influence calculator class following the provided model, training dataset
         and additional information.
+
         Parameters
         ----------
         training_dataset
@@ -44,6 +46,7 @@ class InfluenceCalculatorFactory:
         train_info
             An object providing additional information about the training procedure. For example, additional
             information is needed for computing influence values using TracIn.
+
         Returns
         -------
         The desired influence calculator instance.
@@ -54,6 +57,7 @@ class InfluenceCalculatorFactory:
 class FirstOrderFactory(InfluenceCalculatorFactory):
     """
     A factory for creating instances of FirstOrderInfluenceCalculator objects.
+
     Attributes
     ----------
     ihvp_mode
@@ -88,8 +92,9 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               train_info: Any) -> FirstOrderInfluenceCalculator:
         """
-        Builds an instance of a first order influence calculator class following the provided model and
+        Builds an instance of the FirstOrderInfluenceCalculator class following the provided model and
         training dataset. No additional information is required.
+
         Parameters
         ----------
         training_dataset
@@ -98,9 +103,10 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
             A TF model for which to compute the influence-related quantities.
         train_info
             In this case, None, as no additional information is required.
+
         Returns
         -------
-        The desired first order influence calculator instance.
+        The desired FirstOrderInfluenceCalculator instance.
         """
         influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
 
@@ -131,6 +137,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
 class RPSLJEFactory(InfluenceCalculatorFactory):
     """
     A factory for creating instances of representer point LJE objects.
+
     Attributes
     ----------
     ihvp_mode
@@ -165,7 +172,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               train_info: Any) -> RepresenterPointLJE:
         """
-        Builds an instance of a representer point LJE class following the provided model and training dataset.
+        Builds an instance of the RepresenterPointLJE class following the provided model and training dataset.
         No additional information is required in this case.
         Parameters
         ----------
@@ -177,7 +184,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
             None in this case, as no additional information is required
         Returns
         -------
-        The desired representer point LJE instance.
+        The desired RepresenterPointLJE instance.
         """
         influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
 
@@ -219,6 +226,7 @@ class TracInFactory(InfluenceCalculatorFactory):
         """
         Builds an instance of the TracIn class following the provided model, training dataset
         and additional information.
+
         Parameters
         ----------
         training_dataset
@@ -228,6 +236,7 @@ class TracInFactory(InfluenceCalculatorFactory):
         train_info
             A tuple with a list with the model's checkpoints on the first element and the corresponding
             list of learning rates on the second element.
+
         Returns
         -------
         The desired TracIn instance.
@@ -242,7 +251,8 @@ class TracInFactory(InfluenceCalculatorFactory):
 
 class RPSL2Factory(InfluenceCalculatorFactory):
     """
-    A factory for creating instances of representer point L2 objects.
+    A factory for creating instances of RepresenterPointL2 objects.
+
     Attributes
     ----------
     loss_function
@@ -276,8 +286,9 @@ class RPSL2Factory(InfluenceCalculatorFactory):
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
               train_info: Any) -> RepresenterPointL2:
         """
-        Builds an instance of the representer point L2 class following the provided model and training dataset.
+        Builds an instance of the RepresenterPointL2 class following the provided model and training dataset.
         No additional information is required in this case.
+
         Parameters
         ----------
         training_dataset
@@ -286,9 +297,10 @@ class RPSL2Factory(InfluenceCalculatorFactory):
             A TF model for which to compute the influence-related quantities.
         train_info
             None, as no additional information is required in this case.
+
         Returns
         -------
-        The desired representer point L2 instance.
+        The desired RepresenterPointL2 instance.
         """
         influence_calculator = RepresenterPointL2(model,
                                                   training_dataset,
@@ -298,3 +310,147 @@ class RPSL2Factory(InfluenceCalculatorFactory):
                                                   self.epochs,
                                                   self.layer_index)
         return influence_calculator
+
+
+class WeightsBoundaryCalculatorFactory(InfluenceCalculatorFactory):
+    """
+    A factory for creating instances of WeightsBoundaryCalculator objects.
+
+    Attributes
+    ----------
+    step_nbr
+        The number of iterations to search the boundary for. By default, a value of 100 is chosen.
+    norm_type
+        The norm type of the distance between the weights to measure the distance to the boundary.
+        By default, the L2 distance is chosen.
+    """
+    def __init__(self, step_nbr: int = 100, norm_type: int = 2):
+        self.step_nbr = step_nbr
+        self.norm_type = norm_type
+
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              train_info: Any) -> WeightsBoundaryCalculator:
+        """
+        Builds an instance of the WeightsBoundaryCalculator class following the provided model and training dataset.
+        No additional information is required in this case.
+
+        Parameters
+        ----------
+        training_dataset
+            A TF dataset with the data on which the model was trained.
+        model
+            A TF model for which to compute the influence-related quantities.
+        train_info
+            None, as no additional information is required in this case.
+
+        Returns
+        -------
+        The desired WeightsBoundaryCalculator instance.
+        """
+        return WeightsBoundaryCalculator(model, self.step_nbr, self.norm_type)
+
+
+class SampleBoundaryCalculatorFactory(InfluenceCalculatorFactory):
+    """
+    A factory for creating instances of SampleBoundaryCalculator objects.
+
+    Attributes
+    ----------
+    step_nbr
+        The number of iterations to search the boundary for. By default, a value of 100 is chosen.
+    """
+
+    def __init__(self, step_nbr: int = 100):
+        self.step_nbr = step_nbr
+
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              train_info: Any) -> SampleBoundaryCalculator:
+        """
+        Builds an instance of the SampleBoundaryCalculator class following the provided model and training dataset.
+        No additional information is required in this case.
+
+        Parameters
+        ----------
+        training_dataset
+            A TF dataset with the data on which the model was trained.
+        model
+            A TF model for which to compute the influence-related quantities.
+        train_info
+            None, as no additional information is required in this case.
+
+        Returns
+        -------
+        The desired SampleBoundaryCalculator instance.
+        """
+        return SampleBoundaryCalculator(model, self.step_nbr)
+
+
+class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
+    """
+    A factory for creating instances of ArnoldiInfluenceCalculator objects.
+
+    Attributes
+    ----------
+    subspace_dim
+        The dimension of the Krylov subspace for the Arnoldi algorithm.
+    force_hermitian
+        A boolean indicating if we should force the projected matrix to be hermitian before the eigenvalue computation.
+    k_largest_eig_vals
+        An integer for the amount of top eigenvalues to keep for the influence estimations.
+    start_layer
+        An integer for the target layer on which to compute the influence. By default, the last layer of
+        the model is chosen.
+    dataset_hessian_size
+        An integer for the amount of samples that should go into the computation of the hessian matrix. By
+        default, the entire training dataset is used.
+    dtype
+        Numeric type for the Krylov basis (tf.float32 by default).
+    """
+    def __init__(
+            self,
+            subspace_dim: int,
+            force_hermitian: bool,
+            k_largest_eig_vals: int,
+            start_layer: int = -1,
+            dataset_hessian_size: int = -1,
+            loss_function: Callable = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
+            dtype: tf.dtypes = tf.float32
+    ):
+        self.subspace_dim = subspace_dim
+        self.force_hermitian = force_hermitian
+        self.k_largest_eig_vals = k_largest_eig_vals
+        self.start_layer = start_layer
+        self.loss_function = loss_function
+        self.dataset_hessian_size = dataset_hessian_size
+        self.dtype = dtype
+
+    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+              train_info: Any) -> ArnoldiInfluenceCalculator:
+        """
+        Builds an instance of the ArnoldiInfluenceCalculator class following the provided model and training dataset.
+        No additional information is required in this case.
+
+        Parameters
+        ----------
+        training_dataset
+            A TF dataset with the data on which the model was trained.
+        model
+            A TF model for which to compute the influence-related quantities.
+        train_info
+            None, as no additional information is required in this case.
+
+        Returns
+        -------
+        The desired ArnoldiInfluenceCalculator instance.
+        """
+        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
+
+        if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
+            dataset_hessian = training_dataset
+        else:
+            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
+            take_size = int(np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
+            dataset_hessian = training_dataset.take(take_size)
+
+        return ArnoldiInfluenceCalculator(influence_model, dataset_hessian, self.subspace_dim, self.force_hermitian,
+                                          self.k_largest_eig_vals, self.dtype)
