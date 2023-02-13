@@ -13,10 +13,11 @@ the influence of a point on another.
 
 The adversarial attacks are performed via deep fool.
 """
-from ..common import SelfInfluenceCalculator
 import tensorflow as tf
-from ..types import Tuple
 from tensorflow.keras import Model  # pylint:  disable=E0611
+
+from ..common import SelfInfluenceCalculator
+from ..types import Tuple
 
 
 class SampleBoundaryCalculator(SelfInfluenceCalculator):
@@ -165,7 +166,7 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
             computation, _, x_new = self.__step(x_current, y_pred)
             return computation, index + 1, x_new
 
-        find, _, x_adversarial = tf.while_loop(
+        _, _, x_adversarial = tf.while_loop(
             lambda cond, index, x_current: tf.logical_and(cond, index < self.step_nbr),
             lambda cond, index, x_current: body(index, x_current),
             [tf.constant(True), tf.constant(0, dtype=tf.int32), x])
