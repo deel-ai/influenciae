@@ -59,7 +59,7 @@ class ConvNetCIFAR(Sequential):
             elif model == 'vgg19':
                 base_model = VGG19(include_top=False, weights=None, input_shape=(32, 32, 3))
             else:
-                raise Exception('unknown model=' + model)
+                raise ValueError('unknown model=' + model)
         self.add(base_model)
         self.add(Flatten())
 
