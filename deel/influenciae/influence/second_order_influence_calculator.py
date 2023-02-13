@@ -15,7 +15,7 @@ the influence for a large number of weights.
 import tensorflow as tf
 
 from .base_group_influence import BaseGroupInfluenceCalculator
-from ..common import ExactIHVP, ConjugateGradientDescentIHVP
+from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
@@ -148,14 +148,16 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing the sum of all the interactions of each point we are removing with each other point
             of the group
         """
-        local_ihvp = ExactIHVP(self.model, dataset) if isinstance(self.ihvp_calculator, ExactIHVP) \
-            else ConjugateGradientDescentIHVP(
-            self.model,
-            self.ihvp_calculator.extractor_layer,
-            dataset,
-            self.ihvp_calculator.n_cgd_iters,
-            self.ihvp_calculator.feature_extractor
-        )
+        if isinstance(self.ihvp_calculator, ExactIHVP):
+            local_ihvp = ExactIHVP(self.model, dataset)
+        elif isinstance(self.ihvp_calculator, ConjugateGradientDescentIHVP):
+            local_ihvp = ConjugateGradientDescentIHVP(self.model, self.ihvp_calculator.extractor_layer,
+                                                      dataset, self.ihvp_calculator.n_opt_iters,
+                                                      self.ihvp_calculator.feature_extractor)
+        else:
+            local_ihvp = LissaIHVP(self.model, self.ihvp_calculator.extractor_layer,
+                                   dataset, self.ihvp_calculator.n_opt_iters,
+                                   self.ihvp_calculator.feature_extractor)
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
         ihvp_ds = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1))
