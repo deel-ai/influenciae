@@ -127,7 +127,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
             ihvp_calculator = LissaIHVP(influence_model, self.feature_extractor, dataset_hessian, self.n_opt_iters,
                                         damping=1e-4, scale=5.)
         else:
-            raise Exception("unknown ihvp calculator=" + self.ihvp_mode)
+            raise ValueError("unknown ihvp calculator=" + self.ihvp_mode)
 
         influence_calculator = FirstOrderInfluenceCalculator(influence_model, training_dataset, ihvp_calculator,
                                                              n_samples_for_hessian=self.dataset_hessian_size)
@@ -203,7 +203,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         elif self.ihvp_mode == 'lissa':
             ihvp_calculator_factory = LissaIHVPFactory(self.feature_extractor, self.n_opt_iters, damping=1e-4, scale=5.)
         else:
-            raise Exception("unknown ihvp calculator=" + self.ihvp_mode)
+            raise ValueError("unknown ihvp calculator=" + self.ihvp_mode)
 
         influence_calculator = RepresenterPointLJE(influence_model, dataset_hessian, ihvp_calculator_factory)
         return influence_calculator

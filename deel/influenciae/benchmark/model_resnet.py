@@ -377,7 +377,7 @@ def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',
         repetitions = [3, 4, 6, 3]
     # Determine proper input shape
     if len(input_shape) != 3:
-        raise Exception("Input shape should be a tuple (nb_channels, nb_rows, nb_cols)")
+        raise TypeError("Input shape should be a tuple (nb_channels, nb_rows, nb_cols)")
 
     if block == 'basic':
         block_fn = basic_block
