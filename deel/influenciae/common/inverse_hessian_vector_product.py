@@ -665,7 +665,7 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
             n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Model] = None,
     ):
-        def iterative_function(operator, v):
+        def iterative_function(operator, v, maxiter):  # pylint: disable=W0613
             return conjugate_gradients_solve(operator, v, x0=None, maxiter=self.n_opt_iters)
         super().__init__(iterative_function, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
 
