@@ -18,7 +18,7 @@ from tensorflow.keras.models import Sequential  # pylint: disable=E0611
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 
 from ..types import Optional, Union, Tuple, List, Callable
-from ..utils import assert_batched_dataset, dataset_size, conjugate_gradients_solve, map_to_device
+from ..utils import assert_batched_dataset, conjugate_gradients_solve, map_to_device
 
 
 class InverseHessianVectorProduct(ABC):
@@ -467,8 +467,8 @@ class ForwardOverBackwardHVP:
             loop_vars=[tf.constant(0, dtype=tf.int64), hvp_init, tf.constant(0, dtype=tf.int32)]
         )
 
-        hessian_vector_product = tf.reshape(hessian_vector_product, (self.model.nb_params, 1)) / tf.cast(nb_hessian,
-                                                                                                         dtype=hessian_vector_product.dtype)
+        hessian_vector_product = tf.reshape(hessian_vector_product, (self.model.nb_params, 1)) / \
+                                 tf.cast(nb_hessian, dtype=hessian_vector_product.dtype)
 
         return hessian_vector_product
 
@@ -665,8 +665,8 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
             n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Model] = None,
     ):
-        iterative_function = lambda operator, v, maxiter: conjugate_gradients_solve(operator, v, x0=None,
-                                                                                    maxiter=self.n_opt_iters)
+        def iterative_function(operator, v):
+            return conjugate_gradients_solve(operator, v, x0=None, maxiter=self.n_opt_iters)
         super().__init__(iterative_function, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
 
 
@@ -732,7 +732,9 @@ class LissaIHVP(IterativeIHVP):
             A tensor containing the inversion operator
         """
         _, ihvp_result = tf.while_loop(lambda index, ihvp: index < maxiter,
-                                       lambda index, ihvp: (index + 1, v + tf.cast(1. - self.damping, dtype=tf.float32) * ihvp - operator(ihvp) / self.scale),
+                                       lambda index, ihvp: (index + 1,
+                                                            v + tf.cast(1. - self.damping, dtype=tf.float32) * ihvp -
+                                                            operator(ihvp) / self.scale),
                                        [tf.constant(0, dtype=tf.int32), v],
                                        parallel_iterations=1)
         ihvp_result /= self.scale
@@ -768,7 +770,7 @@ class IHVPCalculator(Enum):
                                                              "vector product calculators are supported."
         if ihvp_calculator == 'exact':
             return IHVPCalculator.Exact
-        elif ihvp_calculator == 'lissa':
+        if ihvp_calculator == 'lissa':
             return IHVPCalculator.Lissa
 
         return IHVPCalculator.Cgd

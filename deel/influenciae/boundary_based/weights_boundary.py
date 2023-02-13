@@ -13,10 +13,11 @@ the influence of a point on another.
 
 This boundary deformation process is performed using deep fool on the target weights.
 """
-from ..common import SelfInfluenceCalculator
 import tensorflow as tf
-from ..types import Tuple, List
 from tensorflow.keras import Model  # pylint:  disable=E0611
+
+from ..common import SelfInfluenceCalculator
+from ..types import Tuple, List
 
 
 class WeightsBoundaryCalculator(SelfInfluenceCalculator):
