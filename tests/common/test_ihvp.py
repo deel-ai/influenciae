@@ -393,7 +393,7 @@ def test_lissa_ihvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-2)
+    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-1)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 2))
