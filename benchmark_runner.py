@@ -35,7 +35,8 @@ if __name__ == '__main__':
     parser.add_argument("-influence_batch_size", default=128, type=int,
                         help="The batch size used to compute influence functions")
 
-    parser.add_argument("-epochs_to_save", default="", type=lambda x: [int(x_) for x_ in x.split(',')] if len(x) > 0 else None,
+    parser.add_argument("-epochs_to_save", default="",
+                        type=lambda x: [int(x_) for x_ in x.split(',')] if len(x) > 0 else None,
                         help="the model used for the tracin method")
     parser.add_argument("-verbose_training", default=False, type=bool,
                         help="Display in the console information about intermediate training steps for each model")
@@ -47,7 +48,7 @@ if __name__ == '__main__':
     parser.add_argument("-nbr_of_evaluation", default=10, type=int, help="Nbr of seeds used to bench a method")
 
     parser.add_argument("-method_name", default='influence_first_order', metavar=str, help="methods to benchmark",
-                        choices=['influence_first_order', 'tracein', 'rps_lje', 'rps_l2', 'boundary_weights',
+                        choices=['influence_first_order', 'tracin', 'rps_lje', 'rps_l2', 'boundary_weights',
                                  'boundary_sample', 'arnoldi'], required=True)
 
     # Methods parameters
@@ -90,44 +91,36 @@ if __name__ == '__main__':
     if isinstance(args.method_name, str):
         args.method_name = [args.method_name]
 
+    influence_methods_dict = {
+        'influence_first_order': FirstOrderFactory(ihvp_mode=args.ihvp_mode,
+                                                   start_layer=args.start_layer,
+                                                   dataset_hessian_size=args.dataset_hessian_size,
+                                                   n_opt_iters=args.n_opt_iters,
+                                                   feature_extractor=args.feature_extractor),
+        'tracin': TracInFactory(),
+        'rps_l2': RPSL2Factory(CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
+                               args.lambda_regularization,
+                               args.scaling_factor,
+                               args.layer_index,
+                               args.epochs_rpsl2),
+        'rps_lje': RPSLJEFactory(ihvp_mode=args.ihvp_mode,
+                                 start_layer=args.start_layer,
+                                 dataset_hessian_size=args.dataset_hessian_size,
+                                 n_opt_iters=args.n_opt_iters,
+                                 feature_extractor=args.feature_extractor
+                                 ),
+        'boundary_weights': WeightsBoundaryCalculatorFactory(step_nbr=args.boundary_iter),
+        'boundary_sample': SampleBoundaryCalculatorFactory(step_nbr=args.boundary_iter),
+        'arnoldi': ArnoldiCalculatorFactory(subspace_dim=args.subspace_dim,
+                                            force_hermitian=args.force_hermitian,
+                                            k_largest_eig_vals=args.k_largest_eig_vals,
+                                            start_layer=args.start_layer,
+                                            dataset_hessian_size=args.dataset_hessian_size)
+    }
+
     factories = {}
     for method_name in args.method_name:
-        if method_name == 'influence_first_order':
-            influence_factory = FirstOrderFactory(ihvp_mode=args.ihvp_mode,
-                                                  start_layer=args.start_layer,
-                                                  dataset_hessian_size=args.dataset_hessian_size,
-                                                  n_opt_iters=args.n_opt_iters,
-                                                  feature_extractor=args.feature_extractor)
-
-        elif method_name == 'tracein':
-            influence_factory = TracInFactory()
-        elif method_name == 'rps_l2':
-            influence_factory = RPSL2Factory(CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
-                                             args.lambda_regularization,
-                                             args.scaling_factor,
-                                             args.layer_index,
-                                             args.epochs_rpsl2)
-        elif method_name == 'rps_lje':
-            influence_factory = RPSLJEFactory(ihvp_mode=args.ihvp_mode,
-                                              start_layer=args.start_layer,
-                                              dataset_hessian_size=args.dataset_hessian_size,
-                                              n_opt_iters=args.n_opt_iters,
-                                              feature_extractor=args.feature_extractor
-                                              )
-        elif method_name == 'boundary_weights':
-            influence_factory = WeightsBoundaryCalculatorFactory(step_nbr=args.boundary_iter)
-        elif method_name == 'boundary_sample':
-            influence_factory = SampleBoundaryCalculatorFactory(step_nbr=args.boundary_iter)
-        elif method_name == 'scaling_up':
-            influence_factory = ArnoldiCalculatorFactory(subspace_dim=args.subspace_dim,
-                                                         force_hermitian=args.force_hermitian,
-                                                         k_largest_eig_vals=args.k_largest_eig_vals,
-                                                         start_layer=args.start_layer,
-                                                         dataset_hessian_size=args.dataset_hessian_size)
-        else:
-            raise Exception('Unknown method to benchmark=' + method_name)
-
-        factories[method_name] = influence_factory
+        factories[method_name] = influence_methods_dict[method_name]
 
     result = cifar10_evaluator.bench(influence_calculator_factories=factories,
                                      nbr_of_evaluation=args.nbr_of_evaluation,
