@@ -46,7 +46,7 @@ def test_cgd_factory():
 
     n_cgd_iters = 100
 
-    # case 1
+    # case 1: model feature extractor
     feature_extractor = Sequential(model.layers[:1])
     ihvp = ConjugateGradientDescentIHVP(influence_model, 1, train_set, n_cgd_iters, feature_extractor)
     cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters, 1)
@@ -60,7 +60,7 @@ def test_cgd_factory():
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
 
-    # case 2
+    # case 2: layer position feature extractor
     feature_extractor = 1
     ihvp = ConjugateGradientDescentIHVP(influence_model, 1, train_set, n_cgd_iters, None)
     cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
@@ -74,7 +74,7 @@ def test_cgd_factory():
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
 
-    # case 3
+    # case 3: model feature extractor without layer position
     feature_extractor = Sequential(model.layers[:1])
     with pytest.raises(AssertionError):
         cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
@@ -91,7 +91,7 @@ def test_lissa_factory():
 
     n_lissa_iters = 100
 
-    # case 1
+    # case 1: model feature extractor
     feature_extractor = Sequential(model.layers[:1])
     ihvp = LissaIHVP(influence_model, 1, train_set, n_lissa_iters, feature_extractor)
     lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters, 1)
@@ -105,7 +105,7 @@ def test_lissa_factory():
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
 
-    # case 2
+    # case 2: layer position feature extractor
     feature_extractor = 1
     ihvp = LissaIHVP(influence_model, 1, train_set, n_lissa_iters, None)
     lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
@@ -119,7 +119,7 @@ def test_lissa_factory():
         assert almost_equal(ihvp_batch[0], factory_batch[0])
         assert almost_equal(ihvp_batch[1], factory_batch[1])
 
-    # case 3
+    # case 3: model feature extractor without layer position
     feature_extractor = Sequential(model.layers[:1])
     with pytest.raises(AssertionError):
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
