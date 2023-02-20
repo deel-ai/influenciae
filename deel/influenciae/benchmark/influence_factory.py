@@ -74,6 +74,10 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
     feature_extractor
         Either an integer for the last layer of the feature extractor, or an entire TF graph for computing the
         embeddings of the samples. Used if ihvp_mode == 'cgd'.
+    loss_function
+        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
+        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
+        for example.
     """
 
     def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
@@ -90,7 +94,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> FirstOrderInfluenceCalculator:
+              train_info: Any = None) -> FirstOrderInfluenceCalculator:
         """
         Builds an instance of the FirstOrderInfluenceCalculator class following the provided model and
         training dataset. No additional information is required.
@@ -154,6 +158,10 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
     feature_extractor
         Either an integer for the last layer of the feature extractor, or an entire TF graph for computing the
         embeddings of the samples. Used if ihvp_mode == 'cgd'.
+    loss_function
+        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
+        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
+        for example.
     """
 
     def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
@@ -170,10 +178,11 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> RepresenterPointLJE:
+              train_info: Any = None) -> RepresenterPointLJE:
         """
         Builds an instance of the RepresenterPointLJE class following the provided model and training dataset.
         No additional information is required in this case.
+
         Parameters
         ----------
         training_dataset
@@ -182,6 +191,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
             A TF model for which to compute the influence-related quantities.
         train_info
             None in this case, as no additional information is required
+
         Returns
         -------
         The desired RepresenterPointLJE instance.
@@ -214,11 +224,16 @@ class TracInFactory(InfluenceCalculatorFactory):
     A factory for creating instances of TracIn objects.
     As it works by tracking the gradients along the training process, it also requires some
     training information to be able to compute influence values.
+
+    Attributes
+    ----------
+    loss_function
+        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
+        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
+        for example.
     """
 
-    def __init__(self, loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-        from_logits=True, reduction=Reduction.NONE)
-                 ):
+    def __init__(self, loss_function: Callable = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)):
         self.loss_function = loss_function
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
@@ -284,7 +299,7 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         self.layer_index = layer_index
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> RepresenterPointL2:
+              train_info: Any = None) -> RepresenterPointL2:
         """
         Builds an instance of the RepresenterPointL2 class following the provided model and training dataset.
         No additional information is required in this case.
@@ -329,7 +344,7 @@ class WeightsBoundaryCalculatorFactory(InfluenceCalculatorFactory):
         self.norm_type = norm_type
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> WeightsBoundaryCalculator:
+              train_info: Any = None) -> WeightsBoundaryCalculator:
         """
         Builds an instance of the WeightsBoundaryCalculator class following the provided model and training dataset.
         No additional information is required in this case.
@@ -364,7 +379,7 @@ class SampleBoundaryCalculatorFactory(InfluenceCalculatorFactory):
         self.step_nbr = step_nbr
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> SampleBoundaryCalculator:
+              train_info: Any = None) -> SampleBoundaryCalculator:
         """
         Builds an instance of the SampleBoundaryCalculator class following the provided model and training dataset.
         No additional information is required in this case.
@@ -425,7 +440,7 @@ class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
         self.dtype = dtype
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> ArnoldiInfluenceCalculator:
+              train_info: Any = None) -> ArnoldiInfluenceCalculator:
         """
         Builds an instance of the ArnoldiInfluenceCalculator class following the provided model and training dataset.
         No additional information is required in this case.
