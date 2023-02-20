@@ -718,25 +718,30 @@ class LissaIHVP(IterativeIHVP):
 
     def lissa(self, operator: Callable, v: tf.Tensor, maxiter: int):
         """
+        Performs the Linear time Stochastic Second-order Algorithm (LiSSA) optimization procedure to solve
+        a problem of the shape Ax = b by iterating as follows:
+
+            [A^{-1}v]_{j+1} = v + (I - (A + d * I))[A^{-1}v]_j * v
+
         Parameters
         ----------
         operator
-            The hvp operator
+            The operator that transforms the input vector v into Av
         v
-            The vector where the inversion of the operator shall be proceeded
+            The vector v of the problem
         maxiter
-            Number of iteration of the algorithm
+            Number of iterations of the algorithm
+
         Returns
         -------
         ihvp_result
-            A tensor containing the inversion operator
+            A tensor containing inv(A)v
         """
         _, ihvp_result = tf.while_loop(lambda index, ihvp: index < maxiter,
                                        lambda index, ihvp: (index + 1,
                                                             v + tf.cast(1. - self.damping, dtype=tf.float32) * ihvp -
                                                             operator(ihvp) / self.scale),
-                                       [tf.constant(0, dtype=tf.int32), v],
-                                       parallel_iterations=1)
+                                       [tf.constant(0, dtype=tf.int32), v])
         ihvp_result /= self.scale
 
         return ihvp_result
