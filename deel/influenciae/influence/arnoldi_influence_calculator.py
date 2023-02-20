@@ -91,7 +91,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
             index: int
     ) -> Tuple[tf.Tensor, tf.Tensor, int]:
         """
-        Builds the new vector of the Krylov's basis and compute the projection of the hessian for this vector
+        Builds the new vector of the Krylov's basis and computes the projection of the hessian for this vector.
 
         Parameters
         ----------
@@ -114,23 +114,23 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         w_next = self.hvp_calculator(W[index])
         w_next = tf.squeeze(w_next, axis=1)
         size = index + 1
-        A_next_ligne = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(w_next, axis=0), size, axis=0), axis=1)
-        WA_product = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(A_next_ligne, axis=1), tf.shape(W)[1], axis=1),
+        A_next_line = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(w_next, axis=0), size, axis=0), axis=1)
+        WA_product = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(A_next_line, axis=1), tf.shape(W)[1], axis=1),
                                    axis=0)
         w_next = w_next - WA_product
 
         w_next_norm = tf.norm(w_next)
 
-        padding_size = tf.shape(A)[1] - tf.shape(A_next_ligne)[0] - 1
-        A_next_ligne = tf.concat(
-            [A_next_ligne, tf.expand_dims(w_next_norm, axis=0), tf.zeros((padding_size,), self.dtype)],
+        padding_size = tf.shape(A)[1] - tf.shape(A_next_line)[0] - 1
+        A_next_line = tf.concat(
+            [A_next_line, tf.expand_dims(w_next_norm, axis=0), tf.zeros((padding_size,), self.dtype)],
             axis=0)
 
         W = tf.concat([W[:size], tf.expand_dims(w_next, axis=0) / w_next_norm,
                        tf.zeros((tf.shape(W)[0] - size - 1, tf.shape(W)[1]), self.dtype)], axis=0)
 
         A = tf.concat(
-            [A[:index], tf.expand_dims(A_next_ligne, axis=0),
+            [A[:index], tf.expand_dims(A_next_line, axis=0),
              tf.zeros((tf.shape(A)[0] - index - 1, tf.shape(A)[1]), self.dtype)],
             axis=0)
 
@@ -139,7 +139,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
     def _build_orthogonal_basis(self, v: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         """
         Build orthonormal basis for the Krylov subspaces with the first vector of the basis v.
-        Project the hessian on the Krylov subspaces
+        Project the hessian on the Krylov subspaces.
 
         Parameters
         ----------
@@ -166,7 +166,15 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
     def _distill(self, A: tf.Tensor, W: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         """
-        Inverse the projection
+        Inverse the projection by performing the following operations:
+
+            Hessian = W^T * A * W
+
+            A = V^T * I * V
+            G^T = W^T * V^T
+            G = V W
+
+            => Hessian = G^T * I * G
 
         Parameters
         ----------
@@ -203,21 +211,11 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         G = tf.matmul(eig_vectors, tf.cast(W, dtype=eig_vectors.dtype), transpose_a=True)
 
-        # hessian = W^T * A * W
-        # A = V^T * I * V
-        # G^T = W^T * V^T
-        # G = V W
-        # hessian = G^T * I * G
-
         return eig_vals, G
 
     def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
         """
         Compute an equivalent of the influence vector for a sample of training points.
-
-        Disclaimer: this vector is not an estimation of the difference between the actual
-        model and the perturbed model without the samples (like it is the case with what is
-        calculated using deel.influenciae.influence).
 
         Parameters
         ----------
