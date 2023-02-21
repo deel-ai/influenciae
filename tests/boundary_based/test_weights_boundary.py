@@ -24,10 +24,10 @@ def test_compute_influence_shape():
 
     influence_computed_score = calculator._compute_influence_values(train_set)
 
-    assert tf.reduce_all(tf.shape(influence_computed_score) == tf.convert_to_tensor([10, 1], dtype=tf.int32))
+    assert tf.reduce_all(influence_computed_score.shape == (10, 1))
 
 
-def test_compute_influence_vector():
+def test_compute_influence_values():
     model = Sequential()
     model.add(Input(shape=(3,)))
     model.add(Dense(2, kernel_initializer=tf.constant_initializer([[1, 1, 1], [0, 0, 0]]),
@@ -41,6 +41,7 @@ def test_compute_influence_vector():
 
     influence_computed_score = calculator._compute_influence_values(train_set)
 
+    # modify the bias term to get equal logits
     influence_computed_expected = tf.convert_to_tensor([[-np.sqrt(2.0) * 2.0]], dtype=tf.float32)
 
     assert tf.reduce_max(tf.abs(influence_computed_expected - influence_computed_score)) < 1E-6
