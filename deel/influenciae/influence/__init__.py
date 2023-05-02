@@ -8,3 +8,4 @@ Influence function module
 from .first_order_influence_calculator import FirstOrderInfluenceCalculator
 from .second_order_influence_calculator import SecondOrderInfluenceCalculator
 from .arnoldi_influence_calculator import ArnoldiInfluenceCalculator
+from .base_group_influence import BaseGroupInfluenceCalculator
