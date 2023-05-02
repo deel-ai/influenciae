@@ -193,6 +193,8 @@ def test_compute_influence_values_group():
     reduced_ground_truth_grads_test = tf.reduce_sum(ground_truth_grads_test, axis=1, keepdims=True)
     ground_truth_influence_values = tf.matmul(reduced_ground_truth_grads_test, ground_truth_influence_group,
                                               transpose_a=True, transpose_b=True)
+    ground_truth_self_influence = tf.matmul(reduced_ground_truth_grads, ground_truth_influence_group,
+                                            transpose_a=True, transpose_b=True)
 
     # Check if the result is the one expected
     calculators = [
@@ -208,6 +210,10 @@ def test_compute_influence_values_group():
                                                                                       test_set.take(5).batch(5))
         assert influence_group_values.shape == (1, 1)
         assert almost_equal(influence_group_values, ground_truth_influence_values, epsilon=1e-3)
+
+        self_influence_group = influence_calculator.estimate_influence_values_group(train_set.take(5).batch(5))
+        assert self_influence_group.shape == (1, 1)
+        assert almost_equal(self_influence_group, ground_truth_self_influence, epsilon=1e-3)
 
 
 def test_cnn_shapes():
