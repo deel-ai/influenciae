@@ -98,7 +98,7 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         return delta_x
 
     @tf.function
-    def __step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def _step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         """
         The optimization step to find the distance between the boundary and a given sample x.
         To see more details about the optimization procedure for multi-class classifiers,
@@ -211,7 +211,7 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         y_pred = self.model(x)
 
         tf.while_loop(lambda cond, index: tf.logical_and(cond, index < self.step_nbr),
-                      lambda cond, index: (self.__step(x, y_pred)[0], index + 1),
+                      lambda cond, index: (self._step(x, y_pred)[0], index + 1),
                       [tf.constant(True), tf.constant(0, dtype=tf.int32)])
 
         score = self.__delta_weights()
