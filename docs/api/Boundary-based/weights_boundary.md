@@ -10,7 +10,7 @@ on the model) to make the model change its prediction on them.
 
 In particular, we define the influence score as follows:
 
-$$ \mathcal{I}_SB (z) = - \lVert w - w_{adv} \rVert^2 \, , $$
+$$ \mathcal{I}_{WB} (z) = - \lVert w - w_{adv} \rVert^2 \, , $$
 where $w$ is the model's weights and $w_{adv}$ is the perturbed model with the lowest possible budget and 
 obtained through an adaptation of the [DeepFool method](https://arxiv.org/abs/1511.04599).
 

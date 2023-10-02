@@ -10,7 +10,7 @@ there, the model would have placed the decision boundary elsewhere.
 
 In particular, we define the influence score as follows:
 
-$$ \mathcal{I}_SB (z) = - \lVert z - z_{adv} \rVert^2 \, , $$
+$$ \mathcal{I}_{SB} (z) = - \lVert z - z_{adv} \rVert^2 \, , $$
 where $z$ is the data-point under study and $z_{adv}$ is the adversarial example with the lowest possible budget 
 and obtained through the [DeepFool method](https://arxiv.org/abs/1511.04599).
 
