@@ -37,9 +37,11 @@ We propose some hands-on tutorials to get familiar with the library and it's API
 - [**Benchmarking with Mislabeled sample detection**](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing) </sub>
 - [**Using the first order influence calculator**](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) </sub>
 - [**Using the second order influence calculator**](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) </sub>
+- [**Using Arnoldi Influence Calculator**](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing) </sub>
 - [**Using TracIn**](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) </sub>
 - [**Using Representer Point Selection - L2 (RPS_L2)**](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) </sub>
 - [**Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE)**](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) </sub>
+- [**Using Boundary-based Influence**](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) </sub>
 
 ## 🚀 Quick Start
 
@@ -63,7 +65,7 @@ from deel.influenciae.utils import ORDER
 
 # load the model, the training loss (without reduction) and the training data (with the labels and in a batched TF dataset)
 
-influence_model = InfluenceModel(model, target_layer, loss_function)
+influence_model = InfluenceModel(model, start_layer=target_layer, loss_function=loss_function)
 ihvp_calculator = ExactIHVP(influence_model, train_dataset)
 influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 data_and_influence_dataset = influence_calculator.compute_influence_values(train_dataset)
@@ -85,7 +87,7 @@ from deel.influenciae.utils import ORDER
 # load the model, the training loss (without reduction), the training data and
 # the data to explain (with the labels and in batched a TF dataset)
 
-influence_model = InfluenceModel(model, target_layer, loss_function)
+influence_model = InfluenceModel(model, start_layer=target_layer, loss_function=loss_function)
 ihvp_calculator = ExactIHVP(influence_model, train_dataset)
 influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)
 data_and_influence_dataset = influence_calculator.estimate_influence_values_in_batches(samples_to_explain, train_dataset)
@@ -108,7 +110,7 @@ from deel.influenciae.influence import SecondOrderInfluenceCalculator
 # load the model, the training loss (without reduction), the training data and
 # the data to explain (with the labels and in a batched TF dataset)
 
-influence_model = InfluenceModel(model, target_layer, loss_function)
+influence_model = InfluenceModel(model, start_layer=target_layer, loss_function=loss_function)
 ihvp_calculator = ExactIHVP(influence_model, train_dataset)
 influence_calculator = SecondOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)  # or FirstOrderInfluenceCalculator
 data_and_influence_dataset = influence_calculator.estimate_influence_values_group(groups_train, groups_to_explain)
@@ -123,7 +125,7 @@ from deel.influenciae.influence import SecondOrderInfluenceCalculator
 # load the model, the training loss (without reduction), the training data and
 # the data to explain (with the labels and in a batched TF dataset)
 
-influence_model = InfluenceModel(model, target_layer, loss_function)
+influence_model = InfluenceModel(model, start_layer=target_layer, loss_function=loss_function)
 ihvp_calculator = ExactIHVP(influence_model, train_dataset)
 influence_calculator = SecondOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator)  # or FirstOrderInfluenceCalculator
 data_and_influence_dataset = influence_calculator.estimate_influence_values_group(groups_train)
@@ -139,11 +141,11 @@ All the influence calculation methods work on Tensorflow models trained for any 
 | RelatIF                                                 | [Paper](https://arxiv.org/pdf/2003.11630.pdf)                                                      | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) |
 | Influence Functions  (first order, groups)              | [Paper](https://arxiv.org/abs/1905.13289)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) |
 | Influence Functions  (second order, groups)             | [Paper](https://arxiv.org/abs/1911.00418)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) |
-| Arnoldi (Scaling Up Influence Functions)                | [Paper](https://arxiv.org/abs/2112.03052)                                                          |                                                                                 WIP                                                                                 |
+| Arnoldi iteration (Scaling Up Influence Functions)      | [Paper](https://arxiv.org/abs/2112.03052)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing)  |
+| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) |
 | Representer Point Selection  (L2)                       | [Paper](https://arxiv.org/abs/1811.09720)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) |
 | Representer Point Selection  (Local Jacobian Expansion) | [Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) |
-| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) |
-| Boundary-based influence                                | --                                                                                                 |                                                                                 WIP                                                                                 |
+| Boundary-based influence                                | --                                                                                                 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) |
 
 ## 👀 See Also
 
