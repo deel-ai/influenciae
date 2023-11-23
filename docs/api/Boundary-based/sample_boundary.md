@@ -20,6 +20,6 @@ obtains acceptable results on our mislabeled point detection benchmark.
 
 ## Notebooks
 
-- [**Using Boundary-based Influence**](https://drive.google.com/file/d/145Gi4gCYTKlRVJjsty5cPkdMGNJoNDws/view?usp=share_link)
+- [**Using Boundary-based Influence**](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) </sub>
 
 {{deel.influenciae.boundary_based.sample_boundary.SampleBoundaryCalculator}}
