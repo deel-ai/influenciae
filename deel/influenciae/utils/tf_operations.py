@@ -8,6 +8,7 @@ Custom operations related to tensorflow objects
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2
 
 from ..types import Union, Tuple, Optional, Callable
 
@@ -56,6 +57,33 @@ def from_layer_name_to_layer_idx(model: tf.keras.Model, layer_name: str) -> int:
             return layer_idx
     raise ValueError(f'No such layer: {layer_name}. Existing layers are: '
                      f'{list(layer.name for layer in model.layers)}.')
+
+def split_model(model: tf.keras.Model, target_layer: Union[str, int]) -> Tuple[tf.keras.Model, tf.keras.Model]:
+    """
+    Splits a model into two sub-models, one containing the layers up to the target layer, and the other containing
+    the layers from the target layer onwards.
+
+    Parameters
+    ----------
+    model
+        Model to split
+    target_layer
+        Layer name or layer index
+
+    Returns
+    -------
+    model_1
+        Model containing the layers up to the target layer
+    model_2
+        Model containing the layers from the target layer onwards
+    """
+    cloned_model = tf.keras.models.clone_model(model)
+    cloned_model.set_weights(model.get_weights())
+    cut_layer = find_layer(cloned_model, target_layer)
+    model_1 = tf.keras.Model(inputs=cloned_model.inputs, outputs=cut_layer.input)
+    model_2 = tf.keras.Model(inputs=tf.keras.Input(tensor=cut_layer.input), outputs=cloned_model.outputs)
+
+    return model_1, model_2
 
 
 def is_dataset_batched(dataset: tf.data.Dataset) -> Union[int, bool]:
