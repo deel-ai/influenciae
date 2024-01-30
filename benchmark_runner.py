@@ -75,10 +75,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    use_bias = False if args.method_name == "rps_lje" or args.method_name == "rps_l2" else True
+
     cifar10_evaluator = Cifar10MislabelingDetectorEvaluator(epochs=args.epochs,
                                                             model_type=args.model_type,
                                                             mislabeling_ratio=args.mislabeling_ratio,
                                                             use_regu=args.use_regu,
+                                                            use_bias=use_bias,
                                                             force_overfit=args.force_overfit,
                                                             train_batch_size=args.train_batch_size,
                                                             test_batch_size=args.test_batch_size,
