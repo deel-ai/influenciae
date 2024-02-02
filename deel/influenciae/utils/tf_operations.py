@@ -8,7 +8,6 @@ Custom operations related to tensorflow objects
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2
 
 from ..types import Union, Tuple, Optional, Callable
 

@@ -10,7 +10,6 @@ https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-
 from typing import Tuple
 
 import tensorflow as tf
-from tensorflow.keras.models import Sequential  # pylint: disable=E0611
 
 from ..common import InfluenceModel, InverseHessianVectorProductFactory, BaseInfluenceCalculator
 from ..utils import map_to_device, split_model, assert_batched_dataset
@@ -99,7 +98,11 @@ class RepresenterPointLJE(BaseInfluenceCalculator):
         self.perturbed_head = perturbed_head
 
         # Create the new model with the perturbed weights to compute the hessian matrix
-        model = InfluenceModel(self.perturbed_head, 1, loss_function=influence_model.loss_function)  # layer 0 is InputLayer
+        model = InfluenceModel(
+            self.perturbed_head,
+            1,  # layer 0 is InputLayer
+            loss_function=influence_model.loss_function
+        )
         self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
 
     def _reshape_assign(self, weights, influence_vector: tf.Tensor) -> None:
@@ -175,13 +178,16 @@ class RepresenterPointLJE(BaseInfluenceCalculator):
             )
         )
         second_term = tf.map_fn(
-            lambda v: self.ihvp_calculator._compute_ihvp_single_batch(tf.expand_dims(v, axis=0), use_gradient=False),
+            lambda v: self.ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=protected-access
+                tf.expand_dims(v, axis=0),
+                use_gradient=False
+            ),
             grads
-        )  # pylint: disable=protected-access
+        )
         second_term = tf.reduce_sum(tf.reshape(second_term, tf.shape(grads)), axis=1)
 
         # Second, we compute the first term, which contains the weights
-        first_term = tf.concat([w for w in weights], axis=0)
+        first_term = tf.concat(list(weights), axis=0)
         first_term = tf.multiply(
             first_term,
             tf.repeat(
@@ -302,7 +308,7 @@ class RepresenterPointLJE(BaseInfluenceCalculator):
             A tensor with influence values for the (batch of) test samples.
         """
         # Extract the different information inside the tuples
-        feature_maps_test, labels_test = preproc_test_sample
+        feature_maps_test, _ = preproc_test_sample
         alpha, feature_maps_train = influence_vector
 
         if len(alpha.shape) == 1 or (len(alpha.shape) == 2 and alpha.shape[1] == 1):
