@@ -202,9 +202,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
             dataset_hessian = training_dataset
         else:
             batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
-            take_size = int(
-                np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
-            dataset_hessian = training_dataset.take(take_size)
+            dataset_hessian = training_dataset.unbatch().take(self.dataset_hessian_size).batch(batch_size)
 
         if self.ihvp_mode == 'exact':
             ihvp_calculator_factory = ExactIHVPFactory()
