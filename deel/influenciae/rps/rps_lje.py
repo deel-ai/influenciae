@@ -11,12 +11,13 @@ from typing import Tuple
 
 import tensorflow as tf
 
-from ..common import InfluenceModel, InverseHessianVectorProductFactory, BaseInfluenceCalculator
-from ..utils import map_to_device, split_model, assert_batched_dataset
+from . import BaseRepresenterPoint
+from ..common import InfluenceModel, InverseHessianVectorProductFactory
+from ..utils import map_to_device
 from ..types import Union, Optional
 
 
-class RepresenterPointLJE(BaseInfluenceCalculator):
+class RepresenterPointLJE(BaseRepresenterPoint):
     """
     Representer Point Selection via Local Jacobian Expansion for Post-hoc Classifier Explanation of Deep Neural
     Networks and Ensemble Models
@@ -52,33 +53,25 @@ class RepresenterPointLJE(BaseInfluenceCalculator):
             shuffle_buffer_size: int = 10000,
             epsilon: float = 1e-5
     ):
-        # Make sure that the model's last layer is a Dense layer with no bias
-        if not isinstance(influence_model.model.layers[-1], tf.keras.layers.Dense):
-            raise ValueError('The last layer of the model must be a Dense layer with no bias.')
-        if influence_model.model.layers[-1].use_bias:
-            raise ValueError('The last layer of the model must be a Dense layer with no bias.')
-
-        # Make sure that the dataset is batched
-        assert_batched_dataset(dataset)
-
-        self.target_layer = target_layer
+        super().__init__(influence_model.model, dataset, influence_model.loss_function)
         self.epsilon = tf.constant(epsilon, dtype=tf.float32)
 
         # In the paper, the authors explain that in practice, they use a single step of SGD to compute the
         # perturbed model's weights. We will do the same here.
         optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4)
-        feature_extractor, perturbed_head = split_model(influence_model.model, target_layer)
         target_layer_shape = influence_model.model.layers[target_layer].input.type_spec.shape
+        perturbed_head = tf.keras.models.clone_model(self.original_head)
+        perturbed_head.set_weights(self.original_head.get_weights())
         perturbed_head.build(target_layer_shape)
         perturbed_head.compile(optimizer=optimizer, loss=influence_model.loss_function)
 
         # Get a dataset to compute the SGD step
         if n_samples_for_hessian is None:
-            dataset_to_estimate_hessian = map_to_device(dataset, lambda x, y: (feature_extractor(x), y))
+            dataset_to_estimate_hessian = map_to_device(dataset, lambda x, y: (self.feature_extractor(x), y))
         else:
             dataset_to_estimate_hessian = map_to_device(
                 dataset.shuffle(shuffle_buffer_size).take(n_samples_for_hessian),
-                lambda x, y: (feature_extractor(x), y)
+                lambda x, y: (self.feature_extractor(x), y)
             )
 
         # Accumulate the gradients for the whole dataset and then update
@@ -93,8 +86,7 @@ class RepresenterPointLJE(BaseInfluenceCalculator):
             _ = [accum_vars[i].assign_add(grad) for i, grad in enumerate(gradients)]
         optimizer.apply_gradients(zip(accum_vars, trainable_vars))
 
-        # Keep the feature extractor and the perturbed head
-        self.feature_extractor = feature_extractor
+        # Keep the perturbed head
         self.perturbed_head = perturbed_head
 
         # Create the new model with the perturbed weights to compute the hessian matrix
