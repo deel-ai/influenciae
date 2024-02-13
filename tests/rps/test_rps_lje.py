@@ -197,7 +197,7 @@ def test_compute_influence_value_from_influence_vector_binary():
 
     # Compute the influence values manually
     alpha, z_batch = rps_lje._compute_influence_vector((inputs_train, targets_train))  # already checked in another test
-    influence_values = alpha
+    influence_values = tf.abs(alpha)
 
     assert almost_equal(influence_values_computed, influence_values, epsilon=1e-3)
 
@@ -228,9 +228,9 @@ def test_compute_influence_value_from_influence_vector_multiclass():
     # Compute the influence values manually
     alpha, z_batch = rps_lje._compute_influence_vector((inputs_train, targets_train))  # already checked in another test
     alpha_i = tf.gather(alpha, tf.argmax(rps_lje.perturbed_head(z_batch), axis=1), axis=1, batch_dims=1)
-    influence_values = alpha_i
+    influence_values = tf.abs(alpha_i)
 
-    assert almost_equal(influence_values_computed, influence_values, epsilon=1e-3)
+    assert relative_almost_equal(influence_values_computed, influence_values, percent=0.05)
 
 
 def test_compute_pairwise_influence_value_binary():
