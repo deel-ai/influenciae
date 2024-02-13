@@ -9,7 +9,7 @@ https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-
 """
 import tensorflow as tf
 
-from . import BaseRepresenterPoint
+from .base_representer_point import BaseRepresenterPoint
 from ..common import InfluenceModel, InverseHessianVectorProductFactory
 from ..utils import map_to_device
 from ..types import Union, Optional

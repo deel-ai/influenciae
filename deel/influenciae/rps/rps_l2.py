@@ -10,10 +10,10 @@ https://arxiv.org/abs/1811.09720
 import tensorflow as tf
 from tensorflow.keras import Model #pylint:  disable=E0611
 from tensorflow.keras.layers import Input, Dense #pylint:  disable=E0611
-from tensorflow.keras.losses import MeanSquaredError, Loss, Reduction #pylint:  disable=E0611
+from tensorflow.keras.losses import MeanSquaredError, Loss #pylint:  disable=E0611
 from tensorflow.keras.regularizers import L2 #pylint:  disable=E0611
 
-from . import BaseRepresenterPoint
+from .base_representer_point import BaseRepresenterPoint
 from ..types import Tuple, Callable, Union
 
 from ..utils import BacktrackingLineSearch, dataset_size
