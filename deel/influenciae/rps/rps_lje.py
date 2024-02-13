@@ -7,8 +7,6 @@ Module implementing a technique based on the representer point theorem for kerne
 but using a local jacobian expansion, as per
 https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf
 """
-from typing import Tuple
-
 import tensorflow as tf
 
 from . import BaseRepresenterPoint
@@ -97,45 +95,6 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         )
         self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
 
-    def _reshape_assign(self, weights, influence_vector: tf.Tensor) -> None:
-        """
-        Updates the model's weights in-place for the Local Jacobian Expansion approximation.
-
-        Parameters
-        ----------
-        weights
-            The weights for which we wish to compute the influence-related quantities.
-        influence_vector
-            A tensor with the optimizer's stepped weights.
-        """
-        index = 0
-        for w in weights:
-            shape = tf.shape(w)
-            size = tf.reduce_prod(shape)
-            v = influence_vector[index:(index + size)]
-            index += size
-            v = tf.reshape(v, shape)
-            w.assign(w - v)
-
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        """
-        Preprocess a single batch of samples.
-
-        Parameters
-        ----------
-        samples
-            A single batch of tensors containing the samples.
-
-        Returns
-        -------
-        evaluate_vect
-            The preprocessed sample
-        """
-        z_batch = self.feature_extractor(samples[:-1])
-        y_batch = samples[-1]
-
-        return z_batch, y_batch
-
     def _compute_alpha(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         """
         Computes the alpha vector for the Local Jacobian Expansion approximation.
@@ -194,124 +153,3 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         first_term = tf.reduce_sum(first_term, axis=1)
 
         return first_term - second_term  # alpha is first term minus second term
-
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        """
-        Compute the influence score for a batch of training samples (i.e. self-influence).
-
-        Parameters
-        ----------
-        train_samples
-            A tensor containing a batch of training samples.
-
-        Returns
-        -------
-        influence_values
-            A tensor with the self-influence of the training samples.
-        """
-        z_batch, y_batch = self._preprocess_samples(train_samples)
-        alpha = self._compute_alpha(z_batch, y_batch)
-
-        # If the problem is binary classification, take all the alpha values
-        # If multiclass, take only those that correspond to the prediction
-        out_shape = self.perturbed_head.output_shape
-        if len(out_shape) == 1:
-            influence_values = alpha
-        elif len(out_shape) == 2 and out_shape[1] == 1:
-            influence_values = alpha
-        else:
-            if len(out_shape) > 2:
-                indices = tf.argmax(tf.squeeze(self.perturbed_head(z_batch), axis=-1), axis=1)
-            else:
-                indices = tf.argmax(self.perturbed_head(z_batch), axis=1)
-            influence_values = tf.gather(alpha, indices, axis=1, batch_dims=1)
-
-        return influence_values
-
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
-        """
-        Compute an equivalent of the influence vector for a sample of training points.
-
-        Disclaimer: this vector is not an estimation of the difference between the actual
-        model and the perturbed model without the samples (like it is the case with what is
-        calculated using deel.influenciae.influence).
-
-        Parameters
-        ----------
-        train_samples
-            A tensor with a group of training samples of which we wish to compute the influence.
-
-        Returns
-        -------
-        influence_vectors
-            A tensor with a concatenation of the alpha weights and the feature maps for each sample.
-            This allows for optimizations to be put in place but is not really an influence vector
-            of any kind.
-        """
-        z_batch = self.feature_extractor(train_samples[:-1])
-        alpha = self._compute_alpha(z_batch, train_samples[-1])
-
-        return alpha, z_batch
-
-    def _estimate_individual_influence_values_from_batch(
-            self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
-        """
-        Estimate the (individual) influence scores of a single batch of samples with respect to
-        a batch of samples belonging to the model's training dataset.
-
-        Parameters
-        ----------
-        train_samples
-            A single batch of training samples (and their target values).
-        samples_to_evaluate
-            A single batch of samples of which we wish to compute the influence of removing the training
-            samples.
-
-        Returns
-        -------
-        A tensor containing the individual influence scores.
-        """
-        return self._estimate_influence_value_from_influence_vector(
-            self._preprocess_samples(samples_to_evaluate),
-            self._compute_influence_vector(train_samples)
-        )
-
-    def _estimate_influence_value_from_influence_vector(
-            self,
-            preproc_test_sample: tf.Tensor,
-            influence_vector: tf.Tensor
-    ) -> tf.Tensor:
-        """
-        Compute the influence score for a (batch of) preprocessed test sample(s) and a training "influence vector".
-
-        Parameters
-        ----------
-        preproc_test_sample
-            A tensor with a pre-processed sample to evaluate.
-        influence_vector
-            A tensor with the training influence vector.
-
-        Returns
-        -------
-        influence_values
-            A tensor with influence values for the (batch of) test samples.
-        """
-        # Extract the different information inside the tuples
-        feature_maps_test, _ = preproc_test_sample
-        alpha, feature_maps_train = influence_vector
-
-        if len(alpha.shape) == 1 or (len(alpha.shape) == 2 and alpha.shape[1] == 1):
-            influence_values = alpha * tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
-        else:
-            if len(self.perturbed_head.output_shape) > 2:
-                indices = tf.argmax(tf.squeeze(self.perturbed_head(feature_maps_test), axis=-1), axis=1)
-            else:
-                indices = tf.argmax(self.perturbed_head(feature_maps_test), axis=1)
-            influence_values = tf.gather(alpha, indices, axis=1, batch_dims=1) * \
-                               tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
-        influence_values = tf.transpose(influence_values)
-
-        return influence_values
