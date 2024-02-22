@@ -16,7 +16,8 @@ from .tf_operations import (
      default_process_batch,
      dataset_to_tensor,
      array_to_dataset,
-     map_to_device
+     map_to_device,
+     split_model,
 )
 from .sorted_dict import BatchSort, ORDER
 from .nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors

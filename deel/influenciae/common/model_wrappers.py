@@ -379,7 +379,7 @@ class InfluenceModel(BaseInfluenceModel):
                  loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
                      from_logits=False, reduction=Reduction.NONE),
                  process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch):
-
+        self.start_layer = start_layer
         weights_to_watch = InfluenceModel._get_weights_of_interest(model, start_layer, last_layer)
         super().__init__(model, weights_to_watch, loss_function, process_batch_for_loss_fn, weights_processed=True)
 

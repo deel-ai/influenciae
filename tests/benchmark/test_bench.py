@@ -107,7 +107,8 @@ def test_rps_lje():
                                                             test_batch_size=10,
                                                             epochs_to_save=None,
                                                             take_batch=take_batch,
-                                                            verbose_training=False)
+                                                            verbose_training=False,
+                                                            use_bias=False)
 
     influence_factory = RPSLJEFactory('exact')
     result = cifar10_evaluator.evaluate(influence_factory=influence_factory, nbr_of_evaluation=2, verbose=False)
@@ -126,7 +127,8 @@ def test_rps_l2():
                                                             test_batch_size=10,
                                                             epochs_to_save=None,
                                                             take_batch=take_batch,
-                                                            verbose_training=False)
+                                                            verbose_training=False,
+                                                            use_bias=False)
 
     influence_factory = RPSL2Factory(CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
                                      lambda_regularization=10.0)

@@ -72,8 +72,11 @@ class BaseGroupInfluenceCalculator:
 
         # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
         if isinstance(ihvp_calculator, str):
-            self.ihvp_calculator = IHVPCalculator.from_string(ihvp_calculator).value(self.model,
-                                                                                     self.train_set)
+            self.ihvp_calculator = IHVPCalculator.from_string(ihvp_calculator).value(self.model, self.train_set) if \
+                ihvp_calculator == 'exact' else \
+                IHVPCalculator.from_string(ihvp_calculator).value(self.model,
+                                                                  self.model.start_layer,
+                                                                  self.train_set)
         elif isinstance(ihvp_calculator, IHVPCalculator):
             self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
         elif isinstance(ihvp_calculator, InverseHessianVectorProduct):

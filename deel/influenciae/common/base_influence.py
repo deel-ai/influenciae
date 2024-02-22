@@ -269,30 +269,6 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         return inf_vect_ds
 
-    @abstractmethod
-    def _estimate_individual_influence_values_from_batch(
-            self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
-        """
-        Estimate the (individual) influence scores of a single batch of samples with respect to
-        a batch of samples belonging to the model's training dataset.
-
-        Parameters
-        ----------
-        train_samples
-            A single batch of training samples (and their target values).
-        samples_to_evaluate
-            A single batch of samples of which we wish to compute the influence of removing the training
-            samples.
-
-        Returns
-        -------
-        A tensor containing the individual influence scores.
-        """
-        raise NotImplementedError()
-
     def estimate_influence_values_in_batches(
             self,
             dataset_to_evaluate: tf.data.Dataset,

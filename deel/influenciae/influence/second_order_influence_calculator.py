@@ -207,6 +207,8 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         influence_values_group
             A tensor containing one influence value for the whole group.
         """
+        if group_to_evaluate is None:
+            group_to_evaluate = group_train
         ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
         influence = tf.transpose(self.compute_influence_vector_group(group_train))
         reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),

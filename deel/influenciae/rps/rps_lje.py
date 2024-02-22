@@ -7,27 +7,20 @@ Module implementing a technique based on the representer point theorem for kerne
 but using a local jacobian expansion, as per
 https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf
 """
-import itertools
-
 import tensorflow as tf
-from tensorflow.keras.models import Sequential # pylint: disable=E0611
 
-from ..common import InfluenceModel
-from ..common import InverseHessianVectorProductFactory
-
-from ..influence import FirstOrderInfluenceCalculator
+from .base_representer_point import BaseRepresenterPoint
+from ..common import InfluenceModel, InverseHessianVectorProductFactory
 from ..types import Union, Optional
 
 
-class RepresenterPointLJE(FirstOrderInfluenceCalculator):
+class RepresenterPointLJE(BaseRepresenterPoint):
     """
     Representer Point Selection via Local Jacobian Expansion for Post-hoc Classifier Explanation of Deep Neural
     Networks and Ensemble Models
     https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf
 
-    As this technique is quite similar to the implementation in
-    deel.influenciae.influence.first_order_influence_calculator from a functional point of view, we will re-use
-    it here.
+    Disclaimer: This technique requires the last layer of the model to be a Dense layer with no bias.
 
     Parameters
     ----------
@@ -44,6 +37,8 @@ class RepresenterPointLJE(FirstOrderInfluenceCalculator):
         Either a string or an integer identifying the layer on which to compute the influence-related quantities.
     shuffle_buffer_size
         An integer with the buffer size for the training set's shuffle operation.
+    epsilon
+        An epsilon value to prevent division by zero.
     """
     def __init__(
             self,
@@ -52,81 +47,112 @@ class RepresenterPointLJE(FirstOrderInfluenceCalculator):
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int] = None,
             target_layer: Union[int, str] = -1,
-            shuffle_buffer_size: int = 10000
+            shuffle_buffer_size: int = 10000,
+            epsilon: float = 1e-5
     ):
-        # Use a FirstOrderInfluenceCalculator to compute the jacobian expanded weights for the model
-        ihvp_calculator = ihvp_calculator_factory.build(influence_model, dataset)
-        first_order_calculator = FirstOrderInfluenceCalculator(model=influence_model,
-                                                               dataset=dataset,
-                                                               ihvp_calculator=ihvp_calculator,
-                                                               n_samples_for_hessian=n_samples_for_hessian,
-                                                               shuffle_buffer_size=shuffle_buffer_size,
-                                                               normalize=False)
-        influence_vector_dataset = first_order_calculator.compute_influence_vector(dataset)
+        super().__init__(influence_model.model, dataset, influence_model.loss_function)
+        self.epsilon = tf.constant(epsilon, dtype=tf.float32)
 
-        # Compute weight factor for the optimization step
-        size = tf.data.experimental.cardinality(dataset)
-        iter_dataset = iter(influence_vector_dataset)
-        weight_size = tf.reduce_sum(
-            tf.stack([tf.reduce_prod(tf.shape(w)) for w in influence_model.model.layers[target_layer].weights])
+        # In the paper, the authors explain that in practice, they use a single step of SGD to compute the
+        # perturbed model's weights. We will do the same here.
+        optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4)
+        target_layer_shape = influence_model.model.layers[target_layer].input.type_spec.shape
+        perturbed_head = tf.keras.models.clone_model(self.original_head)
+        perturbed_head.set_weights(self.original_head.get_weights())
+        perturbed_head.build(target_layer_shape)
+        perturbed_head.compile(optimizer=optimizer, loss=influence_model.loss_function)
+
+        # Get a dataset to compute the SGD step
+        if n_samples_for_hessian is None:
+            dataset_to_estimate_hessian = dataset
+        else:
+            n_batches_for_hessian = max(n_samples_for_hessian // dataset._batch_size, 1)
+            dataset_to_estimate_hessian = dataset.shuffle(shuffle_buffer_size).take(n_batches_for_hessian)
+        f_array, y_array = None, None
+        for x, y in dataset_to_estimate_hessian:
+            f = self.feature_extractor(x)
+            f_array = f if f_array is None else tf.concat([f_array, f], axis=0)
+            y_array = y if y_array is None else tf.concat([y_array, y], axis=0)
+        dataset_to_estimate_hessian = tf.data.Dataset.from_tensor_slices((f_array, y_array)).batch(dataset._batch_size)
+
+        # Accumulate the gradients for the whole dataset and then update
+        trainable_vars = perturbed_head.trainable_variables
+        accum_vars = [tf.Variable(tf.zeros_like(t_var.read_value()), trainable=False)
+                      for t_var in trainable_vars]
+        for x, y in dataset_to_estimate_hessian:
+            with tf.GradientTape() as tape:
+                y_pred = perturbed_head(x)
+                loss = -perturbed_head.loss(y, y_pred)
+            gradients = tape.gradient(loss, trainable_vars)
+            _ = [accum_vars[i].assign_add(grad) for i, grad in enumerate(gradients)]
+        optimizer.apply_gradients(zip(accum_vars, trainable_vars))
+
+        # Keep the perturbed head
+        self.perturbed_head = perturbed_head
+
+        # Create the new model with the perturbed weights to compute the hessian matrix
+        model = InfluenceModel(
+            self.perturbed_head,
+            1,  # layer 0 is InputLayer
+            loss_function=influence_model.loss_function
         )
+        self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
 
-        def body(i, v, nb):
-            current_vector = next(iter_dataset)[1]
-            nb_next = nb + tf.cast(tf.shape(current_vector)[0], dtype=nb.dtype)
-            v_current = tf.reduce_sum(current_vector, axis=0)
-            v_next = (nb / nb_next) * v + v_current / nb_next
-
-            return i + tf.constant(1, dtype=size.dtype), v_next, nb_next
-
-        dtype_ = dataset.element_spec[0].dtype
-        _, influence_vector, __ = tf.while_loop(cond=lambda i, v, nb: i < size,
-                                                body=body,
-                                                loop_vars=[tf.constant(0, dtype=size.dtype),
-                                                           tf.zeros((weight_size,), dtype=dtype_),
-                                                           tf.constant(0.0, dtype=dtype_)])
-
-        # Extract the model's target weights and clone the model to update it
-        layers_end = influence_model.model.layers[target_layer:]
-        weights = [lay.weights for lay in layers_end]
-        weights = list(itertools.chain(*weights))
-        model_end = tf.keras.models.clone_model(Sequential(layers_end))
-
-        # Update the new model
-        input_layer_shape = influence_model.model.layers[target_layer].input.type_spec.shape
-        model_end.build(input_layer_shape)
-        model_end.set_weights(weights)
-        self._reshape_assign(model_end.layers[0].weights, influence_vector)
-
-        # Instantiate the elements for calculating the influence through the FirstOrderInfluenceCalculator's
-        features_extractor = Sequential(influence_model.model.layers[:target_layer])
-        model = InfluenceModel(Sequential([features_extractor, model_end]), 1,
-                               loss_function=influence_model.loss_function)
-        ihvp_calculator = ihvp_calculator_factory.build(model, dataset)
-
-        super().__init__(model=model,
-                         dataset=dataset,
-                         ihvp_calculator=ihvp_calculator,
-                         n_samples_for_hessian=n_samples_for_hessian,
-                         shuffle_buffer_size=shuffle_buffer_size,
-                         normalize=False)
-
-    def _reshape_assign(self, weights, influence_vector: tf.Tensor) -> None:
+    def _compute_alpha(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         """
-        Updates the model's weights in-place for the Local Jacobian Expansion approximation.
+        Computes the alpha vector for the Local Jacobian Expansion approximation.
 
         Parameters
         ----------
-        weights
-            The weights for which we wish to compute the influence-related quantities.
-        influence_vector
-            A tensor with the optimizer's stepped weights.
+        z_batch
+            A tensor with the perturbed model's predictions.
+        y_batch
+            A tensor with the ground truth labels.
+
+        Returns
+        -------
+        A tensor with the alpha vector for the Local Jacobian Expansion approximation.
         """
-        index = 0
-        for w in weights:
-            shape = tf.shape(w)
-            size = tf.reduce_prod(shape)
-            v = influence_vector[index:(index + size)]
-            index += size
-            v = tf.reshape(v, shape)
-            w.assign(w - v)
+        # First, we compute the second term, which contains the Hessian vector product
+        weights = self.perturbed_head.trainable_weights
+        with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+            tape.watch(weights)
+            logits = self.perturbed_head(z_batch)
+            loss = self.perturbed_head.compiled_loss(y_batch, logits)
+        grads = tape.jacobian(loss, weights)[0]
+        grads = tf.multiply(
+            grads,
+            tf.repeat(
+                tf.expand_dims(
+                    tf.divide(tf.ones_like(z_batch),
+                              tf.cast(tf.shape(z_batch)[0], z_batch.dtype) * z_batch +
+                              tf.cast(self.epsilon, z_batch.dtype)),
+                    axis=-1),
+                grads.shape[-1], axis=-1
+            )
+        )
+        second_term = tf.map_fn(
+            lambda v: self.ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=protected-access
+                tf.expand_dims(v, axis=0),
+                use_gradient=False
+            ),
+            grads
+        )
+        second_term = tf.reduce_sum(tf.reshape(second_term, tf.shape(grads)), axis=1)
+
+        # Second, we compute the first term, which contains the weights
+        first_term = tf.concat(list(weights), axis=0)
+        first_term = tf.multiply(
+            first_term,
+            tf.repeat(
+                tf.expand_dims(
+                    tf.divide(tf.ones_like(z_batch),
+                              tf.cast(tf.shape(z_batch)[0], z_batch.dtype) * z_batch +
+                              tf.cast(self.epsilon, z_batch.dtype)),
+                    axis=-1),
+                first_term.shape[-1], axis=-1
+            )
+        )
+        first_term = tf.reduce_sum(first_term, axis=1)
+
+        return first_term - second_term  # alpha is first term minus second term

@@ -75,7 +75,7 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         return delta_x
 
     @tf.function
-    def __step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         """
         The optimization step to find the distance between the boundary and a given sample x.
 
@@ -163,7 +163,7 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         y_pred = self.model(x)
 
         def body(index, x_current):
-            computation, _, x_new = self.__step(x_current, y_pred)
+            computation, _, x_new = self._step(x_current, y_pred)
             return computation, index + 1, x_new
 
         _, _, x_adversarial = tf.while_loop(

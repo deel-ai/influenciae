@@ -19,7 +19,7 @@ def test_surrogate_model():
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 4, "same", activation='swish'),
         tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(4)
+        tf.keras.layers.Dense(4, use_bias=False)
     ])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-2),
@@ -54,7 +54,7 @@ def test_gradients():
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 4, "valid", activation='relu'),
         tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(4)
+        tf.keras.layers.Dense(4, use_bias=False)
     ])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-2),
@@ -107,7 +107,7 @@ def test_influence_values():
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 4, "valid", activation='relu'),
         tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(4)
+        tf.keras.layers.Dense(4, use_bias=False)
     ])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-2),
@@ -157,7 +157,7 @@ def test_predict_with_kernel():
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 5, "valid", activation='relu'),
         tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(1)
+        tf.keras.layers.Dense(1, use_bias=False)
     ])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-2),

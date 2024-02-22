@@ -6,7 +6,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
 
-from deel.influenciae.utils import find_layer, is_dataset_batched, dataset_to_tensor, array_to_dataset
+from deel.influenciae.utils import find_layer, is_dataset_batched, dataset_to_tensor, array_to_dataset, split_model
+from ..utils_test import almost_equal
 
 
 def test_find_layer():
@@ -68,3 +69,21 @@ def test_array_to_dataset():
     r_ds = array_to_dataset(r, batch_size=5, shuffle=True, buffer_size=25)
     r_sorted = tf.sort(tf.concat([b for b in r_ds], axis=0))
     assert tf.reduce_all(r == r_sorted)
+
+
+def test_split_model():
+    """Ensure we can properly split a model into two sub-models"""
+    x = tf.random.normal((25, 32, 32, 3))
+    model = tf.keras.models.Sequential([
+        Conv2D(4, (1, 1), name="conv2d_1", input_shape=(32, 32, 3)),
+        Conv2D(4, (1, 1), name="conv2d_2"),
+        MaxPooling2D(),
+        Flatten(),
+        Dense(5)
+    ])
+    model_a, model_b = split_model(model, 2)
+    model_a_test = tf.keras.models.Sequential(model.layers[:2])
+    model_b_test = tf.keras.models.Sequential(model.layers[2:])
+    assert almost_equal(model_a_test.predict(x), model_a.predict(x))
+    assert almost_equal(model_b_test.predict(model_a_test.predict(x)), model_b.predict(model_a.predict(x)))
+    assert almost_equal(model(x), model_b(model_a(x)))

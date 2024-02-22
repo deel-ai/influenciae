@@ -44,7 +44,7 @@ class ConvNetCIFAR(Sequential):
     use_regularization
         A boolean indicating whether to add regularization on the final model's last layer.
     """
-    def __init__(self, model: Union[str, Model], use_regularization: bool = True, **kwargs):
+    def __init__(self, model: Union[str, Model], use_regularization: bool = True, use_bias: bool = True, **kwargs):
         super().__init__(**kwargs)
         if isinstance(model, Model):
             base_model = model
@@ -73,9 +73,14 @@ class ConvNetCIFAR(Sequential):
         self.add(tf.keras.layers.LeakyReLU())
 
         if use_regularization:
-            dense_2 = Dense(10, kernel_regularizer=L1L2(l1=1e-4, l2=1e-4), kernel_initializer="he_normal")
+            dense_2 = Dense(
+                10,
+                kernel_regularizer=L1L2(l1=1e-4, l2=1e-4),
+                kernel_initializer="he_normal",
+                use_bias=use_bias
+            )
         else:
-            dense_2 = Dense(10)
+            dense_2 = Dense(10, use_bias=use_bias)
 
         self.add(dense_2)
 
@@ -92,6 +97,8 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         A string with the type of model to use. Either 'resnet', 'efficient_net' or 'vgg19'.
     use_regu
         A boolean indicating whether L1L2 regularization should be used on the last layer.
+    use_bias
+        A boolean for adding a bias to the last layer.
     force_overfit
         A boolean for if the training schedule to be used should try to overfit the model or not.
     epochs_to_save
@@ -107,6 +114,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
             epochs: int = 60,
             model_type: str = 'resnet',
             use_regu: bool = True,
+            use_bias: bool = True,
             force_overfit: bool = False,
             epochs_to_save: Optional[List[int]] = None,
             verbose: bool = True,
@@ -115,6 +123,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         self.epochs = epochs
         self.model_type = model_type
         self.use_regu = use_regu
+        self.use_bias = use_bias
         self.force_overfit = force_overfit
         self.epochs_to_save = epochs_to_save
         self.verbose = verbose
@@ -171,7 +180,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
 
         test_dataset = test_dataset.batch(test_batch_size).prefetch(100)
 
-        model = ConvNetCIFAR(self.model_type, self.use_regu)
+        model = ConvNetCIFAR(self.model_type, self.use_regu, self.use_bias)
 
         loss = CategoricalCrossentropy(from_logits=True)
 
@@ -266,6 +275,7 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
             model_type: str = 'resnet',
             mislabeling_ratio: float = 0.0005,
             use_regu: bool = True,
+            use_bias: bool = True,
             force_overfit: bool = False,
             train_batch_size: int = 128,
             test_batch_size: int = 128,
@@ -281,6 +291,7 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
             "model_type": model_type,
             "mislabeling_ratio": mislabeling_ratio,
             "use_regularization": use_regu,
+            "use_bias": use_bias,
             "optimizer": 'sgd' if force_overfit else 'adam',
             "train_batch_size": train_batch_size,
             "test_batch_size": test_batch_size,
@@ -301,8 +312,8 @@ class Cifar10MislabelingDetectorEvaluator(MislabelingDetectorEvaluator):
         if take_batch is not None:
             training_dataset = training_dataset.take(take_batch)
             test_dataset = test_dataset.take(take_batch)
-        training_procedure = Cifar10TrainingProcedure(epochs, model_type, use_regu, force_overfit, epochs_to_save,
-                                                      verbose_training, use_tensorboard)
+        training_procedure = Cifar10TrainingProcedure(epochs, model_type, use_regu, use_bias, force_overfit,
+                                                      epochs_to_save, verbose_training, use_tensorboard)
         super().__init__(training_dataset, test_dataset, training_procedure,
                          nb_classes=10, mislabeling_ratio=mislabeling_ratio,
                          train_batch_size=train_batch_size,

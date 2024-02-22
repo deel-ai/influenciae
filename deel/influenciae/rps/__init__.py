@@ -3,8 +3,9 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Representer Point L2 module
+Representer Point theorem module
 """
 
+from .base_representer_point import BaseRepresenterPoint
 from .rps_l2 import RepresenterPointL2
 from .rps_lje import RepresenterPointLJE

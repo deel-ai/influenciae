@@ -40,6 +40,8 @@ We propose some hands-on tutorials to get familiar with the library and it's API
 - [**Using TracIn**](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) </sub>
 - [**Using Representer Point Selection - L2 (RPS_L2)**](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) </sub>
 - [**Using Representer Point Selection - Local Jacobian Expansion (RPS_LJE)**](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) </sub>
+- [**Using Arnoldi Influence Calculator**](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing) </sub>
+- [**Using Boundary-based Influence**](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) </sub>
 
 ## 🚀 Quick Start
 
@@ -133,15 +135,17 @@ data_and_influence_dataset = influence_calculator.estimate_influence_values_grou
 
 All the influence calculation methods work on Tensorflow models trained for any sort of task and on any type of data. Visualization functionality is implemented for image datasets only (for the moment).
 
-| **Influence Method**                                    | Source                                    |                                                                               Tutorial                                                                               |
-|:--------------------------------------------------------| :---------------------------------------- |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
-| Influence Functions                                     | [Paper](https://arxiv.org/abs/1703.04730)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
-| RelatIF                                                 | [Paper](https://arxiv.org/pdf/2003.11630.pdf)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
-| Influence Functions  (first order, groups)              | [Paper](https://arxiv.org/abs/1905.13289)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing)  |
-| Influence Functions  (second order, groups)             | [Paper](https://arxiv.org/abs/1911.00418)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing)  |
-| Representer Point Selection  (L2)                       | [Paper](https://arxiv.org/abs/1811.09720)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing)  |
-| Representer Point Selection  (Local Jacobian Expansion) | [Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing)  |
-| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing)  |
+| **Influence Method**                                    | Source                                                                                             |                                                                              Tutorial                                                                               |
+|:--------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+| Influence Functions                                     | [Paper](https://arxiv.org/abs/1703.04730)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) |
+| RelatIF                                                 | [Paper](https://arxiv.org/pdf/2003.11630.pdf)                                                      | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) |
+| Influence Functions  (first order, groups)              | [Paper](https://arxiv.org/abs/1905.13289)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WlYcQNu5obhVjhonN2QYi8ybKyZJl4iY?usp=sharing) |
+| Influence Functions  (second order, groups)             | [Paper](https://arxiv.org/abs/1911.00418)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1qNvKiU3-aZWhRA0rxS6X3ebeNkoznJJe?usp=sharing) |
+| Arnoldi iteration (Scaling Up Influence Functions)      | [Paper](https://arxiv.org/abs/2112.03052)  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing) |
+| Representer Point Selection  (L2)                       | [Paper](https://arxiv.org/abs/1811.09720)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/17W5s30LbxABbDd8hbdwYE56abyWjSC4u?usp=sharing) |
+| Representer Point Selection  (Local Jacobian Expansion) | [Paper](https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14e7wwFRQJhY-huVYmJ7ri355kfLJgAPA?usp=sharing) |
+| Trac-In                                                 | [Paper](https://arxiv.org/abs/2002.08484)                                                          | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1E94cGF46SUQXcCTNwQ4VGSjXEKm7g21c?usp=sharing) |
+| Boundary-based influence                                | --                                                                                                 |                                                                                  - [**Using Boundary-based Influence**](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1785eHgT91FfqG1f25s7ovqd6JhP5uklh?usp=sharing) </sub>                                                                                   |
 
 ## 👀 See Also
 
@@ -167,6 +171,25 @@ This project received funding from the French ”Investing for the Future – PI
 ## 👨‍🎓 Creators
 
 This library was first created as a research tool by [Agustin Martin PICARD](mailto:agustin-martin.picard@irt-saintexupery.com) in the context of the DEEL project with the help of [David Vigouroux](mailto:david.vigouroux@irt-saintexupery.com) and [Thomas FEL](http://thomasfel.fr). Later on, [Lucas Hervier](https://github.com/lucashervier) joined the team to transform (at least attempt) the code base as a practical user-(almost)-friendly and efficient tool.
+
+## 🗞️ Citation
+
+If you use Influenciae as part of your workflow in a scientific publication, please consider citing the 🗞️ [official paper](https://hal.science/hal-04284178/):
+
+```
+@unpublished{picard:hal-04284178,
+  TITLE = {{Influenci{\ae}: A library for tracing the influence back to the data-points}},
+  AUTHOR = {Picard, Agustin Martin and Hervier, Lucas and Fel, Thomas and Vigouroux, David},
+  URL = {https://hal.science/hal-04284178},
+  NOTE = {working paper or preprint},
+  YEAR = {2023},
+  MONTH = Nov,
+  KEYWORDS = {Data-centric ai ; XAI ; Explainability ; Influence Functions ; Open-source toolbox},
+  PDF = {https://hal.science/hal-04284178/file/ms.pdf},
+  HAL_ID = {hal-04284178},
+  HAL_VERSION = {v1},
+}
+```
 
 ## 📝 License
 

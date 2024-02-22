@@ -16,6 +16,11 @@ def almost_equal(arr1, arr2, epsilon=1e-6):
     return np.sum(np.abs(arr1 - arr2)) < epsilon
 
 
+def relative_almost_equal(arr1, arr2, percent=0.01):
+    """Ensure two array are almost equal at a percent"""
+    return np.sum(np.abs(arr1 - arr2)) / np.sum(np.abs(arr1)) < percent
+
+
 def assert_tensor_equal(tensor1, tensor2):
     return tf.debugging.assert_equal(tensor1, tensor2)
 
