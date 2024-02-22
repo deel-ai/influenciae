@@ -172,6 +172,25 @@ This project received funding from the French ”Investing for the Future – PI
 
 This library was first created as a research tool by [Agustin Martin PICARD](mailto:agustin-martin.picard@irt-saintexupery.com) in the context of the DEEL project with the help of [David Vigouroux](mailto:david.vigouroux@irt-saintexupery.com) and [Thomas FEL](http://thomasfel.fr). Later on, [Lucas Hervier](https://github.com/lucashervier) joined the team to transform (at least attempt) the code base as a practical user-(almost)-friendly and efficient tool.
 
+## 🗞️ Citation
+
+If you use Influenciae as part of your workflow in a scientific publication, please consider citing the 🗞️ [official paper](https://hal.science/hal-04284178/):
+
+```
+@unpublished{picard:hal-04284178,
+  TITLE = {{Influenci{\ae}: A library for tracing the influence back to the data-points}},
+  AUTHOR = {Picard, Agustin Martin and Hervier, Lucas and Fel, Thomas and Vigouroux, David},
+  URL = {https://hal.science/hal-04284178},
+  NOTE = {working paper or preprint},
+  YEAR = {2023},
+  MONTH = Nov,
+  KEYWORDS = {Data-centric ai ; XAI ; Explainability ; Influence Functions ; Open-source toolbox},
+  PDF = {https://hal.science/hal-04284178/file/ms.pdf},
+  HAL_ID = {hal-04284178},
+  HAL_VERSION = {v1},
+}
+```
+
 ## 📝 License
 
 The package is released under <a href="https://choosealicense.com/licenses/mit"> MIT license</a>.
