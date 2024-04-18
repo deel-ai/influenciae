@@ -178,7 +178,7 @@ If you use Influenciae as part of your workflow in a scientific publication, ple
 
 ```
 @unpublished{picard:hal-04284178,
-  TITLE = {{Influenci{\ae}: A library for tracing the influence back to the data-points}},
+  TITLE = {Influenci\{ae}: A library for tracing the influence back to the data-points},
   AUTHOR = {Picard, Agustin Martin and Hervier, Lucas and Fel, Thomas and Vigouroux, David},
   URL = {https://hal.science/hal-04284178},
   NOTE = {working paper or preprint},

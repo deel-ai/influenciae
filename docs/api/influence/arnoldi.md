@@ -25,4 +25,4 @@ points for the moment.
 
 - [**Using Arnoldi Influence Calculator**](https://colab.research.google.com/drive/1rQU33sbD0YW1cZMRlJmS15EW5O16yoDE?usp=sharing)
 
-{{deel.influenciae.influence.first_order_influence_calculator.ArnoldiInfluenceCalculator}}
+{{deel.influenciae.influence.arnoldi_influence_calculator.ArnoldiInfluenceCalculator}}
