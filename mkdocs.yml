@@ -1,18 +1,18 @@
 site_name: Influenciae
 
-#google_analytics:
-#  - UA-132343476-2
-#  - auto
-
 nav:
   - Home: index.md
   - Influence Functions:
       - First Order Influence Calculator: api/influence/first_order_influence_calculator.md
       - Second Order Influence Calculator: api/influence/second_order_influence_calculator.md
+      - Arnoldi Influence Calculator: api/influence/arnoldi.md
   - Representer Point Selection:
       - Representer Point Selection - L2: api/representer_point_selection/rps_l2.md
       - Representer Point Selection - LJE: api/representer_point_selection/rps_lje.md
   - TracIn: api/tracin.md
+  - Boundary Based:
+      - Boundary Based Sample Boundary: api/Boundary-based/sample_boundary.md
+      - Boundary Based Weights Boundary: api/Boundary-based/weights_boundary.md
   - Benchmarks: api/benchmarks.md
 
 theme:
