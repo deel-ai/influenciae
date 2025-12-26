@@ -24,6 +24,8 @@ def test_instantiation():
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     # build a fake dataset in order to have batched samples
+    # Use a seed for reproducibility and numerical stability
+    tf.random.set_seed(42)
     inputs = tf.random.normal((25, 1, 3))
     target = tf.random.normal((25, 1))
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
