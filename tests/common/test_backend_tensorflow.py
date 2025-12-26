@@ -241,9 +241,8 @@ class TestTensorFlowBackendLayerOperations:
         """Test finding last weight layer."""
         idx = backend.find_last_weight_layer(simple_model)
 
-        # For a 2-layer model, last weight layer should be -2 (skipping last)
-        # But since our model has Dense as last layer with weights, it should be -2
-        assert idx == -2  # Second to last because we start from -2
+        # Last Dense layer should be at index -1
+        assert idx == -1
 
     def test_find_last_weight_layer_with_trailing_layers(self, backend):
         """Test finding last weight layer with non-weight layers at the end."""
@@ -319,8 +318,8 @@ class TestTensorFlowInfluenceModel:
         loss_fn = MeanSquaredError(reduction=Reduction.NONE)
         influence_model = InfluenceModel(simple_model, loss_function=loss_fn)
 
-        # Should use second-to-last layer by default (layer before logits)
-        expected_params = 5 * 3 + 3  # First dense layer
+        # Should use last layer by default (the output layer)
+        expected_params = 3 * 2 + 2  # Output dense layer
         assert influence_model.nb_params == expected_params
 
     def test_influence_model_with_start_layer(self, simple_model):

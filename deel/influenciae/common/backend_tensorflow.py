@@ -166,7 +166,7 @@ class TensorFlowBackend(BaseBackend):
 
     def find_last_weight_layer(self, model: tf.keras.Model) -> int:
         """
-        Find and return the id of the last layer before logits with weights.
+        Find and return the id of the last layer with weights.
 
         Parameters
         ----------
@@ -176,12 +176,11 @@ class TensorFlowBackend(BaseBackend):
         Returns
         -------
         layer_id
-            Id (e.g. -2, -3...) of the layer found.
+            Id (e.g. -1, -2...) of the layer found.
         """
         num_layers = len(model.layers)
-        # Start from -2 to skip the logits layer, but handle small models
-        start = min(2, num_layers)
-        for layer_id in range(start, num_layers + 1):
+        # Start from -1 (the last layer) and work backwards
+        for layer_id in range(1, num_layers + 1):
             layer = model.layers[-layer_id]
             if hasattr(layer, 'weights') and layer.weights:
                 return -layer_id
