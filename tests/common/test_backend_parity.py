@@ -361,7 +361,7 @@ class TestInfluenceModelParity:
                       (torch.from_numpy(inputs[2:]), torch.from_numpy(targets[2:]))]
 
         tf_loss = tf_influence.batch_loss(tf_dataset).numpy()
-        pt_loss = tf_influence.backend.to_numpy(pt_influence.batch_loss(pt_dataset))
+        pt_loss = pt_influence.backend.to_numpy(pt_influence.batch_loss(pt_dataset))
 
         assert almost_equal(tf_loss, pt_loss), \
             f"InfluenceModel batch_loss mismatch:\nTF: {tf_loss}\nPT: {pt_loss}"
