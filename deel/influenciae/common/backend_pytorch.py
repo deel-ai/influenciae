@@ -479,3 +479,148 @@ class PyTorchBackend(BaseBackend):
                     return
         raise ValueError("Dataset does not appear to be batched")
 
+    # Linear algebra operations for IHVP
+    def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> torch.Tensor:
+        """Create a tensor of zeros."""
+        if dtype is None:
+            dtype = torch.float32
+        return torch.zeros(shape, dtype=dtype)
+
+    def pinv(self, matrix: torch.Tensor) -> torch.Tensor:
+        """Compute the Moore-Penrose pseudo-inverse of a matrix."""
+        return torch.linalg.pinv(matrix)
+
+    def cast(self, tensor: torch.Tensor, dtype: Any) -> torch.Tensor:
+        """Cast a tensor to a different dtype."""
+        return tensor.to(dtype)
+
+    def get_dtype(self, tensor: torch.Tensor) -> Any:
+        """Get the dtype of a tensor."""
+        return tensor.dtype
+
+    def float32_dtype(self) -> Any:
+        """Return the float32 dtype for the framework."""
+        return torch.float32
+
+    def int32_dtype(self) -> Any:
+        """Return the int32 dtype for the framework."""
+        return torch.int32
+
+    def int64_dtype(self) -> Any:
+        """Return the int64 dtype for the framework."""
+        return torch.int64
+
+    def constant(self, value: Any, dtype: Any = None) -> torch.Tensor:
+        """Create a constant tensor."""
+        if dtype is None:
+            return torch.tensor(value)
+        return torch.tensor(value, dtype=dtype)
+
+    def convert_to_tensor(self, value: Any, dtype: Any = None) -> torch.Tensor:
+        """Convert a value to a tensor."""
+        if isinstance(value, torch.Tensor):
+            if dtype is not None:
+                return value.to(dtype)
+            return value
+        if dtype is None:
+            return torch.tensor(value)
+        return torch.tensor(value, dtype=dtype)
+
+    def reduce_prod(self, tensor: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+        """Reduce product along an axis."""
+        if axis is None:
+            return tensor.prod()
+        return tensor.prod(dim=axis)
+
+    def compute_hessian(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        dataset: Any,
+        nb_params: int,
+        jacobian_fn: Optional[Callable] = None
+    ) -> torch.Tensor:
+        """Compute the Hessian matrix of the loss with respect to weights."""
+        hess = torch.zeros((nb_params, nb_params))
+        nb_elt = 0
+
+        for batch in dataset:
+            inputs, targets = batch[0], batch[1]
+            batch_size = inputs.shape[0]
+
+            for i in range(batch_size):
+                model.zero_grad()
+                input_sample = inputs[i:i+1]
+                target_sample = targets[i:i+1]
+
+                predictions = model(input_sample)
+                loss = loss_function(predictions, target_sample).sum()
+
+                # Compute gradients
+                grads = torch.autograd.grad(loss, weights, create_graph=True)
+                grad_flat = torch.cat([g.flatten() for g in grads])
+
+                # Compute Hessian row by row
+                for j, g in enumerate(grad_flat):
+                    model.zero_grad()
+                    hess_row = torch.autograd.grad(g, weights, retain_graph=True)
+                    hess_row_flat = torch.cat([h.flatten() for h in hess_row])
+                    hess[j] += hess_row_flat.detach()
+
+                nb_elt += 1
+
+        return hess / nb_elt
+
+    def compute_hvp_single(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        v: List[torch.Tensor],
+        inputs: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute Hessian-vector product using forward-over-backward AD."""
+        model.zero_grad()
+        predictions = model(inputs)
+        loss = loss_function(predictions, targets).sum()
+
+        # Compute gradients with graph
+        grads = torch.autograd.grad(loss, weights, create_graph=True)
+
+        # Compute HVP: sum of grad_i * v_i derivatives
+        grad_v_product = sum(
+            (g * v_i).sum() for g, v_i in zip(grads, v)
+        )
+
+        hvp_list = torch.autograd.grad(grad_v_product, weights)
+
+        # Flatten and concatenate
+        hvp = torch.cat([h.flatten() for h in hvp_list])
+
+        return hvp
+
+    def map_fn(self, fn: Callable, elems: torch.Tensor) -> torch.Tensor:
+        """Apply a function to each element in a batch."""
+        results = [fn(elem) for elem in elems]
+        return torch.stack(results)
+
+    def get_dataset_cardinality(self, dataset: Any) -> int:
+        """Get the number of batches in a dataset."""
+        if hasattr(dataset, '__len__'):
+            return len(dataset)
+        # Fallback: count batches
+        count = 0
+        for _ in dataset:
+            count += 1
+        return count
+
+    def is_sequential_model(self, model: nn.Module) -> bool:
+        """Check if a model is a Sequential model."""
+        return isinstance(model, nn.Sequential)
+
+    def create_sequential_from_layers(self, layers: List[nn.Module]) -> nn.Module:
+        """Create a Sequential model from a list of layers."""
+        return nn.Sequential(*layers)
+

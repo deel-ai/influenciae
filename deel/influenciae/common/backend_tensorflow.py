@@ -335,3 +335,125 @@ class TensorFlowBackend(BaseBackend):
         from ..utils import assert_batched_dataset
         assert_batched_dataset(dataset)
 
+    # Linear algebra operations for IHVP
+    def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> tf.Tensor:
+        """Create a tensor of zeros."""
+        if dtype is None:
+            dtype = tf.float32
+        return tf.zeros(shape, dtype=dtype)
+
+    def pinv(self, matrix: tf.Tensor) -> tf.Tensor:
+        """Compute the Moore-Penrose pseudo-inverse of a matrix."""
+        return tf.linalg.pinv(matrix)
+
+    def cast(self, tensor: tf.Tensor, dtype: Any) -> tf.Tensor:
+        """Cast a tensor to a different dtype."""
+        return tf.cast(tensor, dtype)
+
+    def get_dtype(self, tensor: tf.Tensor) -> Any:
+        """Get the dtype of a tensor."""
+        return tensor.dtype
+
+    def float32_dtype(self) -> Any:
+        """Return the float32 dtype for the framework."""
+        return tf.float32
+
+    def int32_dtype(self) -> Any:
+        """Return the int32 dtype for the framework."""
+        return tf.int32
+
+    def int64_dtype(self) -> Any:
+        """Return the int64 dtype for the framework."""
+        return tf.int64
+
+    def constant(self, value: Any, dtype: Any = None) -> tf.Tensor:
+        """Create a constant tensor."""
+        return tf.constant(value, dtype=dtype)
+
+    def convert_to_tensor(self, value: Any, dtype: Any = None) -> tf.Tensor:
+        """Convert a value to a tensor."""
+        return tf.convert_to_tensor(value, dtype=dtype)
+
+    def reduce_prod(self, tensor: tf.Tensor, axis: Optional[int] = None) -> tf.Tensor:
+        """Reduce product along an axis."""
+        return tf.reduce_prod(tensor, axis=axis)
+
+    def compute_hessian(
+        self,
+        model: Any,
+        weights: List[tf.Variable],
+        loss_function: Callable,
+        dataset: tf.data.Dataset,
+        nb_params: int,
+        jacobian_fn: Optional[Callable] = None
+    ) -> tf.Tensor:
+        """Compute the Hessian matrix of the loss with respect to weights using second-order AD."""
+        # Get dtype from dataset
+        dtype = dataset.element_spec[0].dtype
+        hess = tf.zeros((nb_params, nb_params), dtype=dtype)
+        nb_elt = 0
+
+        for batch in dataset:
+            batch_size = tf.shape(batch[0])[0]
+
+            with tf.GradientTape(persistent=True, watch_accessed_variables=False) as tape_hess:
+                tape_hess.watch(weights)
+                # Compute jacobian inside the tape so we can take second derivatives
+                with tf.GradientTape(watch_accessed_variables=False) as tape_inner:
+                    tape_inner.watch(weights)
+                    predictions = model(batch[0])
+                    loss = loss_function(batch[1], predictions)
+                grads = tape_inner.jacobian(loss, weights)
+                grads = [tf.reshape(g, (batch_size, -1)) for g in grads]
+                grads = tf.concat(grads, axis=1)
+
+            curr_hess = tape_hess.jacobian(grads, weights)
+            curr_hess = [tf.reshape(h, shape=(batch_size, nb_params, -1)) for h in curr_hess]
+            curr_hess = tf.concat(curr_hess, axis=-1)
+            curr_hess = tf.reduce_sum(curr_hess, axis=0)
+            hess += tf.cast(curr_hess, dtype=hess.dtype)
+            nb_elt += batch_size
+
+        return hess / tf.cast(nb_elt, dtype=hess.dtype)
+
+    def compute_hvp_single(
+        self,
+        model: Any,
+        weights: List[tf.Variable],
+        loss_function: Callable,
+        v: List[tf.Tensor],
+        inputs: tf.Tensor,
+        targets: tf.Tensor
+    ) -> tf.Tensor:
+        """Compute Hessian-vector product using forward-over-backward AD."""
+        with tf.autodiff.ForwardAccumulator(weights, v) as acc:
+            with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+                tape.watch(weights)
+                predictions = model(inputs)
+                loss = loss_function(targets, predictions)
+            backward = tape.jacobian(loss, weights)
+        hvp_list = acc.jvp(backward)
+
+        # Flatten and concatenate
+        hvp = [tf.reshape(h, shape=(-1,)) for h in hvp_list]
+        hvp = tf.concat(hvp, axis=0)
+
+        return hvp
+
+    def map_fn(self, fn: Callable, elems: tf.Tensor) -> tf.Tensor:
+        """Apply a function to each element in a batch."""
+        return tf.map_fn(fn=fn, elems=elems)
+
+    def get_dataset_cardinality(self, dataset: tf.data.Dataset) -> int:
+        """Get the number of batches in a dataset."""
+        return int(dataset.cardinality())
+
+    def is_sequential_model(self, model: tf.keras.Model) -> bool:
+        """Check if a model is a Sequential model."""
+        from tensorflow.keras.models import Sequential
+        return isinstance(model, Sequential)
+
+    def create_sequential_from_layers(self, layers: List[tf.keras.layers.Layer]) -> tf.keras.Model:
+        """Create a Sequential model from a list of layers."""
+        return tf.keras.Sequential(layers)
+

@@ -525,6 +525,174 @@ class BaseBackend(ABC):
         """
         pass
 
+    # Linear algebra operations for IHVP
+    @abstractmethod
+    def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+        """Create a tensor of zeros."""
+        pass
+
+    @abstractmethod
+    def pinv(self, matrix: Any) -> Any:
+        """Compute the Moore-Penrose pseudo-inverse of a matrix."""
+        pass
+
+    @abstractmethod
+    def cast(self, tensor: Any, dtype: Any) -> Any:
+        """Cast a tensor to a different dtype."""
+        pass
+
+    @abstractmethod
+    def get_dtype(self, tensor: Any) -> Any:
+        """Get the dtype of a tensor."""
+        pass
+
+    @abstractmethod
+    def float32_dtype(self) -> Any:
+        """Return the float32 dtype for the framework."""
+        pass
+
+    @abstractmethod
+    def int32_dtype(self) -> Any:
+        """Return the int32 dtype for the framework."""
+        pass
+
+    @abstractmethod
+    def int64_dtype(self) -> Any:
+        """Return the int64 dtype for the framework."""
+        pass
+
+    @abstractmethod
+    def constant(self, value: Any, dtype: Any = None) -> Any:
+        """Create a constant tensor."""
+        pass
+
+    @abstractmethod
+    def convert_to_tensor(self, value: Any, dtype: Any = None) -> Any:
+        """Convert a value to a tensor."""
+        pass
+
+    @abstractmethod
+    def reduce_prod(self, tensor: Any, axis: Optional[int] = None) -> Any:
+        """Reduce product along an axis."""
+        pass
+
+    @abstractmethod
+    def compute_hessian(
+        self,
+        model: Any,
+        weights: List[Any],
+        loss_function: Callable,
+        dataset: Any,
+        nb_params: int,
+        jacobian_fn: Optional[Callable] = None
+    ) -> Any:
+        """
+        Compute the Hessian matrix of the loss with respect to weights.
+
+        Parameters
+        ----------
+        model
+            The model.
+        weights
+            List of weight tensors.
+        loss_function
+            The loss function.
+        dataset
+            The dataset to compute Hessian over.
+        nb_params
+            Number of parameters.
+        jacobian_fn
+            Optional function to compute batch Jacobian. If provided, uses this
+            for more accurate Hessian computation.
+
+        Returns
+        -------
+        hessian
+            The Hessian matrix.
+        """
+        pass
+
+    @abstractmethod
+    def compute_hvp_single(
+        self,
+        model: Any,
+        weights: List[Any],
+        loss_function: Callable,
+        v: Any,
+        inputs: Any,
+        targets: Any
+    ) -> Any:
+        """
+        Compute Hessian-vector product for a single sample using forward-over-backward AD.
+
+        Parameters
+        ----------
+        model
+            The model.
+        weights
+            List of weight tensors.
+        loss_function
+            The loss function.
+        v
+            The vector to multiply with the Hessian.
+        inputs
+            Input sample.
+        targets
+            Target sample.
+
+        Returns
+        -------
+        hvp
+            The Hessian-vector product.
+        """
+        pass
+
+    @abstractmethod
+    def map_fn(self, fn: Callable, elems: Any) -> Any:
+        """
+        Apply a function to each element in a batch.
+
+        Parameters
+        ----------
+        fn
+            The function to apply.
+        elems
+            The elements to map over.
+
+        Returns
+        -------
+        result
+            The mapped results.
+        """
+        pass
+
+    @abstractmethod
+    def get_dataset_cardinality(self, dataset: Any) -> int:
+        """
+        Get the number of batches in a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset.
+
+        Returns
+        -------
+        cardinality
+            Number of batches.
+        """
+        pass
+
+    @abstractmethod
+    def is_sequential_model(self, model: Any) -> bool:
+        """Check if a model is a Sequential model."""
+        pass
+
+    @abstractmethod
+    def create_sequential_from_layers(self, layers: List[Any]) -> Any:
+        """Create a Sequential model from a list of layers."""
+        pass
+
 
 def get_backend(framework: Framework) -> BaseBackend:
     """
