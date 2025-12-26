@@ -5,7 +5,7 @@
 """
 PyTorch backend implementation.
 """
-from typing import Any, List, Tuple, Callable, Optional, Union
+from typing import Any, List, Tuple, Callable, Optional
 
 import numpy as np
 import torch
@@ -197,6 +197,32 @@ class PyTorchBackend(BaseBackend):
             return tensor.sum()
         return tensor.sum(dim=axis)
 
+    def expand_dims(self, tensor: torch.Tensor, axis: int) -> torch.Tensor:
+        """Add a new axis to a tensor."""
+        return tensor.unsqueeze(axis)
+
+    def squeeze(self, tensor: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+        """Remove dimensions of size 1."""
+        if axis is None:
+            return tensor.squeeze()
+        return tensor.squeeze(axis)
+
+    def transpose(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Transpose a tensor (swap last two dimensions)."""
+        return tensor.t() if tensor.dim() <= 2 else tensor.transpose(-2, -1)
+
+    def tensor_shape(self, tensor: torch.Tensor) -> Tuple[int, ...]:
+        """Get the shape of a tensor."""
+        return tuple(tensor.shape)
+
+    def tensor_ndim(self, tensor: torch.Tensor) -> int:
+        """Get the number of dimensions of a tensor."""
+        return tensor.dim()
+
+    def matmul(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Matrix multiplication."""
+        return torch.matmul(a, b)
+
     def find_layer_by_name(self, model: nn.Module, layer_name: str) -> Tuple[int, nn.Module]:
         """Find a layer by name and return its index and the layer."""
         named_modules = list(model.named_modules())
@@ -313,4 +339,143 @@ class PyTorchBackend(BaseBackend):
             layers = children[start_idx:end_idx + 1]
 
         return self.get_model_weights(model, layers)
+
+    # Dataset operations
+    def map_dataset(
+        self,
+        dataset: Any,  # DataLoader
+        map_fn: Callable,
+        device: Optional[str] = None
+    ) -> List[Any]:
+        """
+        Apply a mapping function to each batch in a dataset.
+
+        For PyTorch, this returns a list of mapped results since DataLoader
+        doesn't support lazy mapping like tf.data.Dataset.
+        """
+        results = []
+        for batch in dataset:
+            if device is not None:
+                # Move batch to device if specified
+                if isinstance(batch, (list, tuple)):
+                    batch = tuple(
+                        b.to(device) if isinstance(b, torch.Tensor) else b
+                        for b in batch
+                    )
+                elif isinstance(batch, torch.Tensor):
+                    batch = batch.to(device)
+            result = map_fn(*batch) if isinstance(batch, (list, tuple)) else map_fn(batch)
+            results.append(result)
+        return results
+
+    def cache_dataset(self, dataset: Any) -> List[Any]:
+        """
+        Cache a dataset in memory.
+
+        For PyTorch, this materializes the DataLoader into a list.
+        """
+        return list(dataset)
+
+    def save_dataset(self, dataset: Any, path: str) -> None:
+        """Save a dataset to disk using torch.save."""
+        import os
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+        # Materialize dataset if it's a DataLoader
+        if hasattr(dataset, '__iter__'):
+            data = list(dataset)
+        else:
+            data = dataset
+        torch.save(data, path)
+
+    def load_dataset(self, path: str) -> List[Any]:
+        """Load a dataset from disk."""
+        import os
+        if os.path.exists(path):
+            return torch.load(path)
+        raise FileNotFoundError(f"The dataset path: {path} was not found")
+
+    def get_dataset_batch_size(self, dataset: Any) -> int:
+        """Get the batch size of a dataset (DataLoader)."""
+        if hasattr(dataset, 'batch_size'):
+            return dataset.batch_size
+        # Try to infer from first batch
+        for batch in dataset:
+            if isinstance(batch, (list, tuple)):
+                return batch[0].shape[0]
+            return batch.shape[0]
+        raise ValueError("Could not determine batch size from dataset")
+
+    def zip_datasets(self, dataset1: Any, dataset2: Any) -> List[Tuple[Any, Any]]:
+        """Zip two datasets together."""
+        return list(zip(dataset1, dataset2))
+
+    def batch_dataset(self, dataset: Any, batch_size: int) -> Any:
+        """
+        Batch a dataset.
+
+        For PyTorch, if dataset is a list, create batches manually.
+        If it's a Dataset, wrap with DataLoader.
+        """
+        from torch.utils.data import DataLoader
+
+        if isinstance(dataset, DataLoader):
+            # Already batched, return as-is or rebatch
+            return dataset
+        elif isinstance(dataset, (list, tuple)):
+            # Create batches from list
+            batches = []
+            for i in range(0, len(dataset), batch_size):
+                batch = dataset[i:i + batch_size]
+                batches.append(batch)
+            return batches
+        else:
+            # Assume it's a PyTorch Dataset
+            return DataLoader(dataset, batch_size=batch_size)
+
+    def unbatch_dataset(self, dataset: Any) -> List[Any]:
+        """Unbatch a dataset."""
+        unbatched = []
+        for batch in dataset:
+            if isinstance(batch, (list, tuple)):
+                # Unbatch each element in the tuple
+                batch_size = batch[0].shape[0] if isinstance(batch[0], torch.Tensor) else len(batch[0])
+                for i in range(batch_size):
+                    item = tuple(b[i] for b in batch)
+                    unbatched.append(item)
+            elif isinstance(batch, torch.Tensor):
+                for i in range(batch.shape[0]):
+                    unbatched.append(batch[i])
+            else:
+                unbatched.append(batch)
+        return unbatched
+
+    def get_dataset_element_spec(self, dataset: Any) -> Any:
+        """
+        Get the element spec of a dataset.
+
+        For PyTorch, returns shape info from first batch.
+        """
+        for batch in dataset:
+            if isinstance(batch, (list, tuple)):
+                return tuple(
+                    {'shape': b.shape, 'dtype': b.dtype} if isinstance(b, torch.Tensor) else type(b)
+                    for b in batch
+                )
+            elif isinstance(batch, torch.Tensor):
+                return {'shape': batch.shape, 'dtype': batch.dtype}
+            return type(batch)
+        return None
+
+    def assert_batched_dataset(self, dataset: Any) -> None:
+        """Assert that a dataset is batched."""
+        # For PyTorch DataLoader, check batch_size attribute
+        if hasattr(dataset, 'batch_size') and dataset.batch_size is not None:
+            return
+        # For lists, check first element
+        if isinstance(dataset, list) and len(dataset) > 0:
+            first = dataset[0]
+            if isinstance(first, (list, tuple)) and len(first) > 0:
+                if isinstance(first[0], torch.Tensor) and first[0].dim() > 0:
+                    return
+        raise ValueError("Dataset does not appear to be batched")
 

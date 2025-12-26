@@ -146,6 +146,32 @@ class TensorFlowBackend(BaseBackend):
         """Reduce sum along an axis."""
         return tf.reduce_sum(tensor, axis=axis)
 
+    def expand_dims(self, tensor: tf.Tensor, axis: int) -> tf.Tensor:
+        """Add a new axis to a tensor."""
+        return tf.expand_dims(tensor, axis=axis)
+
+    def squeeze(self, tensor: tf.Tensor, axis: Optional[int] = None) -> tf.Tensor:
+        """Remove dimensions of size 1."""
+        if axis is None:
+            return tf.squeeze(tensor)
+        return tf.squeeze(tensor, axis=axis)
+
+    def transpose(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Transpose a tensor (swap last two dimensions)."""
+        return tf.transpose(tensor)
+
+    def tensor_shape(self, tensor: tf.Tensor) -> Tuple[int, ...]:
+        """Get the shape of a tensor."""
+        return tuple(tensor.shape.as_list())
+
+    def tensor_ndim(self, tensor: tf.Tensor) -> int:
+        """Get the number of dimensions of a tensor."""
+        return len(tensor.shape)
+
+    def matmul(self, a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
+        """Matrix multiplication."""
+        return tf.matmul(a, b)
+
     def find_layer_by_name(self, model: tf.keras.Model, layer_name: str) -> Tuple[int, tf.keras.layers.Layer]:
         """Find a layer by name and return its index and the layer."""
         for layer_idx, layer in enumerate(model.layers):
@@ -248,4 +274,64 @@ class TensorFlowBackend(BaseBackend):
             layers = model.layers[start_idx:end_idx + 1]
 
         return self.get_model_weights(model, layers)
+
+    # Dataset operations
+    def map_dataset(
+        self,
+        dataset: tf.data.Dataset,
+        map_fn: Callable,
+        device: Optional[str] = None
+    ) -> tf.data.Dataset:
+        """Apply a mapping function to each batch in a dataset."""
+        if device is not None:
+            def device_map_fn(*args):
+                with tf.device(device):
+                    return map_fn(*args)
+            return dataset.map(device_map_fn)
+        return dataset.map(map_fn)
+
+    def cache_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
+        """Cache a dataset in memory."""
+        return dataset.cache()
+
+    def save_dataset(self, dataset: tf.data.Dataset, path: str) -> None:
+        """Save a dataset to disk."""
+        tf.data.experimental.save(dataset, path)
+
+    def load_dataset(self, path: str) -> tf.data.Dataset:
+        """Load a dataset from disk."""
+        from os import path as os_path
+        from xml.dom import NotFoundErr
+        if os_path.exists(path):
+            return tf.data.experimental.load(path)
+        raise NotFoundErr(f"The dataset path: {path} was not found")
+
+    def get_dataset_batch_size(self, dataset: tf.data.Dataset) -> int:
+        """Get the batch size of a dataset."""
+        return int(dataset._batch_size)  # pylint: disable=W0212
+
+    def zip_datasets(
+        self,
+        dataset1: tf.data.Dataset,
+        dataset2: tf.data.Dataset
+    ) -> tf.data.Dataset:
+        """Zip two datasets together."""
+        return tf.data.Dataset.zip((dataset1, dataset2))
+
+    def batch_dataset(self, dataset: tf.data.Dataset, batch_size: int) -> tf.data.Dataset:
+        """Batch a dataset."""
+        return dataset.batch(batch_size)
+
+    def unbatch_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
+        """Unbatch a dataset."""
+        return dataset.unbatch()
+
+    def get_dataset_element_spec(self, dataset: tf.data.Dataset) -> Any:
+        """Get the element spec of a dataset."""
+        return dataset.element_spec
+
+    def assert_batched_dataset(self, dataset: tf.data.Dataset) -> None:
+        """Assert that a dataset is batched."""
+        from ..utils import assert_batched_dataset
+        assert_batched_dataset(dataset)
 

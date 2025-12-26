@@ -263,6 +263,36 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
+    def expand_dims(self, tensor: Any, axis: int) -> Any:
+        """Add a new axis to a tensor."""
+        pass
+
+    @abstractmethod
+    def squeeze(self, tensor: Any, axis: Optional[int] = None) -> Any:
+        """Remove dimensions of size 1."""
+        pass
+
+    @abstractmethod
+    def transpose(self, tensor: Any) -> Any:
+        """Transpose a tensor (swap last two dimensions)."""
+        pass
+
+    @abstractmethod
+    def tensor_shape(self, tensor: Any) -> Tuple[int, ...]:
+        """Get the shape of a tensor."""
+        pass
+
+    @abstractmethod
+    def tensor_ndim(self, tensor: Any) -> int:
+        """Get the number of dimensions of a tensor."""
+        pass
+
+    @abstractmethod
+    def matmul(self, a: Any, b: Any) -> Any:
+        """Matrix multiplication."""
+        pass
+
+    @abstractmethod
     def find_layer_by_name(self, model: Any, layer_name: str) -> Tuple[int, Any]:
         """
         Find a layer by name and return its index and the layer.
@@ -316,6 +346,182 @@ class BaseBackend(ABC):
         -------
         weights
             List of weight tensors.
+        """
+        pass
+
+    # Dataset operations
+    @abstractmethod
+    def map_dataset(self, dataset: Any, map_fn: Callable, device: Optional[str] = None) -> Any:
+        """
+        Apply a mapping function to each batch in a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to map over (tf.data.Dataset or PyTorch DataLoader).
+        map_fn
+            The function to apply to each batch.
+        device
+            Optional device to execute on.
+
+        Returns
+        -------
+        mapped_dataset
+            A new dataset/iterable with the map function applied.
+        """
+        pass
+
+    @abstractmethod
+    def cache_dataset(self, dataset: Any) -> Any:
+        """
+        Cache a dataset in memory.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to cache.
+
+        Returns
+        -------
+        cached_dataset
+            The cached dataset.
+        """
+        pass
+
+    @abstractmethod
+    def save_dataset(self, dataset: Any, path: str) -> None:
+        """
+        Save a dataset to disk.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to save.
+        path
+            Path to save the dataset.
+        """
+        pass
+
+    @abstractmethod
+    def load_dataset(self, path: str) -> Any:
+        """
+        Load a dataset from disk.
+
+        Parameters
+        ----------
+        path
+            Path to load the dataset from.
+
+        Returns
+        -------
+        dataset
+            The loaded dataset.
+        """
+        pass
+
+    @abstractmethod
+    def get_dataset_batch_size(self, dataset: Any) -> int:
+        """
+        Get the batch size of a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset.
+
+        Returns
+        -------
+        batch_size
+            The batch size.
+        """
+        pass
+
+    @abstractmethod
+    def zip_datasets(self, dataset1: Any, dataset2: Any) -> Any:
+        """
+        Zip two datasets together.
+
+        Parameters
+        ----------
+        dataset1
+            First dataset.
+        dataset2
+            Second dataset.
+
+        Returns
+        -------
+        zipped_dataset
+            The zipped dataset.
+        """
+        pass
+
+    @abstractmethod
+    def batch_dataset(self, dataset: Any, batch_size: int) -> Any:
+        """
+        Batch a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to batch.
+        batch_size
+            The batch size.
+
+        Returns
+        -------
+        batched_dataset
+            The batched dataset.
+        """
+        pass
+
+    @abstractmethod
+    def unbatch_dataset(self, dataset: Any) -> Any:
+        """
+        Unbatch a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to unbatch.
+
+        Returns
+        -------
+        unbatched_dataset
+            The unbatched dataset.
+        """
+        pass
+
+    @abstractmethod
+    def get_dataset_element_spec(self, dataset: Any) -> Any:
+        """
+        Get the element spec of a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset.
+
+        Returns
+        -------
+        element_spec
+            The element specification.
+        """
+        pass
+
+    @abstractmethod
+    def assert_batched_dataset(self, dataset: Any) -> None:
+        """
+        Assert that a dataset is batched.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to check.
+
+        Raises
+        ------
+        ValueError
+            If the dataset is not batched.
         """
         pass
 
