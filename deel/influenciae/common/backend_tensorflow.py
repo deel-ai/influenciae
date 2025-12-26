@@ -178,7 +178,10 @@ class TensorFlowBackend(BaseBackend):
         layer_id
             Id (e.g. -2, -3...) of the layer found.
         """
-        for layer_id in range(2, len(model.layers)):
+        num_layers = len(model.layers)
+        # Start from -2 to skip the logits layer, but handle small models
+        start = min(2, num_layers)
+        for layer_id in range(start, num_layers + 1):
             layer = model.layers[-layer_id]
             if hasattr(layer, 'weights') and layer.weights:
                 return -layer_id
