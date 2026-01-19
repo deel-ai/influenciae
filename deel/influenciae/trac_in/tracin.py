@@ -8,17 +8,21 @@ https://arxiv.org/pdf/2002.08484.pdf
 It computes the influence of each training point by tracing the gradients during the
 training phase. In practice, we will use the model at different checkpoints, achieving
 a more efficient estimation at the cost of a little precision.
-"""
-import tensorflow as tf
 
-from ..common import InfluenceModel, BaseInfluenceCalculator
-from ..types import Union, List, Tuple
+Supports both TensorFlow and PyTorch models through the backend abstraction layer.
+"""
+import numpy as np
+
+from ..common import InfluenceModel, BaseInfluenceCalculator, BaseBackend
+from ..types import Union, List, Tuple, Any
 
 
 class TracIn(BaseInfluenceCalculator):
     """
     A class implementing an influence score based on TracIn method proposed in
     [https://arxiv.org/pdf/2002.08484.pdf](https://arxiv.org/pdf/2002.08484.pdf)
+
+    Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 
     Notes
     -----
@@ -31,8 +35,8 @@ class TracIn(BaseInfluenceCalculator):
     Parameters
     ----------
     models
-        A list of TF2.X models implementing the InfluenceModel interface at different steps (epochs)
-        of the training
+        A list of models implementing the InfluenceModel interface at different steps (epochs)
+        of the training. Can be either TensorFlow or PyTorch models.
     learning_rates
         Learning rate or list of learning rates used during the training.
         If learning_rates is a list, it should have the same size as the amount of models
@@ -46,7 +50,13 @@ class TracIn(BaseInfluenceCalculator):
         else:
             self.learning_rates = [learning_rates for _ in range(len(models))]
 
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+        # Set up the backend from the first model
+        if len(models) > 0:
+            self.backend: BaseBackend = models[0].backend
+        else:
+            raise ValueError("At least one model must be provided.")
+
+    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Compute an equivalent of the influence vector for a sample of training points.
 
@@ -67,12 +77,13 @@ class TracIn(BaseInfluenceCalculator):
         influence_vectors = []
         for model, lr in zip(self.models, self.learning_rates):
             g_train = model.batch_jacobian_tensor(train_samples)
-            influence_vectors.append(g_train * tf.cast(tf.sqrt(lr), g_train.dtype))
-        influence_vectors = tf.concat(influence_vectors, axis=1)
+            lr_sqrt = np.sqrt(lr)
+            influence_vectors.append(self.backend.multiply(g_train, lr_sqrt))
+        influence_vectors = self.backend.concat(influence_vectors, axis=1)
 
         return influence_vectors
 
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
         """
         Pre-process a sample to facilitate evaluation afterwards. In this case, it amounts to transforming
         it into it's "influence vector".
@@ -91,9 +102,9 @@ class TracIn(BaseInfluenceCalculator):
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
+            train_samples: Tuple[Any, ...],
+            samples_to_evaluate: Tuple[Any, ...]
+    ) -> Any:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.
@@ -117,9 +128,9 @@ class TracIn(BaseInfluenceCalculator):
 
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: tf.Tensor,
-            influence_vector: tf.Tensor
-    ) -> tf.Tensor:
+            preproc_test_sample: Any,
+            influence_vector: Any
+    ) -> Any:
         """
         Compute the influence score of a (pre-processed) sample and an "influence vector" from a training
         data-point
@@ -136,10 +147,10 @@ class TracIn(BaseInfluenceCalculator):
         influence_values
             A tensor with the influence scores
         """
-        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
+        influence_values = self.backend.matmul(preproc_test_sample, self.backend.transpose(influence_vector))
         return influence_values
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Compute the influence score for a training sample
 
@@ -152,5 +163,9 @@ class TracIn(BaseInfluenceCalculator):
         The influence score
         """
         influence_vector = self._compute_influence_vector(train_samples)
-        influence_values = tf.reduce_sum(influence_vector * influence_vector, axis=1, keepdims=True)
+        influence_values = self.backend.reduce_sum(
+            self.backend.multiply(influence_vector, influence_vector),
+            axis=1,
+            keepdims=True
+        )
         return influence_values
