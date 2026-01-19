@@ -14,16 +14,13 @@ which does not take into account the pairwise interactions of data-points inside
 For a more precise (but much more computationally expensive) alternative, please refer
 to the SecondOrderInfluenceCalculator module.
 """
-import tensorflow as tf
-
 from .base_group_influence import BaseGroupInfluenceCalculator
 
 from ..common import InfluenceModel
 from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
-from ..types import Optional, Union, Tuple
-from ..utils import assert_batched_dataset
+from ..types import Optional, Union, Tuple, Any
 
 
 class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceCalculator):
@@ -51,9 +48,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     Parameters
     ----------
     model
-        The TF2.X model implementing the InfluenceModel interface.
+        The model implementing the InfluenceModel interface (TensorFlow or PyTorch).
     dataset
-        A batched TF dataset containing the training dataset over which we will estimate the
+        A batched dataset containing the training dataset over which we will estimate the
         inverse-hessian-vector product.
     ihvp_calculator
         Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
@@ -72,11 +69,11 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     def __init__(
             self,
             model: InfluenceModel,
-            dataset: tf.data.Dataset,
+            dataset: Any,
             ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000,
-            normalize=False
+            normalize: bool = False
     ):
         super().__init__(
             model,
@@ -88,8 +85,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         self.normalize = normalize
 
-    @tf.function
-    def _normalize_if_needed(self, v):
+    def _normalize_if_needed(self, v: Any) -> Any:
         """
         Normalize the input vector if the normalize property is True. If False, do nothing
 
@@ -104,11 +100,10 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             The normalized vector if the normalize property is True, otherwise the input vector
         """
         if self.normalize:
-            v = v / tf.norm(v, axis=0, keepdims=True)
+            v = self.backend.normalize(v, axis=0, keepdims=True)
         return v
 
-    @tf.function
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -125,11 +120,10 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         """
         influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)  # pylint: disable=W0212
         influence_vector = self._normalize_if_needed(influence_vector)
-        influence_vector = tf.transpose(influence_vector)
+        influence_vector = self.backend.transpose(influence_vector)
         return influence_vector
 
-    @tf.function
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
         """
         Preprocess a sample to evaluate
 
@@ -147,9 +141,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
+            train_samples: Tuple[Any, ...],
+            samples_to_evaluate: Tuple[Any, ...]
+    ) -> Any:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.
@@ -171,9 +165,11 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             self._compute_influence_vector(train_samples)
         )
 
-    @tf.function
-    def _estimate_influence_value_from_influence_vector(self, preproc_test_sample: tf.Tensor,
-                                                        influence_vector: tf.Tensor) -> tf.Tensor:
+    def _estimate_influence_value_from_influence_vector(
+            self,
+            preproc_test_sample: Any,
+            influence_vector: Any
+    ) -> Any:
         """
         Estimates the influence score of leaving out the influence vector corresponding to a given training
         data-point on a test sample that has already been pre-processed.
@@ -190,11 +186,13 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_values
             A tensor with the resulting influence value.
         """
-        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
+        influence_values = self.backend.matmul(
+            preproc_test_sample,
+            self.backend.transpose(influence_vector)
+        )
         return influence_values
 
-    @tf.function
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -210,15 +208,15 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         """
         batched_inf_vect = self._compute_influence_vector(train_samples)
         evaluate_vect = self._preprocess_samples(train_samples)
-        influence_values = tf.reduce_sum(
-            tf.math.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
-        #TODO: improve IHVP to not compute 2 times the gradient
+        influence_values = self.backend.reduce_sum(
+            self.backend.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
+        # TODO: improve IHVP to not compute 2 times the gradient
         return influence_values
 
     def compute_influence_vector_group(
             self,
-            group: tf.data.Dataset
-    ) -> tf.Tensor:
+            group: Any
+    ) -> Any:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -226,7 +224,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         Parameters
         ----------
         group
-            A batched TF dataset containing the group of points of which we wish to compute the
+            A batched dataset containing the group of points of which we wish to compute the
             influence of removal.
 
         Returns
@@ -234,23 +232,30 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_group
             A tensor containing one vector for the whole group.
         """
-        assert_batched_dataset(group)
+        self.backend.assert_batched_dataset(group)
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(group)
-        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
-        reduced_ihvp = reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
+
+        # Reduce IHVP across all batches
+        reduced_ihvp = None
+        for batch in ihvp_ds:
+            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=True)
+            if reduced_ihvp is None:
+                reduced_ihvp = batch_sum
+            else:
+                reduced_ihvp = reduced_ihvp + batch_sum
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
-        influence_group = tf.reshape(reduced_ihvp, (1, -1))
+        influence_group = self.backend.reshape(reduced_ihvp, (1, -1))
 
         return influence_group
 
     def estimate_influence_values_group(
             self,
-            group_train: tf.data.Dataset,
-            group_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
+            group_train: Any,
+            group_to_evaluate: Optional[Any] = None
+    ) -> Any:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.
@@ -266,9 +271,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         Parameters
         ----------
         group_train
-            A batched TF dataset containing the group of points we wish to remove.
+            A batched dataset containing the group of points we wish to remove.
         group_to_evaluate
-            A batched TF dataset containing the group of points with respect to whom we wish to
+            A batched dataset containing the group of points with respect to whom we wish to
             measure the influence of removing the training points.
 
         Returns
@@ -282,15 +287,25 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
 
-        reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
-                                                 (ds_size, -1)), axis=0, keepdims=True)
+        # Compute reduced gradients
+        jacobian = self.model.batch_jacobian(group_to_evaluate)
+        reduced_grads = self.backend.reduce_sum(
+            self.backend.reshape(jacobian, (ds_size, -1)),
+            axis=0, keepdims=True
+        )
 
+        # Compute and reduce IHVP
         ihvp_ds = self.ihvp_calculator.compute_ihvp(group_train)
-        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
-        reduced_ihvp = reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
+        reduced_ihvp = None
+        for batch in ihvp_ds:
+            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=True)
+            if reduced_ihvp is None:
+                reduced_ihvp = batch_sum
+            else:
+                reduced_ihvp = reduced_ihvp + batch_sum
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
-        influence_values_group = tf.matmul(reduced_grads, reduced_ihvp)
+        influence_values_group = self.backend.matmul(reduced_grads, reduced_ihvp)
 
         return influence_values_group
