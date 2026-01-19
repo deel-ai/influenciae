@@ -258,7 +258,7 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def reduce_sum(self, tensor: Any, axis: Optional[int] = None) -> Any:
+    def reduce_sum(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
         """Reduce sum along an axis."""
         pass
 
@@ -290,6 +290,32 @@ class BaseBackend(ABC):
     @abstractmethod
     def matmul(self, a: Any, b: Any) -> Any:
         """Matrix multiplication."""
+        pass
+
+    @abstractmethod
+    def multiply(self, a: Any, b: Any) -> Any:
+        """Element-wise multiplication."""
+        pass
+
+    @abstractmethod
+    def normalize(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
+        """
+        Normalize a tensor along an axis using L2 norm.
+
+        Parameters
+        ----------
+        tensor
+            The tensor to normalize.
+        axis
+            The axis along which to normalize.
+        keepdims
+            Whether to keep the reduced dimension.
+
+        Returns
+        -------
+        normalized_tensor
+            The normalized tensor.
+        """
         pass
 
     @abstractmethod
@@ -488,6 +514,61 @@ class BaseBackend(ABC):
         -------
         unbatched_dataset
             The unbatched dataset.
+        """
+        pass
+
+    @abstractmethod
+    def shuffle_dataset(self, dataset: Any, buffer_size: int) -> Any:
+        """
+        Shuffle a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset to shuffle.
+        buffer_size
+            The buffer size for shuffling.
+
+        Returns
+        -------
+        shuffled_dataset
+            The shuffled dataset.
+        """
+        pass
+
+    @abstractmethod
+    def take_dataset(self, dataset: Any, count: int) -> Any:
+        """
+        Take a number of elements from a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset.
+        count
+            The number of elements to take.
+
+        Returns
+        -------
+        taken_dataset
+            The dataset with only the first `count` elements.
+        """
+        pass
+
+    @abstractmethod
+    def get_dataset_size(self, dataset: Any) -> int:
+        """
+        Get the total number of elements in a dataset.
+
+        Parameters
+        ----------
+        dataset
+            The dataset.
+
+        Returns
+        -------
+        size
+            The total number of elements.
         """
         pass
 

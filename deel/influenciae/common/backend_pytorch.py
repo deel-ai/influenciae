@@ -191,11 +191,11 @@ class PyTorchBackend(BaseBackend):
         """Get the batch size (first dimension) of a tensor."""
         return tensor.shape[0]
 
-    def reduce_sum(self, tensor: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+    def reduce_sum(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
         """Reduce sum along an axis."""
         if axis is None:
             return tensor.sum()
-        return tensor.sum(dim=axis)
+        return tensor.sum(dim=axis, keepdim=keepdims)
 
     def expand_dims(self, tensor: torch.Tensor, axis: int) -> torch.Tensor:
         """Add a new axis to a tensor."""
@@ -222,6 +222,15 @@ class PyTorchBackend(BaseBackend):
     def matmul(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         """Matrix multiplication."""
         return torch.matmul(a, b)
+
+    def multiply(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Element-wise multiplication."""
+        return torch.mul(a, b)
+
+    def normalize(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
+        """Normalize a tensor along an axis using L2 norm."""
+        norm = torch.linalg.norm(tensor, dim=axis, keepdim=keepdims)
+        return tensor / norm
 
     def find_layer_by_name(self, model: nn.Module, layer_name: str) -> Tuple[int, nn.Module]:
         """Find a layer by name and return its index and the layer."""
@@ -448,6 +457,57 @@ class PyTorchBackend(BaseBackend):
             else:
                 unbatched.append(batch)
         return unbatched
+
+    def shuffle_dataset(self, dataset: Any, buffer_size: int) -> List[Any]:
+        """
+        Shuffle a dataset.
+
+        For PyTorch, this materializes and shuffles the data.
+        """
+        import random
+        if isinstance(dataset, list):
+            data = list(dataset)
+        else:
+            data = list(dataset)
+        random.shuffle(data)
+        return data
+
+    def take_dataset(self, dataset: Any, count: int) -> List[Any]:
+        """Take a number of elements from a dataset."""
+        if isinstance(dataset, list):
+            return dataset[:count]
+        # Materialize and take
+        result = []
+        for i, item in enumerate(dataset):
+            if i >= count:
+                break
+            result.append(item)
+        return result
+
+    def get_dataset_size(self, dataset: Any) -> int:
+        """Get the total number of elements in a dataset."""
+        if isinstance(dataset, list):
+            # If it's a list of batched items, count total samples
+            total = 0
+            for batch in dataset:
+                if isinstance(batch, (list, tuple)):
+                    if isinstance(batch[0], torch.Tensor):
+                        total += batch[0].shape[0]
+                    else:
+                        total += len(batch[0])
+                elif isinstance(batch, torch.Tensor):
+                    total += batch.shape[0]
+                else:
+                    total += 1
+            return total
+        elif hasattr(dataset, 'dataset'):
+            # DataLoader with underlying dataset
+            return len(dataset.dataset)
+        elif hasattr(dataset, '__len__'):
+            return len(dataset)
+        else:
+            # Materialize and count
+            return sum(1 for _ in dataset)
 
     def get_dataset_element_spec(self, dataset: Any) -> Any:
         """

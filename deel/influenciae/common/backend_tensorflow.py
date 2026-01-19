@@ -142,9 +142,9 @@ class TensorFlowBackend(BaseBackend):
         """Get the batch size (first dimension) of a tensor."""
         return tf.shape(tensor)[0]
 
-    def reduce_sum(self, tensor: tf.Tensor, axis: Optional[int] = None) -> tf.Tensor:
+    def reduce_sum(self, tensor: tf.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> tf.Tensor:
         """Reduce sum along an axis."""
-        return tf.reduce_sum(tensor, axis=axis)
+        return tf.reduce_sum(tensor, axis=axis, keepdims=keepdims)
 
     def expand_dims(self, tensor: tf.Tensor, axis: int) -> tf.Tensor:
         """Add a new axis to a tensor."""
@@ -171,6 +171,14 @@ class TensorFlowBackend(BaseBackend):
     def matmul(self, a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
         """Matrix multiplication."""
         return tf.matmul(a, b)
+
+    def multiply(self, a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
+        """Element-wise multiplication."""
+        return tf.math.multiply(a, b)
+
+    def normalize(self, tensor: tf.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> tf.Tensor:
+        """Normalize a tensor along an axis using L2 norm."""
+        return tensor / tf.norm(tensor, axis=axis, keepdims=keepdims)
 
     def find_layer_by_name(self, model: tf.keras.Model, layer_name: str) -> Tuple[int, tf.keras.layers.Layer]:
         """Find a layer by name and return its index and the layer."""
@@ -325,6 +333,19 @@ class TensorFlowBackend(BaseBackend):
     def unbatch_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
         """Unbatch a dataset."""
         return dataset.unbatch()
+
+    def shuffle_dataset(self, dataset: tf.data.Dataset, buffer_size: int) -> tf.data.Dataset:
+        """Shuffle a dataset."""
+        return dataset.shuffle(buffer_size)
+
+    def take_dataset(self, dataset: tf.data.Dataset, count: int) -> tf.data.Dataset:
+        """Take a number of elements from a dataset."""
+        return dataset.take(count)
+
+    def get_dataset_size(self, dataset: tf.data.Dataset) -> int:
+        """Get the total number of elements in a dataset."""
+        from ..utils import dataset_size
+        return dataset_size(dataset)
 
     def get_dataset_element_spec(self, dataset: tf.data.Dataset) -> Any:
         """Get the element spec of a dataset."""
