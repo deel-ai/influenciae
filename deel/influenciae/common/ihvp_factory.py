@@ -10,8 +10,6 @@ functions.
 """
 from abc import abstractmethod
 
-import tensorflow as tf
-
 from .model_wrappers import InfluenceModel
 from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
@@ -20,7 +18,7 @@ from .inverse_hessian_vector_product import (
     LissaIHVP
 )
 
-from ..types import Union, Optional
+from ..types import Union, Optional, Any
 
 
 class InverseHessianVectorProductFactory:
@@ -28,7 +26,7 @@ class InverseHessianVectorProductFactory:
     The base interface for InverseHessianVectorProduct factories.
     """
     @abstractmethod
-    def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
         Creates an instance of an InverseHessianVectorProduct class with the provided
         parameters.
@@ -36,9 +34,10 @@ class InverseHessianVectorProductFactory:
         Parameters
         ----------
         model_influence
-            A TF model implementing the InfluenceModel interface.
+            A model implementing the InfluenceModel interface.
         dataset
-            A TF dataset object containing the model's (full or partial) training dataset.
+            A batched dataset (tf.data.Dataset or PyTorch DataLoader) containing
+            the model's (full or partial) training dataset.
 
         Returns
         -------
@@ -52,7 +51,7 @@ class ExactIHVPFactory(InverseHessianVectorProductFactory):
     """
     A factory for instantiating ExactIHVP objects.
     """
-    def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
         Creates an instance of the ExactIHVP class for a given model
         implementing the InfluenceModel interface and its (full or partial) training dataset.
@@ -60,9 +59,10 @@ class ExactIHVPFactory(InverseHessianVectorProductFactory):
         Parameters
         ----------
         model_influence
-            A TF model implementing the InfluenceModel interface
+            A model implementing the InfluenceModel interface.
         dataset
-            A TF dataset containing the model's (full or partial) training dataset.
+            A batched dataset (tf.data.Dataset or PyTorch DataLoader) containing
+            the model's (full or partial) training dataset.
 
         Returns
         -------
@@ -79,17 +79,17 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
     Attributes
     ----------
     feature_extractor
-        Either a TF feature-extractor model or the index of the layer of a whole model
-        which will be cut into two for computing the influence vectors and scores.
+        Either a feature-extractor model (TF or PyTorch) or the index of the layer of a
+        whole model which will be cut into two for computing the influence vectors and scores.
     n_cgd_iters
         An integer specifying the amount of iterations of the optimizer to run before
         (prematurely) considering the optimization completed.
     extractor_layer
-        The cutoff layer for the feature extractor, if specified in TF model format.
+        The cutoff layer for the feature extractor, if specified in model format.
     """
     def __init__(
         self,
-        feature_extractor: Union[int, tf.keras.Model] = -1,
+        feature_extractor: Union[int, Any] = -1,
         n_cgd_iters: int = 100,
         extractor_layer: Optional[Union[str, int]] = None
     ):
@@ -103,7 +103,7 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
-    def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
         Creates an instance of the ConjugateGradientDescentIHVP class for the provided model and its
         corresponding (full or partial) training dataset.
@@ -111,9 +111,10 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
         Parameters
         ----------
         model_influence
-            A TF model implementing the InfluenceModel interface.
+            A model implementing the InfluenceModel interface.
         dataset
-            A TF dataset containing the model's (full or partial) training dataset.
+            A batched dataset (tf.data.Dataset or PyTorch DataLoader) containing
+            the model's (full or partial) training dataset.
 
         Returns
         -------
@@ -136,13 +137,13 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
     Attributes
     ----------
     feature_extractor
-        Either a TF feature-extractor model or the index of the layer of a whole model
-        which will be cut into two for computing the influence vectors and scores.
+        Either a feature-extractor model (TF or PyTorch) or the index of the layer of a
+        whole model which will be cut into two for computing the influence vectors and scores.
     n_cgd_iters
         An integer specifying the amount of iterations of the optimizer to run before
         (prematurely) considering the optimization completed.
     extractor_layer
-        The cutoff layer for the feature extractor, if specified in TF model format.
+        The cutoff layer for the feature extractor, if specified in model format.
     damping
         A damping parameter to regularize a nearly singular operator.
     scale
@@ -150,7 +151,7 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
     """
     def __init__(
         self,
-        feature_extractor: Union[int, tf.keras.Model] = -1,
+        feature_extractor: Union[int, Any] = -1,
         n_cgd_iters: int = 100,
         extractor_layer: Optional[Union[str, int]] = None,
         damping: float = 1e-4,
@@ -168,22 +169,23 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
-    def build(self, model_influence: InfluenceModel, dataset: tf.data.Dataset) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
-        Creates an instance of the ConjugateGradientDescentIHVP class for the provided model and its
+        Creates an instance of the LissaIHVP class for the provided model and its
         corresponding (full or partial) training dataset.
 
         Parameters
         ----------
         model_influence
-            A TF model implementing the InfluenceModel interface.
+            A model implementing the InfluenceModel interface.
         dataset
-            A TF dataset containing the model's (full or partial) training dataset.
+            A batched dataset (tf.data.Dataset or PyTorch DataLoader) containing
+            the model's (full or partial) training dataset.
 
         Returns
         -------
-        cgd_ihvp
-            An instance of the ConjugateGradientDescentIHVP class
+        lissa_ihvp
+            An instance of the LissaIHVP class.
         """
         return LissaIHVP(
             model_influence,
