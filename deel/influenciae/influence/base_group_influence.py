@@ -16,13 +16,12 @@ https://arxiv.org/abs/1911.00418
 """
 
 from abc import abstractmethod
-import tensorflow as tf
 
 from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, IHVPCalculator, ExactIHVP
+from ..common import BaseBackend
 
-from ..utils import dataset_size
-from ..types import Optional, Union
+from ..types import Optional, Union, Any
 
 
 class BaseGroupInfluenceCalculator:
@@ -39,9 +38,9 @@ class BaseGroupInfluenceCalculator:
     Parameters
     ----------
     model
-        The TF2.X model implementing the InfluenceModel interface.
+        The model implementing the InfluenceModel interface (TensorFlow or PyTorch).
     dataset
-        A batched TF dataset containing the training dataset over which we will estimate the
+        A batched dataset containing the training dataset over which we will estimate the
         inverse-hessian-vector product.
     ihvp_calculator
         Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
@@ -52,21 +51,29 @@ class BaseGroupInfluenceCalculator:
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
     """
+    # Backend should be set by subclasses that have access to a model
+    backend: BaseBackend = None
+
     def __init__(
             self,
             model: InfluenceModel,
-            dataset: tf.data.Dataset,
+            dataset: Any,
             ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = ExactIHVP,
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
     ):
         self.model = model
+        self.backend = model.backend
 
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
         else:
-            dataset_to_estimate_hessian = dataset.unbatch().shuffle(shuffle_buffer_size)\
-                .take(n_samples_for_hessian).batch(dataset._batch_size)
+            # Use backend-agnostic dataset operations
+            batch_size = self.backend.get_dataset_batch_size(dataset)
+            unbatched = self.backend.unbatch_dataset(dataset)
+            shuffled = self.backend.shuffle_dataset(unbatched, shuffle_buffer_size)
+            taken = self.backend.take_dataset(shuffled, n_samples_for_hessian)
+            dataset_to_estimate_hessian = self.backend.batch_dataset(taken, batch_size)
 
         self.train_set = dataset_to_estimate_hessian
 
@@ -85,8 +92,8 @@ class BaseGroupInfluenceCalculator:
     @abstractmethod
     def compute_influence_vector_group(
             self,
-            group: tf.data.Dataset
-    ) -> tf.Tensor:
+            group: Any
+    ) -> Any:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -94,7 +101,7 @@ class BaseGroupInfluenceCalculator:
         Parameters
         ----------
         group
-            A batched TF dataset containing the group of points of which we wish to compute the
+            A batched dataset containing the group of points of which we wish to compute the
             influence of removal.
 
         Returns
@@ -107,9 +114,9 @@ class BaseGroupInfluenceCalculator:
     @abstractmethod
     def estimate_influence_values_group(
             self,
-            group_train: tf.data.Dataset,
-            group_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
+            group_train: Any,
+            group_to_evaluate: Optional[Any] = None
+    ) -> Any:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.
@@ -125,9 +132,9 @@ class BaseGroupInfluenceCalculator:
         Parameters
         ----------
         group_train
-            A batched TF dataset containing the group of points we wish to remove.
+            A batched dataset containing the group of points we wish to remove.
         group_to_evaluate
-            A batched TF dataset containing the group of points with respect to whom we wish to
+            A batched dataset containing the group of points with respect to whom we wish to
             measure the influence of removing the training points.
 
         Returns
@@ -137,8 +144,7 @@ class BaseGroupInfluenceCalculator:
         """
         raise NotImplementedError()
 
-    @staticmethod
-    def assert_compatible_datasets(dataset_a: tf.data.Dataset, dataset_b: tf.data.Dataset) -> int:
+    def assert_compatible_datasets(self, dataset_a: Any, dataset_b: Any) -> int:
         """
         Assert that the datasets are compatible: that they contain the same number of points. Else,
         throw an error.
@@ -146,17 +152,17 @@ class BaseGroupInfluenceCalculator:
         Parameters
         ----------
         dataset_a
-            First batched tensorflow dataset to check.
+            First batched dataset to check.
         dataset_b
-            Second batched tensorflow dataset to check.
+            Second batched dataset to check.
 
         Returns
         -------
         size
             The size of the dataset.
         """
-        size_a = dataset_size(dataset_a)
-        size_b = dataset_size(dataset_b)
+        size_a = self.backend.get_dataset_size(dataset_a)
+        size_b = self.backend.get_dataset_size(dataset_b)
 
         if size_a != size_b:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
