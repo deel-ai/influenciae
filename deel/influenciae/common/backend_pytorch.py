@@ -441,6 +441,12 @@ class PyTorchBackend(BaseBackend):
             # Assume it's a PyTorch Dataset
             return DataLoader(dataset, batch_size=batch_size)
 
+    def create_dataset_from_tensors(self, tensors: torch.Tensor, batch_size: int) -> List[Any]:
+        """Create a batched dataset from tensors."""
+        # For PyTorch, return a list containing the tensor(s)
+        # This mirrors TensorFlow's from_tensors().batch() behavior
+        return [tensors]
+
     def unbatch_dataset(self, dataset: Any) -> List[Any]:
         """Unbatch a dataset."""
         unbatched = []

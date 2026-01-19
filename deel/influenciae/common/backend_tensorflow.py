@@ -330,6 +330,10 @@ class TensorFlowBackend(BaseBackend):
         """Batch a dataset."""
         return dataset.batch(batch_size)
 
+    def create_dataset_from_tensors(self, tensors: tf.Tensor, batch_size: int) -> tf.data.Dataset:
+        """Create a batched dataset from tensors."""
+        return tf.data.Dataset.from_tensors(tensors).batch(batch_size)
+
     def unbatch_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
         """Unbatch a dataset."""
         return dataset.unbatch()

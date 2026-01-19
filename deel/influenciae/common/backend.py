@@ -501,6 +501,25 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
+    def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> Any:
+        """
+        Create a batched dataset from a single tensor or tuple of tensors.
+
+        Parameters
+        ----------
+        tensors
+            A tensor or tuple of tensors to create a dataset from.
+        batch_size
+            The batch size for the resulting dataset.
+
+        Returns
+        -------
+        dataset
+            A batched dataset containing the tensors.
+        """
+        pass
+
+    @abstractmethod
     def unbatch_dataset(self, dataset: Any) -> Any:
         """
         Unbatch a dataset.
