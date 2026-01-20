@@ -13,6 +13,25 @@ from deel.influenciae.common.base_influence import BaseInfluenceCalculator
 
 def almost_equal(arr1, arr2, epsilon=1e-6):
     """Ensure two array are almost equal at an epsilon"""
+    # Handle PyTorch tensors
+    try:
+        import torch
+        if isinstance(arr1, torch.Tensor):
+            arr1 = arr1.detach().cpu().numpy()
+        if isinstance(arr2, torch.Tensor):
+            arr2 = arr2.detach().cpu().numpy()
+    except ImportError:
+        pass
+    # Handle TensorFlow tensors
+    if hasattr(arr1, 'numpy'):
+        arr1 = arr1.numpy()
+    if hasattr(arr2, 'numpy'):
+        arr2 = arr2.numpy()
+    # Handle lists/tuples
+    if isinstance(arr1, (list, tuple)):
+        arr1 = np.array(arr1)
+    if isinstance(arr2, (list, tuple)):
+        arr2 = np.array(arr2)
     return np.sum(np.abs(arr1 - arr2)) < epsilon
 
 
@@ -22,6 +41,20 @@ def relative_almost_equal(arr1, arr2, percent=0.01):
 
 
 def assert_tensor_equal(tensor1, tensor2):
+    """Assert two tensors are equal. Works with both TensorFlow and PyTorch tensors."""
+    # Handle PyTorch tensors
+    try:
+        import torch
+        if isinstance(tensor1, torch.Tensor) or isinstance(tensor2, torch.Tensor):
+            if isinstance(tensor1, torch.Tensor):
+                tensor1 = tensor1.detach().cpu().numpy()
+            if isinstance(tensor2, torch.Tensor):
+                tensor2 = tensor2.detach().cpu().numpy()
+            np.testing.assert_array_equal(tensor1, tensor2)
+            return
+    except ImportError:
+        pass
+    # TensorFlow tensors
     return tf.debugging.assert_equal(tensor1, tensor2)
 
 
