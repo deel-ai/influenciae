@@ -690,6 +690,27 @@ class PyTorchBackend(BaseBackend):
             dtype = torch.float32
         return torch.zeros(shape, dtype=dtype)
 
+    def zeros_like(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Create a tensor of zeros with the same shape and dtype as the input."""
+        return torch.zeros_like(tensor)
+
+    def copy(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Create a copy of a tensor."""
+        return tensor.clone()
+
+    def sqrt(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Compute element-wise square root."""
+        return torch.sqrt(tensor)
+
+    def maximum(self, a: Any, b: Any) -> torch.Tensor:
+        """Element-wise maximum of two tensors/scalars."""
+        # Handle scalar inputs
+        if not isinstance(a, torch.Tensor):
+            a = torch.tensor(a)
+        if not isinstance(b, torch.Tensor):
+            b = torch.tensor(b)
+        return torch.maximum(a, b)
+
     def pinv(self, matrix: torch.Tensor) -> torch.Tensor:
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
         return torch.linalg.pinv(matrix)

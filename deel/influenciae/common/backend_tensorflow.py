@@ -434,6 +434,22 @@ class TensorFlowBackend(BaseBackend):
             dtype = tf.float32
         return tf.zeros(shape, dtype=dtype)
 
+    def zeros_like(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Create a tensor of zeros with the same shape and dtype as the input."""
+        return tf.zeros_like(tensor)
+
+    def copy(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Create a copy of a tensor."""
+        return tf.identity(tensor)
+
+    def sqrt(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Compute element-wise square root."""
+        return tf.sqrt(tensor)
+
+    def maximum(self, a: Any, b: Any) -> tf.Tensor:
+        """Element-wise maximum of two tensors/scalars."""
+        return tf.maximum(a, b)
+
     def pinv(self, matrix: tf.Tensor) -> tf.Tensor:
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
         return tf.linalg.pinv(matrix)
