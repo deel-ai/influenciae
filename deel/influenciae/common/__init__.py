@@ -10,8 +10,10 @@ from .backend import (
     Framework,
     BaseBackend,
     detect_framework,
+    detect_tensor_framework,
     get_backend,
     get_backend_for_model,
+    get_backend_for_tensor,
     get_available_frameworks,
 )
 from .model_wrappers import (
