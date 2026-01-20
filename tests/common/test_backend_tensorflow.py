@@ -233,6 +233,51 @@ class TestTensorFlowBackendTensorOps:
             batch_size = batch_size.numpy()
         assert batch_size == 8
 
+    def test_abs(self, backend):
+        """Test absolute value."""
+        a = tf.constant([-1.0, 2.0, -3.0])
+        result = backend.abs(a)
+        expected = tf.constant([1.0, 2.0, 3.0])
+        assert tf.reduce_all(result == expected)
+
+    def test_argmax(self, backend):
+        """Test argmax."""
+        a = tf.constant([[1.0, 3.0, 2.0], [4.0, 1.0, 2.0]])
+        result = backend.argmax(a, axis=1)
+        expected = tf.constant([1, 0], dtype=tf.int64)
+        assert tf.reduce_all(result == expected)
+
+    def test_gather_along_axis(self, backend):
+        """Test gather along axis."""
+        a = tf.constant([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        indices = tf.constant([2, 0])
+        result = backend.gather_along_axis(a, indices, axis=1, batch_dims=1)
+        expected = tf.constant([3.0, 4.0])
+        assert tf.reduce_all(result == expected)
+
+    def test_get_output_shape(self, backend, simple_model):
+        """Test getting model output shape."""
+        out_shape = backend.get_output_shape(simple_model)
+        assert out_shape == (None, 2)
+
+    def test_split_model(self, backend, simple_model):
+        """Test splitting model into two parts."""
+        feature_extractor, head = backend.split_model(simple_model, -1)
+
+        inputs = tf.random.normal((4, 5))
+
+        # Feature extractor output should be (batch, 3) from the hidden layer
+        fe_output = feature_extractor(inputs)
+        assert fe_output.shape == (4, 3)
+
+        # Head output should be (batch, 2) from the output layer
+        head_output = head(fe_output)
+        assert head_output.shape == (4, 2)
+
+        # Combined should equal original model output
+        original_output = simple_model(inputs)
+        assert almost_equal(head_output, original_output)
+
 
 class TestTensorFlowBackendLayerOperations:
     """Test layer-related operations."""
