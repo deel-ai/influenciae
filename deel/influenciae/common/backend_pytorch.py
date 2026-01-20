@@ -347,8 +347,12 @@ class PyTorchBackend(BaseBackend):
         )
 
     def get_layers(self, model: nn.Module) -> List[nn.Module]:
-        """Get all layers (modules) from a model."""
-        return list(model.modules())
+        """
+        Return top-level layers (Keras-like) so slicing works for feature extractor / head splits.
+        DO NOT use model.modules() here: it includes the container itself and breaks slicing.
+        """
+        children = list(model.children())
+        return children if children else [model]
 
     def forward(self, model: nn.Module, inputs: torch.Tensor) -> torch.Tensor:
         """Run forward pass on a model."""
@@ -554,8 +558,22 @@ class PyTorchBackend(BaseBackend):
             # Create batches from list
             batches = []
             for i in range(0, len(dataset), batch_size):
-                batch = dataset[i:i + batch_size]
-                batches.append(batch)
+                batch_items = dataset[i:i + batch_size]
+                # If items are tuples (e.g., (inputs, targets)), collate them properly
+                if batch_items and isinstance(batch_items[0], tuple):
+                    # Stack each element of the tuple across the batch
+                    collated = []
+                    num_elements = len(batch_items[0])
+                    for j in range(num_elements):
+                        elements = [item[j] for item in batch_items]
+                        # Stack tensors, or create a list for non-tensors
+                        if isinstance(elements[0], torch.Tensor):
+                            collated.append(torch.stack(elements))
+                        else:
+                            collated.append(elements)
+                    batches.append(tuple(collated))
+                else:
+                    batches.append(batch_items)
             return batches
         else:
             # Assume it's a PyTorch Dataset
@@ -676,8 +694,15 @@ class PyTorchBackend(BaseBackend):
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
         return torch.linalg.pinv(matrix)
 
-    def cast(self, tensor: torch.Tensor, dtype: Any) -> torch.Tensor:
+    def cast(self, tensor: Any, dtype: Any) -> Any:
         """Cast a tensor to a different dtype."""
+        # Scalar -> keep as Python scalar (GPU-safe, broadcasts fine)
+        if isinstance(tensor, (int, float, bool, np.number)):
+            if dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16):
+                return float(tensor)
+            return int(tensor)
+
+        # Tensor -> normal cast
         return tensor.to(dtype)
 
     def get_dtype(self, tensor: torch.Tensor) -> Any:
