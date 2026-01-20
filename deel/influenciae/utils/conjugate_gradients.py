@@ -13,7 +13,7 @@ https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditio
 """
 import tensorflow as tf
 
-from ..types import Callable, Optional
+from ..types import Callable, Optional, Any
 
 
 def _identity(x): # pylint: disable=C0116
@@ -21,78 +21,147 @@ def _identity(x): # pylint: disable=C0116
 
 
 def conjugate_gradients_solve(
-        operator: Callable,
-        b: tf.Tensor,
-        x0: Optional[tf.Tensor] = None,
-        *,
-        maxiter: int,
-        tol: float = 1e-3,
-        atol: float = 1e-5,
-        M: Callable = _identity
-):
+    operator: Callable[[Any], Any],
+    b: Any,
+    x0: Optional[Any] = None,
+    maxiter: int = 100,
+    tol: float = 1e-10,
+    eps: float = 1e-12,
+) -> Any:
     """
-    A simple Conjugate Gradients solver based on jax.scipy
+    Solve Ax = b using Conjugate Gradients where operator(x) returns Ax.
+
+    Supports:
+      - torch.Tensor
+      - tf.Tensor
+      - np.ndarray
 
     Parameters
     ----------
-    operator: Callable
-        The operator that calculates the linear map A(x). It is assumed to be hermitian and positive definite
-    b: tf.Tensor
-        The right hand side of the linear system, represented by a single vector.
-    x0: Optional
-        A tensor with the same shape as b and the output that servers as a first guess for the solution
-    maxiter: int
-        The maximum amount of iterations
-    tol: float
-        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    atol: float
-        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    M: Callable
-        A preconditioner approximating the inverse of A.
+    operator : callable
+        Function implementing A @ x.
+    b : tensor/array
+        Right-hand side vector (typically shape (n, 1) or (n,)).
+    x0 : tensor/array, optional
+        Initial guess. If None, uses zeros_like(b) in the same framework.
+    maxiter : int
+        Max CG iterations.
+    tol : float
+        Stop when ||r|| <= tol.
+    eps : float
+        Small number to avoid division by zero.
 
     Returns
     -------
-    x_final: tf.Tensor
-        A tensor with the solution found by the solver
+    x : same type as b
+        Approximate solution.
     """
-    if x0 is None:
-        x0 = tf.zeros_like(b)
+    # ----------------------------
+    # Torch implementation
+    # ----------------------------
+    try:
+        import torch
 
-    bs = tf.reduce_sum(tf.matmul(b, b, transpose_a=True))
-    atol2 = tf.reduce_max([tf.cast(tf.square(tol), dtype=bs.dtype) * bs, tf.cast(tf.square(atol), dtype=bs.dtype)])
+        if isinstance(b, torch.Tensor):
+            if x0 is None:
+                x = torch.zeros_like(b)
+            else:
+                x = x0
 
-    def cond_fun(_, r, gamma, __, k):
-        rs = gamma if M is _identity else tf.reduce_sum(tf.matmul(r, r, transpose_a=True))
-        cond1 = tf.greater(rs, atol2)
-        cond2 = tf.greater(maxiter, k)
-        return tf.logical_and(cond1, cond2)
+            r = b - operator(x)
+            p = r.clone()
 
-    def body_fun(x, r, gamma, p, k):
-        Ap = operator(p)
-        alpha = gamma / (tf.reduce_sum(tf.matmul(p, Ap, transpose_a=True)))
-        x_ = x + alpha * p
-        r_ = r - alpha * Ap
-        z_ = M(r_)
-        gamma_ = tf.reduce_sum(tf.matmul(r_, z_, transpose_a=True))
-        beta_ = gamma_ / gamma
-        p_ = z_ + beta_ * p
+            rs_old = (r * r).sum()
 
-        return x_, r_, gamma_, p_, k + 1
+            for _ in range(maxiter):
+                Ap = operator(p)
+                denom = (p * Ap).sum().clamp_min(eps)
+                alpha = rs_old / denom
 
-    r0 = b - operator(x0)
-    p0 = z0 = M(r0)
-    gamma0 = tf.reduce_sum(tf.matmul(r0, z0, transpose_a=True))
-    initial_value = [x0, r0, gamma0, p0, tf.constant(0, dtype=tf.int32)]
+                x = x + alpha * p
+                r = r - alpha * Ap
 
-    val = tf.while_loop(
-        cond=cond_fun,
-        body=body_fun,
-        loop_vars=initial_value
-    )
+                rs_new = (r * r).sum()
+                if torch.sqrt(rs_new) <= tol:
+                    break
 
-    x_final, *_ = val
+                p = r + (rs_new / rs_old) * p
+                rs_old = rs_new
 
-    return x_final
+            return x
+    except ImportError:
+        pass
+
+    # ----------------------------
+    # TensorFlow implementation
+    # ----------------------------
+    try:
+        import tensorflow as tf
+
+        if tf.is_tensor(b):
+            if x0 is None:
+                x = tf.zeros_like(b)
+            else:
+                x = x0
+
+            r = b - operator(x)
+            p = tf.identity(r)
+
+            rs_old = tf.reduce_sum(r * r)
+
+            for _ in range(maxiter):
+                Ap = operator(p)
+                denom = tf.maximum(tf.reduce_sum(p * Ap), eps)
+                alpha = rs_old / denom
+
+                x = x + alpha * p
+                r = r - alpha * Ap
+
+                rs_new = tf.reduce_sum(r * r)
+                if tf.sqrt(rs_new) <= tol:
+                    break
+
+                p = r + (rs_new / rs_old) * p
+                rs_old = rs_new
+
+            return x
+    except ImportError:
+        pass
+
+    # ----------------------------
+    # NumPy fallback
+    # ----------------------------
+    import numpy as np
+
+    if isinstance(b, np.ndarray):
+        if x0 is None:
+            x = np.zeros_like(b)
+        else:
+            x = x0
+
+        r = b - operator(x)
+        p = r.copy()
+        rs_old = float(np.sum(r * r))
+
+        for _ in range(maxiter):
+            Ap = operator(p)
+            denom = max(float(np.sum(p * Ap)), eps)
+            alpha = rs_old / denom
+
+            x = x + alpha * p
+            r = r - alpha * Ap
+
+            rs_new = float(np.sum(r * r))
+            if np.sqrt(rs_new) <= tol:
+                break
+
+            p = r + (rs_new / rs_old) * p
+            rs_old = rs_new
+
+        return x
+
+    raise TypeError(f"Unsupported type for b: {type(b)}")
+
 
 
 def biconjugate_gradient_stabilized_solve(
