@@ -83,6 +83,63 @@ def detect_framework(model: Any) -> Framework:
     )
 
 
+def detect_tensor_framework(tensor: Any) -> Framework:
+    """
+    Detect which framework a tensor belongs to.
+
+    Parameters
+    ----------
+    tensor
+        The tensor to check.
+
+    Returns
+    -------
+    framework
+        The detected framework.
+
+    Raises
+    ------
+    ValueError
+        If the tensor framework cannot be detected.
+    """
+    try:
+        import tensorflow as tf
+        if tf.is_tensor(tensor):
+            return Framework.TENSORFLOW
+    except ImportError:
+        pass
+
+    try:
+        import torch
+        if isinstance(tensor, torch.Tensor):
+            return Framework.PYTORCH
+    except ImportError:
+        pass
+
+    raise ValueError(
+        f"Could not detect framework for tensor of type {type(tensor)}. "
+        "Supported frameworks: TensorFlow (tf.Tensor) and PyTorch (torch.Tensor)"
+    )
+
+
+def get_backend_for_tensor(tensor: Any) -> "BaseBackend":
+    """
+    Get the appropriate backend for a tensor.
+
+    Parameters
+    ----------
+    tensor
+        The tensor to get the backend for.
+
+    Returns
+    -------
+    backend
+        The backend instance appropriate for the tensor.
+    """
+    framework = detect_tensor_framework(tensor)
+    return get_backend(framework)
+
+
 class BaseBackend(ABC):
     """
     Abstract base class for framework-specific backend operations.
@@ -700,6 +757,26 @@ class BaseBackend(ABC):
     @abstractmethod
     def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
         """Create a tensor of zeros."""
+        pass
+
+    @abstractmethod
+    def zeros_like(self, tensor: Any) -> Any:
+        """Create a tensor of zeros with the same shape and dtype as the input."""
+        pass
+
+    @abstractmethod
+    def copy(self, tensor: Any) -> Any:
+        """Create a copy of a tensor."""
+        pass
+
+    @abstractmethod
+    def sqrt(self, tensor: Any) -> Any:
+        """Compute element-wise square root."""
+        pass
+
+    @abstractmethod
+    def maximum(self, a: Any, b: Any) -> Any:
+        """Element-wise maximum of two tensors/scalars."""
         pass
 
     @abstractmethod
