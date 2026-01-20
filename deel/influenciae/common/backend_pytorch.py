@@ -227,6 +227,109 @@ class PyTorchBackend(BaseBackend):
         """Element-wise multiplication."""
         return torch.mul(a, b)
 
+    def abs(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Compute absolute value of a tensor."""
+        return torch.abs(tensor)
+
+    def argmax(self, tensor: torch.Tensor, axis: int) -> torch.Tensor:
+        """Return indices of maximum values along an axis."""
+        return torch.argmax(tensor, dim=axis)
+
+    def gather_along_axis(
+            self,
+            tensor: torch.Tensor,
+            indices: torch.Tensor,
+            axis: int,
+            batch_dims: int = 0
+    ) -> torch.Tensor:
+        if batch_dims == 0:
+            # Simple gather of whole slices along axis
+            # Expect indices to be 1D here (matches your current use cases)
+            return torch.index_select(tensor, dim=axis, index=indices)
+
+        if batch_dims != 1:
+            raise NotImplementedError(f"batch_dims={batch_dims} not supported")
+
+        if axis != 1:
+            raise NotImplementedError("Only axis=1 is implemented for batch_dims=1 in this backend")
+
+        # Ensure indices are long and on the same device
+        indices = indices.to(device=tensor.device, dtype=torch.long)
+
+        b_tensor = tensor.shape[0]
+        b_idx = indices.shape[0]
+
+        if b_tensor == b_idx:
+            # Row-wise gather: out shape (B,)
+            return tensor.gather(dim=1, index=indices.view(-1, 1)).squeeze(1)
+
+        # Cross-batch: select columns => shape (B_tensor, B_idx)
+        return tensor.index_select(dim=1, index=indices)
+
+    def get_output_shape(self, model: nn.Module) -> Tuple[int, ...]:
+        """Get the output shape of a model."""
+        # For PyTorch, we need to infer output shape by looking at the last layer
+        # or running a forward pass with dummy data
+        children = list(model.children())
+        if children:
+            last_layer = children[-1]
+            if hasattr(last_layer, 'out_features'):
+                return (None, last_layer.out_features)
+        # Fallback: try to get from model attribute if available
+        if hasattr(model, 'output_shape'):
+            return model.output_shape
+        # If we can't determine, return a placeholder
+        return (None,)
+
+    def split_model(
+        self,
+        model: nn.Module,
+        target_layer: Any
+    ) -> Tuple[nn.Module, nn.Module]:
+        """
+        Split a model into two sub-models at a target layer.
+
+        Parameters
+        ----------
+        model
+            The PyTorch model to split.
+        target_layer
+            Layer name (str) or index (int) at which to split.
+
+        Returns
+        -------
+        feature_extractor
+            Model containing layers up to (but not including) target_layer.
+        head
+            Model containing the target_layer and beyond.
+        """
+        children = list(model.children())
+
+        if isinstance(target_layer, int):
+            if target_layer < 0:
+                target_layer = len(children) + target_layer
+            split_idx = target_layer
+        elif isinstance(target_layer, str):
+            # Find by name
+            named_children = list(model.named_children())
+            split_idx = None
+            for idx, (name, _) in enumerate(named_children):
+                if name == target_layer:
+                    split_idx = idx
+                    break
+            if split_idx is None:
+                raise ValueError(f"Could not find layer with name: {target_layer}")
+        else:
+            raise ValueError(f"target_layer must be str or int, got {type(target_layer)}")
+
+        # Create feature extractor (layers before target_layer)
+        feature_extractor = nn.Sequential(*children[:split_idx])
+
+        # Create head (layers from target_layer onwards)
+        head = nn.Sequential(*children[split_idx:])
+
+        return feature_extractor, head
+
     def normalize(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
         """Normalize a tensor along an axis using L2 norm."""
         norm = torch.linalg.norm(tensor, dim=axis, keepdim=keepdims)
@@ -350,31 +453,48 @@ class PyTorchBackend(BaseBackend):
         return self.get_model_weights(model, layers)
 
     # Dataset operations
-    def map_dataset(
-        self,
-        dataset: Any,  # DataLoader
-        map_fn: Callable,
-        device: Optional[str] = None
-    ) -> List[Any]:
+    def map_dataset(self, dataset: Any, map_fn: Callable, device: Optional[str] = None) -> List[Any]:
         """
         Apply a mapping function to each batch in a dataset.
 
         For PyTorch, this returns a list of mapped results since DataLoader
         doesn't support lazy mapping like tf.data.Dataset.
         """
+        import inspect
+
+        def _move_to_device(obj):
+            if device is None:
+                return obj
+            if isinstance(obj, torch.Tensor):
+                return obj.to(device)
+            if isinstance(obj, (list, tuple)):
+                return type(obj)(_move_to_device(o) for o in obj)
+            return obj
+
+        # Decide whether to unpack based on map_fn signature (TF-like behavior)
+        sig = inspect.signature(map_fn)
+        params = list(sig.parameters.values())
+        has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+        num_positional = sum(
+            p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for p in params
+        )
+
         results = []
         for batch in dataset:
-            if device is not None:
-                # Move batch to device if specified
-                if isinstance(batch, (list, tuple)):
-                    batch = tuple(
-                        b.to(device) if isinstance(b, torch.Tensor) else b
-                        for b in batch
-                    )
-                elif isinstance(batch, torch.Tensor):
-                    batch = batch.to(device)
-            result = map_fn(*batch) if isinstance(batch, (list, tuple)) else map_fn(batch)
-            results.append(result)
+            batch = _move_to_device(batch)
+
+            if isinstance(batch, (list, tuple)):
+                # TF-like: if fn takes 1 arg, give it the tuple as-is; otherwise unpack
+                if has_varargs or num_positional > 1:
+                    out = map_fn(*batch)
+                else:
+                    out = map_fn(batch)
+            else:
+                out = map_fn(batch)
+
+            results.append(out)
+
         return results
 
     def cache_dataset(self, dataset: Any) -> List[Any]:

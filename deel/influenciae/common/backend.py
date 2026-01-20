@@ -298,6 +298,77 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
+    def abs(self, tensor: Any) -> Any:
+        """Compute absolute value of a tensor."""
+        pass
+
+    @abstractmethod
+    def argmax(self, tensor: Any, axis: int) -> Any:
+        """Return indices of maximum values along an axis."""
+        pass
+
+    @abstractmethod
+    def gather_along_axis(self, tensor: Any, indices: Any, axis: int, batch_dims: int = 0) -> Any:
+        """
+        Gather values from tensor along an axis using indices.
+
+        Parameters
+        ----------
+        tensor
+            The source tensor.
+        indices
+            The indices to gather.
+        axis
+            The axis along which to gather.
+        batch_dims
+            Number of batch dimensions.
+
+        Returns
+        -------
+        gathered
+            The gathered tensor.
+        """
+        pass
+
+    @abstractmethod
+    def get_output_shape(self, model: Any) -> Tuple[int, ...]:
+        """
+        Get the output shape of a model.
+
+        Parameters
+        ----------
+        model
+            The model.
+
+        Returns
+        -------
+        shape
+            The output shape.
+        """
+        pass
+
+    @abstractmethod
+    def split_model(self, model: Any, target_layer: Union[str, int]) -> Tuple[Any, Any]:
+        """
+        Split a model into two sub-models at a target layer.
+
+        Parameters
+        ----------
+        model
+            The model to split.
+        target_layer
+            The layer name or index at which to split.
+
+        Returns
+        -------
+        feature_extractor
+            Model containing layers up to (but not including) target_layer.
+        head
+            Model containing the target_layer and beyond.
+        """
+        pass
+
+    @abstractmethod
     def normalize(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
         """
         Normalize a tensor along an axis using L2 norm.

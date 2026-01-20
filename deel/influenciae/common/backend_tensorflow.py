@@ -176,6 +176,73 @@ class TensorFlowBackend(BaseBackend):
         """Element-wise multiplication."""
         return tf.math.multiply(a, b)
 
+    def abs(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Compute absolute value of a tensor."""
+        return tf.abs(tensor)
+
+    def argmax(self, tensor: tf.Tensor, axis: int) -> tf.Tensor:
+        """Return indices of maximum values along an axis."""
+        return tf.argmax(tensor, axis=axis)
+
+    def gather_along_axis(
+        self,
+        tensor: tf.Tensor,
+        indices: tf.Tensor,
+        axis: int,
+        batch_dims: int = 0
+    ) -> tf.Tensor:
+        """Gather values from tensor along an axis using indices."""
+        return tf.gather(tensor, indices, axis=axis, batch_dims=batch_dims)
+
+    def get_output_shape(self, model: tf.keras.Model) -> Tuple[int, ...]:
+        """Get the output shape of a model."""
+        return tuple(model.output_shape)
+
+    def split_model(
+        self,
+        model: tf.keras.Model,
+        target_layer: Any
+    ) -> Tuple[tf.keras.Model, tf.keras.Model]:
+        """
+        Split a model into two sub-models at a target layer.
+
+        Parameters
+        ----------
+        model
+            The Keras model to split.
+        target_layer
+            Layer name (str) or index (int) at which to split.
+
+        Returns
+        -------
+        feature_extractor
+            Model containing layers up to (but not including) target_layer.
+        head
+            Model containing the target_layer and beyond.
+        """
+        from ..utils import find_layer
+
+        # Clone the model to avoid modifying the original
+        cloned_model = tf.keras.models.clone_model(model)
+        cloned_model.set_weights(model.get_weights())
+
+        # Find the cut layer
+        cut_layer = find_layer(cloned_model, target_layer)
+
+        # Create the feature extractor (up to but not including target layer)
+        feature_extractor = tf.keras.Model(
+            inputs=cloned_model.inputs,
+            outputs=cut_layer.input
+        )
+
+        # Create the head (from target layer onwards)
+        head = tf.keras.Model(
+            inputs=tf.keras.Input(tensor=cut_layer.input),
+            outputs=cloned_model.outputs
+        )
+
+        return feature_extractor, head
+
     def normalize(self, tensor: tf.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> tf.Tensor:
         """Normalize a tensor along an axis using L2 norm."""
         return tensor / tf.norm(tensor, axis=axis, keepdims=keepdims)
