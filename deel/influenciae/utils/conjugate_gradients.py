@@ -127,11 +127,14 @@ def _conjugate_gradients_tensorflow(
 ) -> Any:
     """
     TF-safe Conjugate Gradients: uses backend.while_loop so it can run under
-    tf.function / tf.data.Dataset.map / tf.map_fn without AutoGraph break errors.
+    tf.function / tf.data.Dataset.map / tf.map_fn without AutoGraph issues.
     """
     dtype = backend.get_dtype(b)
     tol_t = backend.constant(tol, dtype=dtype)
     eps_t = backend.constant(eps, dtype=dtype)
+
+    # Use a TF scalar for maxiter to avoid mixed Python/Tensor comparisons in graph mode
+    maxiter_t = backend.constant(maxiter, dtype=backend.int32_dtype())
 
     x = backend.zeros_like(b) if x0 is None else x0
     r = b - operator(x)
@@ -142,7 +145,7 @@ def _conjugate_gradients_tensorflow(
 
     def cond_fn(k, x, r, p, rs):
         # Continue while k < maxiter and ||r|| > tol
-        return backend.logical_and(k < maxiter, backend.sqrt(rs) > tol_t)
+        return backend.logical_and(k < maxiter_t, backend.sqrt(rs) > tol_t)
 
     def body_fn(k, x, r, p, rs):
         Ap = operator(p)
@@ -160,13 +163,13 @@ def _conjugate_gradients_tensorflow(
         beta = rs_new / rs_safe
         p = r + beta * p
 
-        return (k + 1, x, r, p, rs_new)
+        return [k + 1, x, r, p, rs_new]
 
-    _, x, _, _, _ = backend.while_loop(
+    k, x, r, p, rs = backend.while_loop(
         cond_fn=cond_fn,
         body_fn=body_fn,
         loop_vars=[k0, x, r, p, rs],
-        maximum_iterations=maxiter,
+        maximum_iterations=None,
     )
 
     return x
