@@ -683,16 +683,19 @@ class PyTorchBackend(BaseBackend):
         Get the element spec of a dataset.
 
         For PyTorch, returns shape info from first batch.
+        Handles nested tuple/list structures recursively.
         """
+        def _get_spec(item):
+            """Recursively get spec for an item."""
+            if isinstance(item, torch.Tensor):
+                return {'shape': item.shape, 'dtype': item.dtype}
+            elif isinstance(item, (list, tuple)):
+                return tuple(_get_spec(sub_item) for sub_item in item)
+            else:
+                return type(item)
+
         for batch in dataset:
-            if isinstance(batch, (list, tuple)):
-                return tuple(
-                    {'shape': b.shape, 'dtype': b.dtype} if isinstance(b, torch.Tensor) else type(b)
-                    for b in batch
-                )
-            elif isinstance(batch, torch.Tensor):
-                return {'shape': batch.shape, 'dtype': batch.dtype}
-            return type(batch)
+            return _get_spec(batch)
         return None
 
     def assert_batched_dataset(self, dataset: Any) -> None:
