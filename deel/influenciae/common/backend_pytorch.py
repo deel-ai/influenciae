@@ -719,6 +719,20 @@ class PyTorchBackend(BaseBackend):
         """Create a tensor of zeros with the same shape and dtype as the input."""
         return torch.zeros_like(tensor)
 
+    def ones(self, shape: Tuple[int, ...], dtype: Any = None) -> torch.Tensor:
+        """Create a tensor of ones."""
+        if dtype is None:
+            dtype = torch.float32
+        return torch.ones(shape, dtype=dtype)
+
+    def ones_like(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Create a tensor of ones with the same shape and dtype as the input."""
+        return torch.ones_like(tensor)
+
+    def argsort(self, tensor: torch.Tensor, axis: int = -1, descending: bool = False) -> torch.Tensor:
+        """Return the indices that would sort the tensor along an axis."""
+        return torch.argsort(tensor, dim=axis, descending=descending)
+
     def copy(self, tensor: torch.Tensor) -> torch.Tensor:
         """Create a copy of a tensor."""
         return tensor.clone()

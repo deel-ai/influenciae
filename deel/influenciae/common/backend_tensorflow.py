@@ -438,6 +438,21 @@ class TensorFlowBackend(BaseBackend):
         """Create a tensor of zeros with the same shape and dtype as the input."""
         return tf.zeros_like(tensor)
 
+    def ones(self, shape: Tuple[int, ...], dtype: Any = None) -> tf.Tensor:
+        """Create a tensor of ones."""
+        if dtype is None:
+            dtype = tf.float32
+        return tf.ones(shape, dtype=dtype)
+
+    def ones_like(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Create a tensor of ones with the same shape and dtype as the input."""
+        return tf.ones_like(tensor)
+
+    def argsort(self, tensor: tf.Tensor, axis: int = -1, descending: bool = False) -> tf.Tensor:
+        """Return the indices that would sort the tensor along an axis."""
+        direction = 'DESCENDING' if descending else 'ASCENDING'
+        return tf.argsort(tensor, axis=axis, direction=direction)
+
     def copy(self, tensor: tf.Tensor) -> tf.Tensor:
         """Create a copy of a tensor."""
         return tf.identity(tensor)

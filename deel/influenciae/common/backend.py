@@ -765,6 +765,37 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
+    def ones(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+        """Create a tensor of ones."""
+        pass
+
+    @abstractmethod
+    def ones_like(self, tensor: Any) -> Any:
+        """Create a tensor of ones with the same shape and dtype as the input."""
+        pass
+
+    @abstractmethod
+    def argsort(self, tensor: Any, axis: int = -1, descending: bool = False) -> Any:
+        """
+        Return the indices that would sort the tensor along an axis.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        axis
+            The axis along which to sort.
+        descending
+            If True, sort in descending order. Default is False (ascending).
+
+        Returns
+        -------
+        indices
+            Indices that would sort the tensor.
+        """
+        pass
+
+    @abstractmethod
     def copy(self, tensor: Any) -> Any:
         """Create a copy of a tensor."""
         pass
