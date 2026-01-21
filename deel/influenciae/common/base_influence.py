@@ -190,12 +190,10 @@ class SelfInfluenceCalculator:
             )
 
         best_samples, best_values = batch_sorted_dict.get()
-        influence_values = self.backend.stack(best_values)
-        training_samples = self.backend.concat(
-            [self.backend.expand_dims(v, axis=0) for v in best_samples], axis=0
-        )
-        training_samples = self.backend.squeeze(training_samples, axis=0)
-        influence_values = self.backend.squeeze(influence_values, axis=0)
+        # best_values is already a tensor of shape (1, k), just squeeze the first dimension
+        influence_values = self.backend.squeeze(best_values, axis=0)
+        # best_samples is of shape (1, k, ...), squeeze the first dimension
+        training_samples = self.backend.squeeze(best_samples, axis=0)
 
         return training_samples, influence_values
 
@@ -403,7 +401,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             dataset_to_evaluate: Any,
             train_set: Any,
             k: int = 5,
-            nearest_neighbors: BaseNearestNeighbors = LinearNearestNeighbors(),
+            nearest_neighbors: Optional[BaseNearestNeighbors] = None,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
             load_influence_vector_ds_path: Optional[str] = None,
             save_influence_vector_ds_path: Optional[str] = None,
@@ -456,6 +454,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         """
         if not influence_vector_in_cache and load_influence_vector_ds_path is None:
             warn("Warning: The computation is not efficient thinks to use cache or disk save")
+
+        # Create nearest_neighbors with the correct backend if not provided
+        if nearest_neighbors is None:
+            nearest_neighbors = LinearNearestNeighbors(backend=self.backend)
 
         if influence_vector_in_cache == CACHE.MEMORY:
             load_influence_vector_ds_path = None
