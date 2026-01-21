@@ -11,6 +11,7 @@ from .backend import (
     BaseBackend,
     detect_framework,
     detect_tensor_framework,
+    detect_dtype_framework,
     get_backend,
     get_backend_for_model,
     get_backend_for_tensor,

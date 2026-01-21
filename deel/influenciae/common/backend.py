@@ -122,6 +122,48 @@ def detect_tensor_framework(tensor: Any) -> Framework:
     )
 
 
+def detect_dtype_framework(dtype: Any) -> Optional[Framework]:
+    """
+    Detect which framework a dtype belongs to.
+
+    Parameters
+    ----------
+    dtype
+        The dtype to check.
+
+    Returns
+    -------
+    framework
+        The detected framework, or None if it cannot be determined.
+    """
+    # Check for TensorFlow dtype
+    try:
+        import tensorflow as tf
+        if isinstance(dtype, tf.DType):
+            return Framework.TENSORFLOW
+        # Also check for string representation of TensorFlow dtypes
+        dtype_str = str(dtype).lower()
+        if dtype_str.startswith('tf.') or dtype_str.startswith('<dtype:'):
+            return Framework.TENSORFLOW
+    except ImportError:
+        pass
+
+    # Check for PyTorch dtype
+    try:
+        import torch
+        if isinstance(dtype, torch.dtype):
+            return Framework.PYTORCH
+        # Also check for string representation of PyTorch dtypes
+        dtype_str = str(dtype).lower()
+        if dtype_str.startswith('torch.'):
+            return Framework.PYTORCH
+    except ImportError:
+        pass
+
+    # Could not determine framework from dtype
+    return None
+
+
 def get_backend_for_tensor(tensor: Any) -> "BaseBackend":
     """
     Get the appropriate backend for a tensor.
