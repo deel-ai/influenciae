@@ -232,6 +232,83 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         if batch_size is None:
             batch_size = self.backend.get_batch_size(vector_to_find)
 
+        if self.backend.framework == Framework.TENSORFLOW:
+            return self._query_tensorflow(vector_to_find, batch_size)
+        else:
+            return self._query_pytorch(vector_to_find, batch_size)
+
+    def _query_tensorflow(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
+        """TensorFlow-specific query using reduce for lazy evaluation within graph."""
+        import tensorflow as tf
+
+        k = self.batched_sorted_dict.k
+        order = self.batched_sorted_dict.order
+        batch_shape = tuple(self.batched_sorted_dict._shape[2:])  # Remove (1, k) prefix
+
+        # Initialize state tensors
+        if order == ORDER.DESCENDING:
+            init_values = tf.fill((batch_size, k), float('-inf'))
+        else:
+            init_values = tf.fill((batch_size, k), float('inf'))
+
+        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=self.batched_sorted_dict._dtype)
+
+        # Cast to the appropriate dtype
+        init_values = tf.cast(init_values, self.batched_sorted_dict._dtype)
+
+        def reduce_func(state, batch_data):
+            best_values, best_samples = state
+
+            # Expected structure: (batch, ihvp) where batch is (samples, labels, ...)
+            if isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
+                batch = batch_data[0]
+                ihvp = batch_data[-1]
+                if isinstance(batch, (list, tuple)):
+                    batch_samples = batch[0]
+                else:
+                    batch_samples = batch
+            else:
+                batch_samples = batch_data[0] if isinstance(batch_data, (list, tuple)) else batch_data
+                ihvp = batch_data[-1] if isinstance(batch_data, (list, tuple)) else batch_data
+
+            # Compute influence values
+            influence_values = self.dot_product_fun(vector_to_find, ihvp)
+
+            # Expand batch_samples to match query batch size
+            expanded_batch = tf.repeat(
+                tf.expand_dims(batch_samples, axis=0),
+                batch_size,
+                axis=0
+            )
+
+            # Concatenate with current best
+            current_score = tf.concat([best_values, influence_values], axis=1)
+            current_batch = tf.concat([best_samples, expanded_batch], axis=1)
+
+            # Sort and take top k
+            descending = (order == ORDER.DESCENDING)
+            if descending:
+                indexes = tf.argsort(current_score, axis=1, direction='DESCENDING')
+            else:
+                indexes = tf.argsort(current_score, axis=1, direction='ASCENDING')
+            indexes = indexes[:, :k]
+
+            # Gather top k values and samples
+            new_best_values = tf.gather(current_score, indexes, axis=1, batch_dims=1)
+            new_best_samples = tf.gather(current_batch, indexes, axis=1, batch_dims=1)
+
+            return (new_best_values, new_best_samples)
+
+        # Use reduce to process all batches
+        final_values, final_samples = self.dataset.reduce(
+            (init_values, init_samples),
+            reduce_func
+        )
+
+        return final_values, final_samples
+
+    def _query_pytorch(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
+        """PyTorch-specific query using BatchSort."""
         self.batched_sorted_dict.reset()
 
         # Iterate through the dataset
