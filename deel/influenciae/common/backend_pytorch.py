@@ -816,11 +816,18 @@ class PyTorchBackend(BaseBackend):
         jacobian_fn: Optional[Callable] = None
     ) -> torch.Tensor:
         """Compute the Hessian matrix of the loss with respect to weights."""
-        hess = torch.zeros((nb_params, nb_params))
+        device = weights[0].device
+        dtype = weights[0].dtype
+        hess = torch.zeros((nb_params, nb_params), device=device, dtype=dtype)
         nb_elt = 0
 
         for batch in dataset:
             inputs, targets = batch[0], batch[1]
+            # Ensure data is on same device/dtype as the model weights
+            if isinstance(inputs, torch.Tensor):
+                inputs = inputs.to(device=device, dtype=dtype)
+            if isinstance(targets, torch.Tensor):
+                targets = targets.to(device=device, dtype=dtype)
             batch_size = inputs.shape[0]
 
             for i in range(batch_size):
