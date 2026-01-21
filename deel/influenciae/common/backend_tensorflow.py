@@ -565,3 +565,109 @@ class TensorFlowBackend(BaseBackend):
         """Create a Sequential model from a list of layers."""
         return tf.keras.Sequential(layers)
 
+    # Additional operations for boundary-based calculators
+    def norm(self, tensor: tf.Tensor, ord: Optional[int] = None, axis: Optional[int] = None) -> tf.Tensor:
+        """Compute the norm of a tensor."""
+        if axis is None:
+            # Flatten and compute norm
+            flat = tf.reshape(tensor, (-1,))
+            if ord is None:
+                return tf.norm(flat)
+            return tf.norm(flat, ord=ord)
+        if ord is None:
+            return tf.norm(tensor, axis=axis)
+        return tf.norm(tensor, ord=ord, axis=axis)
+
+    def top_k(self, tensor: tf.Tensor, k: int) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Return the top k values and their indices from a tensor."""
+        return tf.math.top_k(tensor, k=k)
+
+    def arange(self, start: int, end: int, dtype: Any = None) -> tf.Tensor:
+        """Create a tensor with values from start to end."""
+        if dtype is None:
+            dtype = tf.int32
+        return tf.range(start, end, dtype=dtype)
+
+    def tile(self, tensor: tf.Tensor, multiples: Tuple[int, ...]) -> tf.Tensor:
+        """Tile a tensor by repeating it along each dimension."""
+        return tf.tile(tensor, multiples)
+
+    def repeat(self, tensor: tf.Tensor, repeats: int, axis: int) -> tf.Tensor:
+        """Repeat elements of a tensor along an axis."""
+        return tf.repeat(tensor, repeats, axis=axis)
+
+    def sign(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Compute the element-wise sign of a tensor."""
+        return tf.sign(tensor)
+
+    def pow(self, tensor: tf.Tensor, exponent: Any) -> tf.Tensor:
+        """Raise tensor elements to a power."""
+        return tf.pow(tensor, exponent)
+
+    def logical_and(self, a: Any, b: Any) -> tf.Tensor:
+        """Compute element-wise logical AND."""
+        return tf.logical_and(a, b)
+
+    def reduce_any(self, tensor: tf.Tensor, axis: Optional[int] = None) -> tf.Tensor:
+        """Compute logical OR reduction along an axis."""
+        return tf.reduce_any(tensor, axis=axis)
+
+    def argmin(self, tensor: tf.Tensor, axis: int) -> tf.Tensor:
+        """Return indices of minimum values along an axis."""
+        return tf.argmin(tensor, axis=axis)
+
+    def reduce_mean(self, tensor: tf.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> tf.Tensor:
+        """Compute the mean along an axis."""
+        return tf.reduce_mean(tensor, axis=axis, keepdims=keepdims)
+
+    def clone_variable(self, variable: tf.Variable) -> tf.Tensor:
+        """Create a copy of a variable (weight tensor)."""
+        return tf.identity(variable)
+
+    def assign_variable(self, variable: tf.Variable, value: tf.Tensor) -> None:
+        """Assign a value to a variable in-place."""
+        variable.assign(value)
+
+    def compute_output_jacobian(
+        self,
+        model: tf.keras.Model,
+        inputs: tf.Tensor
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Compute the Jacobian of the model output with respect to the input."""
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(inputs)
+            outputs = model(inputs)
+        jacobian = tape.jacobian(outputs, inputs)
+        return outputs, jacobian
+
+    def compute_output_jacobian_wrt_weights(
+        self,
+        model: tf.keras.Model,
+        weights: List[tf.Variable],
+        inputs: tf.Tensor
+    ) -> Tuple[tf.Tensor, List[tf.Tensor]]:
+        """Compute the Jacobian of the model output with respect to the weights."""
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(weights)
+            outputs = model(inputs)
+        jacobian = tape.jacobian(outputs, weights)
+        return outputs, jacobian
+
+    def boolean_mask(self, tensor: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
+        """Apply a boolean mask to a tensor."""
+        return tf.boolean_mask(tensor, mask)
+
+    def while_loop(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        loop_vars: List[Any],
+        maximum_iterations: Optional[int] = None
+    ) -> List[Any]:
+        """Execute a while loop with the given condition and body functions."""
+        return tf.while_loop(
+            cond_fn,
+            body_fn,
+            loop_vars,
+            maximum_iterations=maximum_iterations
+        )

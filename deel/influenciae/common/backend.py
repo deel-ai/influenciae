@@ -941,6 +941,356 @@ class BaseBackend(ABC):
         """Create a Sequential model from a list of layers."""
         pass
 
+    # Additional operations for boundary-based calculators
+    @abstractmethod
+    def norm(self, tensor: Any, ord: Optional[int] = None, axis: Optional[int] = None) -> Any:
+        """
+        Compute the norm of a tensor.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        ord
+            Order of the norm (e.g., 1, 2, or None for Frobenius).
+        axis
+            The axis along which to compute the norm.
+
+        Returns
+        -------
+        norm_value
+            The computed norm.
+        """
+        pass
+
+    @abstractmethod
+    def top_k(self, tensor: Any, k: int) -> Tuple[Any, Any]:
+        """
+        Return the top k values and their indices from a tensor.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        k
+            The number of top elements to return.
+
+        Returns
+        -------
+        values
+            The top k values.
+        indices
+            The indices of the top k values.
+        """
+        pass
+
+    @abstractmethod
+    def arange(self, start: int, end: int, dtype: Any = None) -> Any:
+        """
+        Create a tensor with values from start to end.
+
+        Parameters
+        ----------
+        start
+            Start value.
+        end
+            End value (exclusive).
+        dtype
+            Data type for the tensor.
+
+        Returns
+        -------
+        range_tensor
+            Tensor with values [start, start+1, ..., end-1].
+        """
+        pass
+
+    @abstractmethod
+    def tile(self, tensor: Any, multiples: Tuple[int, ...]) -> Any:
+        """
+        Tile a tensor by repeating it along each dimension.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        multiples
+            Number of times to repeat along each dimension.
+
+        Returns
+        -------
+        tiled_tensor
+            The tiled tensor.
+        """
+        pass
+
+    @abstractmethod
+    def repeat(self, tensor: Any, repeats: int, axis: int) -> Any:
+        """
+        Repeat elements of a tensor along an axis.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        repeats
+            Number of times to repeat each element.
+        axis
+            The axis along which to repeat.
+
+        Returns
+        -------
+        repeated_tensor
+            The repeated tensor.
+        """
+        pass
+
+    @abstractmethod
+    def sign(self, tensor: Any) -> Any:
+        """
+        Compute the element-wise sign of a tensor.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+
+        Returns
+        -------
+        sign_tensor
+            Tensor with -1, 0, or 1 based on the sign of each element.
+        """
+        pass
+
+    @abstractmethod
+    def pow(self, tensor: Any, exponent: Any) -> Any:
+        """
+        Raise tensor elements to a power.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        exponent
+            The exponent value.
+
+        Returns
+        -------
+        powered_tensor
+            The tensor with each element raised to the power.
+        """
+        pass
+
+    @abstractmethod
+    def logical_and(self, a: Any, b: Any) -> Any:
+        """
+        Compute element-wise logical AND.
+
+        Parameters
+        ----------
+        a
+            First tensor.
+        b
+            Second tensor.
+
+        Returns
+        -------
+        result
+            Element-wise logical AND result.
+        """
+        pass
+
+    @abstractmethod
+    def reduce_any(self, tensor: Any, axis: Optional[int] = None) -> Any:
+        """
+        Compute logical OR reduction along an axis.
+
+        Parameters
+        ----------
+        tensor
+            The input boolean tensor.
+        axis
+            The axis along which to reduce.
+
+        Returns
+        -------
+        result
+            Reduced tensor.
+        """
+        pass
+
+    @abstractmethod
+    def argmin(self, tensor: Any, axis: int) -> Any:
+        """
+        Return indices of minimum values along an axis.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        axis
+            The axis along which to find the minimum.
+
+        Returns
+        -------
+        indices
+            Indices of the minimum values.
+        """
+        pass
+
+    @abstractmethod
+    def reduce_mean(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
+        """
+        Compute the mean along an axis.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        axis
+            The axis along which to compute the mean.
+        keepdims
+            Whether to keep the reduced dimension.
+
+        Returns
+        -------
+        mean_tensor
+            The mean value(s).
+        """
+        pass
+
+    @abstractmethod
+    def clone_variable(self, variable: Any) -> Any:
+        """
+        Create a copy of a variable (weight tensor).
+
+        Parameters
+        ----------
+        variable
+            The variable to clone.
+
+        Returns
+        -------
+        cloned_variable
+            A copy of the variable.
+        """
+        pass
+
+    @abstractmethod
+    def assign_variable(self, variable: Any, value: Any) -> None:
+        """
+        Assign a value to a variable in-place.
+
+        Parameters
+        ----------
+        variable
+            The variable to update.
+        value
+            The new value.
+        """
+        pass
+
+    @abstractmethod
+    def compute_output_jacobian(
+        self,
+        model: Any,
+        inputs: Any
+    ) -> Tuple[Any, Any]:
+        """
+        Compute the Jacobian of the model output with respect to the input.
+
+        Parameters
+        ----------
+        model
+            The model.
+        inputs
+            The input tensor.
+
+        Returns
+        -------
+        outputs
+            The model outputs.
+        jacobian
+            The Jacobian of outputs with respect to inputs.
+        """
+        pass
+
+    @abstractmethod
+    def compute_output_jacobian_wrt_weights(
+        self,
+        model: Any,
+        weights: List[Any],
+        inputs: Any
+    ) -> Tuple[Any, List[Any]]:
+        """
+        Compute the Jacobian of the model output with respect to the weights.
+
+        Parameters
+        ----------
+        model
+            The model.
+        weights
+            The weight tensors.
+        inputs
+            The input tensor.
+
+        Returns
+        -------
+        outputs
+            The model outputs.
+        jacobian
+            List of Jacobians of outputs with respect to each weight tensor.
+        """
+        pass
+
+    @abstractmethod
+    def boolean_mask(self, tensor: Any, mask: Any) -> Any:
+        """
+        Apply a boolean mask to a tensor.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor.
+        mask
+            The boolean mask.
+
+        Returns
+        -------
+        masked_tensor
+            The masked tensor.
+        """
+        pass
+
+    @abstractmethod
+    def while_loop(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        loop_vars: List[Any],
+        maximum_iterations: Optional[int] = None
+    ) -> List[Any]:
+        """
+        Execute a while loop with the given condition and body functions.
+
+        Parameters
+        ----------
+        cond_fn
+            A function that takes loop_vars and returns a boolean tensor.
+        body_fn
+            A function that takes loop_vars and returns updated loop_vars.
+        loop_vars
+            Initial values for the loop variables.
+        maximum_iterations
+            Optional maximum number of iterations.
+
+        Returns
+        -------
+        loop_vars
+            Final values of the loop variables.
+        """
+        pass
+
 
 def get_backend(framework: Framework) -> BaseBackend:
     """

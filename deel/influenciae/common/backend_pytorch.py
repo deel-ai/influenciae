@@ -245,7 +245,12 @@ class PyTorchBackend(BaseBackend):
         if batch_dims == 0:
             # Simple gather of whole slices along axis
             # Expect indices to be 1D here (matches your current use cases)
-            return torch.index_select(tensor, dim=axis, index=indices)
+            if indices.dim() == 0:
+                indices = indices.unsqueeze(0)
+            # Flatten indices if needed
+            if indices.dim() > 1:
+                indices = indices.flatten()
+            return torch.index_select(tensor, dim=axis, index=indices.to(dtype=torch.long))
 
         if batch_dims != 1:
             raise NotImplementedError(f"batch_dims={batch_dims} not supported")
@@ -260,11 +265,31 @@ class PyTorchBackend(BaseBackend):
         b_idx = indices.shape[0]
 
         if b_tensor == b_idx:
-            # Row-wise gather: out shape (B,)
-            return tensor.gather(dim=1, index=indices.view(-1, 1)).squeeze(1)
+            # Row-wise gather: preserve shape to match TensorFlow behavior
+            # indices should be (B, K) where K is the number of indices per row
+            if indices.dim() == 1:
+                indices = indices.view(-1, 1)
+
+            # Handle 2D tensors: shape (B, N) -> gather along dim 1
+            if tensor.dim() == 2:
+                return tensor.gather(dim=1, index=indices)
+
+            # Handle 3D+ tensors: shape (B, N, ...) -> gather along dim 1, keep trailing dims
+            # We need to expand indices to match tensor dims
+            # tensor shape: (B, N, D1, D2, ...)
+            # indices shape: (B, K)
+            # result shape: (B, K, D1, D2, ...)
+            trailing_dims = tensor.shape[2:]
+            # Expand indices to broadcast over trailing dimensions
+            expanded_indices = indices
+            for _ in trailing_dims:
+                expanded_indices = expanded_indices.unsqueeze(-1)
+            # Expand to match tensor's trailing dimensions
+            expanded_indices = expanded_indices.expand(-1, -1, *trailing_dims)
+            return tensor.gather(dim=1, index=expanded_indices)
 
         # Cross-batch: select columns => shape (B_tensor, B_idx)
-        return tensor.index_select(dim=1, index=indices)
+        return tensor.index_select(dim=1, index=indices.flatten())
 
     def get_output_shape(self, model: nn.Module) -> Tuple[int, ...]:
         """Get the output shape of a model."""
@@ -856,3 +881,153 @@ class PyTorchBackend(BaseBackend):
         """Create a Sequential model from a list of layers."""
         return nn.Sequential(*layers)
 
+    # Additional operations for boundary-based calculators
+    def norm(self, tensor: torch.Tensor, ord: Optional[int] = None, axis: Optional[int] = None) -> torch.Tensor:
+        """Compute the norm of a tensor."""
+        if axis is None:
+            # Flatten and compute norm
+            flat = tensor.flatten()
+            if ord is None:
+                return torch.linalg.norm(flat)
+            return torch.linalg.norm(flat, ord=ord)
+        if ord is None:
+            return torch.linalg.norm(tensor, dim=axis)
+        return torch.linalg.norm(tensor, ord=ord, dim=axis)
+
+    def top_k(self, tensor: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return the top k values and their indices from a tensor."""
+        return torch.topk(tensor, k=k)
+
+    def arange(self, start: int, end: int, dtype: Any = None) -> torch.Tensor:
+        """Create a tensor with values from start to end."""
+        if dtype is None:
+            dtype = torch.int32
+        return torch.arange(start, end, dtype=dtype)
+
+    def tile(self, tensor: torch.Tensor, multiples: Tuple[int, ...]) -> torch.Tensor:
+        """Tile a tensor by repeating it along each dimension."""
+        return tensor.repeat(multiples)
+
+    def repeat(self, tensor: torch.Tensor, repeats: int, axis: int) -> torch.Tensor:
+        """Repeat elements of a tensor along an axis."""
+        return torch.repeat_interleave(tensor, repeats, dim=axis)
+
+    def sign(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Compute the element-wise sign of a tensor."""
+        return torch.sign(tensor)
+
+    def pow(self, tensor: torch.Tensor, exponent: Any) -> torch.Tensor:
+        """Raise tensor elements to a power."""
+        return torch.pow(tensor, exponent)
+
+    def logical_and(self, a: Any, b: Any) -> torch.Tensor:
+        """Compute element-wise logical AND."""
+        return torch.logical_and(a, b)
+
+    def reduce_any(self, tensor: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+        """Compute logical OR reduction along an axis."""
+        if axis is None:
+            return tensor.any()
+        return tensor.any(dim=axis)
+
+    def argmin(self, tensor: torch.Tensor, axis: int) -> torch.Tensor:
+        """Return indices of minimum values along an axis."""
+        return torch.argmin(tensor, dim=axis)
+
+    def reduce_mean(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
+        """Compute the mean along an axis."""
+        if axis is None:
+            return tensor.mean()
+        return tensor.mean(dim=axis, keepdim=keepdims)
+
+    def clone_variable(self, variable: torch.nn.Parameter) -> torch.Tensor:
+        """Create a copy of a variable (weight tensor)."""
+        return variable.clone().detach()
+
+    def assign_variable(self, variable: torch.nn.Parameter, value: torch.Tensor) -> None:
+        """Assign a value to a variable in-place."""
+        with torch.no_grad():
+            variable.copy_(value)
+
+    def compute_output_jacobian(
+        self,
+        model: nn.Module,
+        inputs: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute the Jacobian of the model output with respect to the input."""
+        inputs = inputs.clone().detach().requires_grad_(True)
+        outputs = model(inputs)
+
+        batch_size = inputs.shape[0]
+        num_outputs = outputs.shape[-1]
+
+        # Compute Jacobian row by row
+        jacobian_rows = []
+        for i in range(num_outputs):
+            grad_outputs = torch.zeros_like(outputs)
+            grad_outputs[..., i] = 1.0
+            grad = torch.autograd.grad(
+                outputs, inputs,
+                grad_outputs=grad_outputs,
+                retain_graph=True,
+                create_graph=False
+            )[0]
+            jacobian_rows.append(grad)
+
+        # Stack to form jacobian: (batch, num_outputs, *input_shape)
+        jacobian = torch.stack(jacobian_rows, dim=1)
+
+        return outputs.detach(), jacobian
+
+    def compute_output_jacobian_wrt_weights(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        inputs: torch.Tensor
+    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """Compute the Jacobian of the model output with respect to the weights."""
+        outputs = model(inputs)
+        batch_size = inputs.shape[0]
+        num_outputs = outputs.shape[-1]
+
+        jacobians = [
+            torch.zeros((batch_size, num_outputs, *w.shape), device=w.device, dtype=w.dtype)
+            for w in weights
+        ]
+
+        for k in range(batch_size):
+            for i in range(num_outputs):
+                grad_outputs = torch.zeros_like(outputs)
+                grad_outputs[k, i] = 1.0
+                grads = torch.autograd.grad(
+                    outputs, weights,
+                    grad_outputs=grad_outputs,
+                    retain_graph=True,
+                    create_graph=False
+                )
+                for w_idx, grad in enumerate(grads):
+                    jacobians[w_idx][k, i] = grad
+
+        return outputs.detach(), jacobians
+
+    def boolean_mask(self, tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Apply a boolean mask to a tensor."""
+        return tensor[mask]
+
+    def while_loop(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        loop_vars: List[Any],
+        maximum_iterations: Optional[int] = None
+    ) -> List[Any]:
+        """Execute a while loop with the given condition and body functions."""
+        iteration = 0
+        while cond_fn(*loop_vars):
+            if maximum_iterations is not None and iteration >= maximum_iterations:
+                break
+            loop_vars = body_fn(*loop_vars)
+            if not isinstance(loop_vars, (list, tuple)):
+                loop_vars = [loop_vars]
+            iteration += 1
+        return loop_vars
