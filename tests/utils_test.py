@@ -190,7 +190,17 @@ def assert_inheritance(
     assert top_k_inf_val.shape == (3,)
 
     # top_k_dataset
-    top_k_dataset = method.top_k(test_set, train_set, k=3, d_type=tf.float64)
+    # Use appropriate dtype based on backend
+    if hasattr(method, 'backend'):
+        from deel.influenciae.common import Framework
+        if method.backend.framework == Framework.PYTORCH:
+            import torch
+            d_type = torch.float64
+        else:
+            d_type = tf.float64
+    else:
+        d_type = tf.float64
+    top_k_dataset = method.top_k(test_set, train_set, k=3, d_type=d_type)
     iter_top_k = iter(top_k_dataset)
     (batch_evaluate_x, batch_evaluate_y), k_inf_val, k_training_samples = next(iter_top_k)
     assert batch_evaluate_x.shape == (10, 5, 5, 3)
