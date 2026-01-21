@@ -13,7 +13,7 @@ https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditio
 """
 import numpy as np
 
-from ..common import BaseBackend, get_backend_for_tensor
+from ..common import BaseBackend, get_backend_for_tensor, Framework
 from ..types import Callable, Optional, Any
 
 
@@ -66,6 +66,9 @@ def conjugate_gradients_solve(
     if backend is None:
         backend = get_backend_for_tensor(b)
 
+    if backend.framework == Framework.TENSORFLOW:
+        return _conjugate_gradients_tensorflow(operator, b, x0, maxiter, tol, eps, backend)
+
     # Initialize solution
     x = backend.zeros_like(b) if x0 is None else x0
 
@@ -109,6 +112,62 @@ def conjugate_gradients_solve(
         beta = rs_new / rs_old
         p = r + beta * p
         rs_old = rs_new
+
+    return x
+
+
+def _conjugate_gradients_tensorflow(
+    operator: Callable[[Any], Any],
+    b: Any,
+    x0: Optional[Any],
+    maxiter: int,
+    tol: float,
+    eps: float,
+    backend: BaseBackend,
+) -> Any:
+    """
+    TF-safe Conjugate Gradients: uses backend.while_loop so it can run under
+    tf.function / tf.data.Dataset.map / tf.map_fn without AutoGraph break errors.
+    """
+    dtype = backend.get_dtype(b)
+    tol_t = backend.constant(tol, dtype=dtype)
+    eps_t = backend.constant(eps, dtype=dtype)
+
+    x = backend.zeros_like(b) if x0 is None else x0
+    r = b - operator(x)
+    p = backend.copy(r)
+    rs = backend.reduce_sum(backend.multiply(r, r))
+
+    k0 = backend.constant(0, dtype=backend.int32_dtype())
+
+    def cond_fn(k, x, r, p, rs):
+        # Continue while k < maxiter and ||r|| > tol
+        return backend.logical_and(k < maxiter, backend.sqrt(rs) > tol_t)
+
+    def body_fn(k, x, r, p, rs):
+        Ap = operator(p)
+        pAp = backend.reduce_sum(backend.multiply(p, Ap))
+        denom = backend.maximum(pAp, eps_t)
+        alpha = rs / denom
+
+        x = x + alpha * p
+        r = r - alpha * Ap
+
+        rs_new = backend.reduce_sum(backend.multiply(r, r))
+
+        # Avoid rs==0 division edge case
+        rs_safe = backend.maximum(rs, eps_t)
+        beta = rs_new / rs_safe
+        p = r + beta * p
+
+        return (k + 1, x, r, p, rs_new)
+
+    _, x, _, _, _ = backend.while_loop(
+        cond_fn=cond_fn,
+        body_fn=body_fn,
+        loop_vars=[k0, x, r, p, rs],
+        maximum_iterations=maxiter,
+    )
 
     return x
 
