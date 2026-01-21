@@ -6,12 +6,12 @@
 Module implementing a technique based on the representer point theorem for kernels,
 but using a local jacobian expansion, as per
 https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf
-"""
-import tensorflow as tf
 
+Supports both TensorFlow and PyTorch models through the backend abstraction layer.
+"""
 from .base_representer_point import BaseRepresenterPoint
-from ..common import InfluenceModel, InverseHessianVectorProductFactory
-from ..types import Union, Optional
+from ..common import InfluenceModel, InverseHessianVectorProductFactory, Framework
+from ..types import Union, Optional, Any
 
 
 class RepresenterPointLJE(BaseRepresenterPoint):
@@ -20,12 +20,16 @@ class RepresenterPointLJE(BaseRepresenterPoint):
     Networks and Ensemble Models
     https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-Paper.pdf
 
-    Disclaimer: This technique requires the last layer of the model to be a Dense layer with no bias.
+    Supports both TensorFlow and PyTorch models through the backend abstraction layer.
+
+    Disclaimer: This technique requires the last layer of the model to be a Dense/Linear layer with no bias.
 
     Parameters
     ----------
     influence_model
-        The TF2.X model implementing the InfluenceModel interface.
+        The model implementing the InfluenceModel interface (TensorFlow or PyTorch).
+    dataset
+        A batched dataset with the points with which the model was trained.
     ihvp_calculator_factory
         An InverseHessianVectorProductFactory for creating new instances of the InverseHessianVectorProduct
         class.
@@ -36,14 +40,14 @@ class RepresenterPointLJE(BaseRepresenterPoint):
     target_layer
         Either a string or an integer identifying the layer on which to compute the influence-related quantities.
     shuffle_buffer_size
-        An integer with the buffer size for the training set's shuffle operation.
+        An integer with the buffer size for the training set's shuffle operation (TensorFlow only).
     epsilon
         An epsilon value to prevent division by zero.
     """
     def __init__(
             self,
             influence_model: InfluenceModel,
-            dataset: tf.data.Dataset,
+            dataset: Any,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int] = None,
             target_layer: Union[int, str] = -1,
@@ -51,7 +55,28 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             epsilon: float = 1e-5
     ):
         super().__init__(influence_model.model, dataset, influence_model.loss_function)
-        self.epsilon = tf.constant(epsilon, dtype=tf.float32)
+        self.epsilon = epsilon
+
+        if self.backend.framework == Framework.TENSORFLOW:
+            self._init_tensorflow(influence_model, dataset, ihvp_calculator_factory,
+                                  n_samples_for_hessian, target_layer, shuffle_buffer_size)
+        else:
+            self._init_pytorch(influence_model, dataset, ihvp_calculator_factory,
+                               n_samples_for_hessian, target_layer)
+
+    def _init_tensorflow(
+            self,
+            influence_model: InfluenceModel,
+            dataset: Any,
+            ihvp_calculator_factory: InverseHessianVectorProductFactory,
+            n_samples_for_hessian: Optional[int],
+            target_layer: Union[int, str],
+            shuffle_buffer_size: int
+    ):
+        """TensorFlow-specific initialization."""
+        import tensorflow as tf
+
+        self.epsilon_tensor = tf.constant(self.epsilon, dtype=tf.float32)
 
         # In the paper, the authors explain that in practice, they use a single step of SGD to compute the
         # perturbed model's weights. We will do the same here.
@@ -98,7 +123,81 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         )
         self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
 
-    def _compute_alpha(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+    def _init_pytorch(
+            self,
+            influence_model: InfluenceModel,
+            dataset: Any,
+            ihvp_calculator_factory: InverseHessianVectorProductFactory,
+            n_samples_for_hessian: Optional[int],
+            target_layer: Union[int, str]
+    ):
+        """PyTorch-specific initialization."""
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        import copy
+
+        device = next(influence_model.model.parameters()).device
+
+        # Clone the original head for perturbation
+        perturbed_head = copy.deepcopy(self.original_head)
+        perturbed_head.to(device)
+        perturbed_head.train()
+
+        # Use a single step of SGD to compute the perturbed model's weights
+        optimizer = torch.optim.SGD(perturbed_head.parameters(), lr=1e-4)
+
+        # Get a dataset to compute the SGD step
+        f_list, y_list = [], []
+        n_samples_seen = 0
+        with torch.no_grad():
+            for batch in dataset:
+                x = batch[0].to(device)
+                y = batch[-1].to(device)
+                f = self.feature_extractor(x)
+                f_list.append(f)
+                y_list.append(y)
+                n_samples_seen += x.shape[0]
+                if n_samples_for_hessian is not None and n_samples_seen >= n_samples_for_hessian:
+                    break
+
+        f_array = torch.cat(f_list, dim=0)
+        y_array = torch.cat(y_list, dim=0)
+
+        # Get the batch size from the original dataset
+        batch_size = self.backend.get_dataset_batch_size(dataset)
+        dataset_to_estimate_hessian = DataLoader(
+            TensorDataset(f_array, y_array),
+            batch_size=batch_size,
+            shuffle=False
+        )
+
+        # Accumulate the gradients for the whole dataset and then update
+        optimizer.zero_grad()
+        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        for f_batch, y_batch in dataset_to_estimate_hessian:
+            f_batch = f_batch.to(device)
+            y_batch = y_batch.to(device)
+            y_pred = perturbed_head(f_batch)
+            # Negative loss for gradient ascent (like TF implementation)
+            batch_loss = -influence_model.loss_function(y_pred, y_batch).mean()
+            total_loss = total_loss + batch_loss
+
+        total_loss.backward()
+        optimizer.step()
+
+        # Set perturbed head to eval mode
+        perturbed_head.eval()
+        self.perturbed_head = perturbed_head
+
+        # Create the new model with the perturbed weights to compute the hessian matrix
+        model = InfluenceModel(
+            self.perturbed_head,
+            0,  # Start layer for the head model
+            loss_function=influence_model.loss_function
+        )
+        self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
+
+    def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
         """
         Computes the alpha vector for the Local Jacobian Expansion approximation.
 
@@ -113,6 +212,15 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         -------
         A tensor with the alpha vector for the Local Jacobian Expansion approximation.
         """
+        if self.backend.framework == Framework.TENSORFLOW:
+            return self._compute_alpha_tensorflow(z_batch, y_batch)
+        else:
+            return self._compute_alpha_pytorch(z_batch, y_batch)
+
+    def _compute_alpha_tensorflow(self, z_batch: Any, y_batch: Any) -> Any:
+        """TensorFlow-specific alpha computation."""
+        import tensorflow as tf
+
         # First, we compute the second term, which contains the Hessian vector product
         weights = self.perturbed_head.trainable_weights
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
@@ -156,3 +264,72 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         first_term = tf.reduce_sum(first_term, axis=1)
 
         return first_term - second_term  # alpha is first term minus second term
+
+    def _compute_alpha_pytorch(self, z_batch: Any, y_batch: Any) -> Any:
+        """PyTorch-specific alpha computation."""
+        import torch
+
+        device = z_batch.device
+        dtype = z_batch.dtype
+        y_batch = y_batch.to(device=device)
+        batch_size = z_batch.shape[0]
+
+        # Get the weights from the perturbed head
+        weights_list = [p for p in self.perturbed_head.parameters() if p.requires_grad]
+        weights = torch.cat([w.view(-1) for w in weights_list])
+
+        # First, we compute the second term, which contains the Hessian vector product
+        logits = self.perturbed_head(z_batch)
+        loss = self.loss_function(logits, y_batch)
+        # Ensure loss is per-sample
+        if loss.dim() > 1:
+            loss = loss.view(batch_size, -1).sum(dim=1)
+        elif loss.dim() == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        # Compute per-sample gradients
+        grads_list = []
+        for i in range(batch_size):
+            grad_i = torch.autograd.grad(loss[i], weights_list, retain_graph=True, create_graph=False)
+            grad_flat = torch.cat([g.view(-1) for g in grad_i])
+            grads_list.append(grad_flat)
+        grads = torch.stack(grads_list, dim=0)  # (batch_size, num_params)
+
+        # Reshape grads to match weight shape (batch_size, in_features, out_features)
+        # Assuming a single linear layer weight of shape (out_features, in_features)
+        weight_shape = weights_list[0].shape  # (out_features, in_features)
+        out_features, in_features = weight_shape
+        grads_reshaped = grads.view(batch_size, out_features, in_features).permute(0, 2, 1)  # (batch, in, out)
+
+        # Divide by feature maps (z_batch): (batch, in)
+        eps = torch.tensor(self.epsilon, device=device, dtype=dtype)
+        divisor = batch_size * z_batch + eps  # (batch, in)
+        divisor_expanded = divisor.unsqueeze(-1)  # (batch, in, 1)
+        grads_divided = grads_reshaped / divisor_expanded  # (batch, in, out)
+
+        # Compute IHVP for each sample
+        second_term_list = []
+        for i in range(batch_size):
+            # Flatten and expand dims for IHVP computation
+            grad_flat = grads_divided[i].permute(1, 0).reshape(1, -1)  # (1, out*in)
+            ihvp_result = self.ihvp_calculator._compute_ihvp_single_batch(
+                (grad_flat,),
+                use_gradient=False
+            )
+            # ihvp_result shape: (num_params, 1) -> flatten
+            second_term_list.append(ihvp_result.squeeze())
+        second_term = torch.stack(second_term_list, dim=0)  # (batch, num_params)
+
+        # Reshape second_term back to (batch, in, out) and sum over in_features
+        second_term_reshaped = second_term.view(batch_size, out_features, in_features).permute(0, 2, 1)
+        second_term_summed = second_term_reshaped.sum(dim=1)  # (batch, out)
+
+        # Compute the first term: weights divided by feature maps
+        # weights_list[0] is (out_features, in_features), transpose to (in, out)
+        weights_transposed = weights_list[0].T  # (in, out)
+        weights_expanded = weights_transposed.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, in, out)
+        first_term = weights_expanded / divisor_expanded  # (batch, in, out)
+        first_term_summed = first_term.sum(dim=1)  # (batch, out)
+
+        return first_term_summed - second_term_summed  # alpha is first term minus second term
+
