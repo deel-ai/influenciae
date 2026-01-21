@@ -15,6 +15,7 @@ from ..common import (
     BaseBackend,
     Framework,
     get_backend,
+    detect_dtype_framework,
 )
 
 
@@ -49,6 +50,8 @@ class BatchSort:
     backend
         The backend to use for tensor operations. If None, it will be inferred from the first batch added
         or default to TensorFlow if available.
+    device
+        The device to create tensors on (PyTorch only). If None, tensors will be created on the default device.
     """
     def __init__(
         self,
@@ -56,15 +59,28 @@ class BatchSort:
         k_shape: Tuple[int, ...],
         dtype: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING,
-        backend: Optional[Union[BaseBackend, Framework]] = None
+        backend: Optional[Union[BaseBackend, Framework]] = None,
+        device: Optional[Any] = None
     ):
         # Determine the backend
         if backend is None:
-            # Default to TensorFlow if available, otherwise PyTorch
-            try:
-                self._backend = get_backend(Framework.TENSORFLOW)
-            except ImportError:
-                self._backend = get_backend(Framework.PYTORCH)
+            # Try to infer backend from dtype if provided
+            if dtype is not None:
+                inferred_framework = detect_dtype_framework(dtype)
+                if inferred_framework is not None:
+                    self._backend = get_backend(inferred_framework)
+                else:
+                    # Default to TensorFlow if available, otherwise PyTorch
+                    try:
+                        self._backend = get_backend(Framework.TENSORFLOW)
+                    except ImportError:
+                        self._backend = get_backend(Framework.PYTORCH)
+            else:
+                # Default to TensorFlow if available, otherwise PyTorch
+                try:
+                    self._backend = get_backend(Framework.TENSORFLOW)
+                except ImportError:
+                    self._backend = get_backend(Framework.PYTORCH)
         elif isinstance(backend, BaseBackend):
             self._backend = backend
         else:
@@ -79,11 +95,15 @@ class BatchSort:
 
         self.k = k_shape[1]
         self.order = order
+        self._device = device
+        self._initialized = False  # Track if we've seen real data
 
         # Create shape by concatenating k_shape and batch_shape
         shape = tuple(k_shape) + tuple(batch_shape)
+        self._shape = shape
+        self._k_shape = k_shape
 
-        # Initialize best_batch and best_values
+        # Initialize best_batch and best_values (will be moved to correct device on first add_all)
         self._best_batch = self._backend.zeros(shape, dtype=self._dtype)
 
         # Initialize best_values with -inf (descending) or inf (ascending)
@@ -91,6 +111,11 @@ class BatchSort:
             self._best_values = self._backend.ones(k_shape, dtype=self._dtype) * (-np.inf)
         else:
             self._best_values = self._backend.ones(k_shape, dtype=self._dtype) * np.inf
+
+        # Move to specified device if provided (PyTorch)
+        if device is not None and self._backend.framework == Framework.PYTORCH:
+            self._best_batch = self._best_batch.to(device)
+            self._best_values = self._best_values.to(device)
 
     @property
     def backend(self) -> BaseBackend:
@@ -109,6 +134,16 @@ class BatchSort:
         batch_values
             A batch of their corresponding values in the form of a tensor.
         """
+        # For PyTorch, ensure all tensors are on the same device
+        if self._backend.framework == Framework.PYTORCH:
+            # Move internal tensors to the device of the incoming batch if needed
+            if not self._initialized and hasattr(batch_values, 'device'):
+                target_device = batch_values.device
+                self._best_batch = self._best_batch.to(target_device)
+                self._best_values = self._best_values.to(target_device)
+                self._device = target_device
+                self._initialized = True
+
         current_score = self._backend.concat([self._best_values, batch_values], axis=1)
         current_batch = self._backend.concat([self._best_batch, batch_key], axis=1)
 
