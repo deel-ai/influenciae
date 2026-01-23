@@ -6,7 +6,7 @@
 Utility classes and functions
 """
 from .conjugate_gradients import conjugate_gradients_solve
-from .backtracking_line_search import BacktrackingLineSearch
+from .backtracking_line_search import BacktrackingLineSearch, BacktrackingLineSearchPyTorch
 from .tf_operations import (
      find_layer,
      from_layer_name_to_layer_idx,
