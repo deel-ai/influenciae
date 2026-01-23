@@ -106,18 +106,21 @@ class RepresenterPointL2(BaseRepresenterPoint):
         self.linear_layer.compile(optimizer=optimizer, loss=self.loss_function)
 
     def _train_last_layer_pytorch(self, epochs: int):
-        """PyTorch-specific training using Backtracking Line-Search (Armijo) like TF."""
+        """PyTorch-specific training using BacktrackingLineSearchPyTorch optimizer."""
         import torch
         import torch.nn as nn
+        from ..utils import BacktrackingLineSearchPyTorch
 
         device = next(self.model.parameters()).device
         self.linear_layer = self._create_surrogate_model_pytorch().to(device)
         mse_loss = nn.MSELoss(reduction="mean")
 
-        # Typical Armijo params
-        armijo_c = 1e-4
-        backtrack_beta = 0.5
-        min_step = 1e-8
+        # Create the backtracking line search optimizer
+        optimizer = BacktrackingLineSearchPyTorch(
+            params=self.linear_layer.parameters(),
+            batches_per_epoch=self.n_train / len(next(iter(self.train_set))[0]),
+            scaling_factor=self.scaling_factor
+        )
 
         W = self.linear_layer.weight  # only parameter (bias=False)
 
@@ -132,7 +135,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
                     y_target = self.original_head(z_batch)
 
                 # Forward + loss (with L2 reg like Keras L2: lambda * sum(W^2))
-                self.linear_layer.zero_grad(set_to_none=True)
+                optimizer.zero_grad()
                 logits = self.linear_layer(z_batch)
                 mse = mse_loss(logits, y_target)
                 reg = self.lambda_regularization * (W.pow(2).sum())
@@ -145,41 +148,32 @@ class RepresenterPointL2(BaseRepresenterPoint):
                 loss.backward()
                 g = W.grad
                 if g is None or not torch.isfinite(g).all():
-                    self.linear_layer.zero_grad(set_to_none=True)
+                    optimizer.zero_grad()
                     continue
 
                 # Clip to avoid rare spikes
                 torch.nn.utils.clip_grad_norm_([W], max_norm=10.0)
 
-                # Backtracking line-search on W only
-                with torch.no_grad():
-                    W0 = W.data.clone()
-                    f0 = loss.detach()
-                    g0 = W.grad.detach()
-                    gnorm2 = (g0 * g0).sum()
+                # Collect gradients for the optimizer
+                gradients = [p.grad.clone() for p in self.linear_layer.parameters() if p.grad is not None]
 
-                    step = float(self.scaling_factor)
-                    accepted = False
-
-                    while step >= min_step:
-                        # trial step
-                        W.data = W0 - step * g0
-
-                        # evaluate new loss (no grad)
+                # Define closure for loss re-evaluation
+                def closure():
+                    with torch.no_grad():
                         logits_new = self.linear_layer(z_batch)
                         mse_new = mse_loss(logits_new, y_target)
                         reg_new = self.lambda_regularization * (W.pow(2).sum())
-                        f_new = mse_new + reg_new
+                        return mse_new + reg_new
 
-                        if torch.isfinite(f_new) and f_new <= f0 - armijo_c * step * gnorm2:
-                            accepted = True
-                            break
-
-                        step *= backtrack_beta
-
-                    if not accepted:
-                        # reject step
-                        W.data = W0
+                # Perform backtracking line search step
+                optimizer.step(
+                    model=self.linear_layer,
+                    current_loss=loss.detach(),
+                    x_inputs=z_batch,
+                    labels=y_target,
+                    gradients=gradients,
+                    closure=closure
+                )
 
         self.linear_layer.eval()
 
