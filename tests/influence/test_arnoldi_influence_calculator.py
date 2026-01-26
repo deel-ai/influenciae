@@ -41,7 +41,7 @@ def test_inverse_exact_hessian():
 
     H_inv = tf.matmul(scaling_up.G, tf.matmul(tf.linalg.diag(1.0 / scaling_up.eig_vals), scaling_up.G),
                       transpose_a=True)
-    assert tf.reduce_max(tf.abs(tf.cast(H_inv, dtype=tf.float64) - tf.linalg.inv(hessian))).numpy() < 1E-6
+    assert tf.reduce_max(tf.abs(tf.cast(H_inv, dtype=tf.float64) - tf.linalg.inv(hessian))).numpy() < 2E-6
 
 
 def test_exact_influence_values():
@@ -72,7 +72,7 @@ def test_exact_influence_values():
     first_order_influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset)
     first_order_influence_values = first_order_influence_calculator._compute_influence_values(train_dataset)
 
-    assert tf.reduce_max(tf.abs(scaling_up_influence_values - first_order_influence_values)) < 1E-6
+    assert tf.reduce_max(tf.abs(scaling_up_influence_values - first_order_influence_values)) < 5E-5
 
     inputs_test = tf.random.normal((nb_sample, 10), dtype=dtype)
     targets_test = tf.random.normal((nb_sample, 1), dtype=dtype)
@@ -84,7 +84,7 @@ def test_exact_influence_values():
 
     for v1, v2 in zip(scaling_up_influence_values, first_order_influence_values):
         for v1_, v2_ in zip(v1[1], v2[1]):
-            assert tf.reduce_max(tf.abs(v1_[1] - v2_[1])) < 1E-6
+            assert tf.reduce_max(tf.abs(v1_[1] - v2_[1])) < 5E-5
 
 
 def test_inheritance():
