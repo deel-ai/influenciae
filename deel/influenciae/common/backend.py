@@ -1364,6 +1364,109 @@ class BaseBackend(ABC):
         """
         pass
 
+    # Arnoldi algorithm specific operations
+    @abstractmethod
+    def random_normal(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+        """
+        Generate random tensor from normal distribution.
+
+        Parameters
+        ----------
+        shape
+            Shape of the output tensor.
+        dtype
+            Data type for the tensor.
+
+        Returns
+        -------
+        tensor
+            Random tensor from normal distribution.
+        """
+        pass
+
+    @abstractmethod
+    def diag_part(self, tensor: Any, k: int = 0) -> Any:
+        """
+        Extract diagonal from a matrix with offset k.
+
+        Parameters
+        ----------
+        tensor
+            The input matrix.
+        k
+            Diagonal offset (0 for main diagonal, positive for upper, negative for lower).
+
+        Returns
+        -------
+        diagonal
+            The diagonal elements.
+        """
+        pass
+
+    @abstractmethod
+    def eigh_tridiagonal(
+        self,
+        maindiag: Any,
+        superdiag: Any,
+        eigvals_only: bool = False
+    ) -> Tuple[Any, Optional[Any]]:
+        """
+        Compute eigenvalues and eigenvectors of a symmetric tridiagonal matrix.
+
+        Parameters
+        ----------
+        maindiag
+            Main diagonal of the tridiagonal matrix.
+        superdiag
+            Super diagonal of the tridiagonal matrix.
+        eigvals_only
+            If True, only compute eigenvalues.
+
+        Returns
+        -------
+        eig_vals
+            The eigenvalues.
+        eig_vectors
+            The eigenvectors (None if eigvals_only is True).
+        """
+        pass
+
+    @abstractmethod
+    def eig(self, tensor: Any) -> Tuple[Any, Any]:
+        """
+        Compute eigenvalues and eigenvectors of a square matrix.
+
+        Parameters
+        ----------
+        tensor
+            The input square matrix.
+
+        Returns
+        -------
+        eig_vals
+            The eigenvalues.
+        eig_vectors
+            The eigenvectors.
+        """
+        pass
+
+    @abstractmethod
+    def real(self, tensor: Any) -> Any:
+        """
+        Return the real part of a complex tensor.
+
+        Parameters
+        ----------
+        tensor
+            The input tensor (possibly complex).
+
+        Returns
+        -------
+        real_tensor
+            The real part of the tensor.
+        """
+        pass
+
 
 def get_backend(framework: Framework) -> BaseBackend:
     """

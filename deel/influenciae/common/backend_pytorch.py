@@ -1043,7 +1043,8 @@ class PyTorchBackend(BaseBackend):
         cond_fn: Callable,
         body_fn: Callable,
         loop_vars: List[Any],
-        maximum_iterations: Optional[int] = None
+        maximum_iterations: Optional[int] = None,
+        parallel_iterations: int = 10
     ) -> List[Any]:
         """Execute a while loop with the given condition and body functions."""
         iteration = 0
@@ -1055,3 +1056,52 @@ class PyTorchBackend(BaseBackend):
                 loop_vars = [loop_vars]
             iteration += 1
         return loop_vars
+
+    # Arnoldi algorithm specific operations
+    def random_normal(self, shape: Tuple[int, ...], dtype: Any = None) -> torch.Tensor:
+        """Generate random tensor from normal distribution."""
+        if dtype is None:
+            dtype = torch.float32
+        return torch.randn(shape, dtype=dtype)
+
+    def diag_part(self, tensor: torch.Tensor, k: int = 0) -> torch.Tensor:
+        """Extract diagonal from a matrix with offset k."""
+        return torch.diagonal(tensor, offset=k)
+
+    def eigh_tridiagonal(
+        self,
+        maindiag: torch.Tensor,
+        superdiag: torch.Tensor,
+        eigvals_only: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Compute eigenvalues and eigenvectors of a symmetric tridiagonal matrix."""
+        # PyTorch doesn't have direct tridiagonal eigensolver
+        # Construct the tridiagonal matrix and use eigh
+        n = maindiag.shape[0]
+        device = maindiag.device
+        dtype = maindiag.dtype
+
+        # Build the tridiagonal matrix
+        T = torch.diag(maindiag)
+        if n > 1:
+            # Add super and sub diagonals
+            indices_super = torch.arange(n - 1, device=device)
+            for i in indices_super:
+                T[i, i + 1] = superdiag[i]
+                T[i + 1, i] = superdiag[i]  # Symmetric
+
+        # Compute eigenvalues and eigenvectors
+        eig_vals, eig_vectors = torch.linalg.eigh(T)
+
+        if eigvals_only:
+            return eig_vals, None
+        return eig_vals, eig_vectors
+
+    def eig(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute eigenvalues and eigenvectors of a square matrix."""
+        return torch.linalg.eig(tensor)
+
+    def real(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Return the real part of a complex tensor."""
+        return tensor.real if tensor.is_complex() else tensor
+

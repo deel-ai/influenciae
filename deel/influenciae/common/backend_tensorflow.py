@@ -677,12 +677,63 @@ class TensorFlowBackend(BaseBackend):
         cond_fn: Callable,
         body_fn: Callable,
         loop_vars: List[Any],
-        maximum_iterations: Optional[int] = None
+        maximum_iterations: Optional[int] = None,
+        parallel_iterations: int = 10
     ) -> List[Any]:
         """Execute a while loop with the given condition and body functions."""
-        return tf.while_loop(
-            cond_fn,
-            body_fn,
+        # Wrap cond_fn and body_fn to work with TensorFlow's while_loop
+        # TensorFlow passes loop_vars as a flat list, but we want to unpack them
+        def wrapped_cond(*args):
+            return cond_fn(*args)
+
+        def wrapped_body(*args):
+            result = body_fn(*args)
+            # Ensure the result is a list to match input structure
+            if isinstance(result, tuple):
+                result = list(result)
+            return result
+
+        result = tf.while_loop(
+            wrapped_cond,
+            wrapped_body,
             loop_vars,
-            maximum_iterations=maximum_iterations
+            maximum_iterations=maximum_iterations,
+            parallel_iterations=parallel_iterations
         )
+        return result
+
+    # Arnoldi algorithm specific operations
+    def random_normal(self, shape: Tuple[int, ...], dtype: Any = None) -> tf.Tensor:
+        """Generate random tensor from normal distribution."""
+        if dtype is None:
+            dtype = tf.float32
+        return tf.random.normal(shape, dtype=dtype)
+
+    def diag_part(self, tensor: tf.Tensor, k: int = 0) -> tf.Tensor:
+        """Extract diagonal from a matrix with offset k."""
+        return tf.linalg.diag_part(tensor, k=k)
+
+    @tf.autograph.experimental.do_not_convert
+    def eigh_tridiagonal(
+        self,
+        maindiag: tf.Tensor,
+        superdiag: tf.Tensor,
+        eigvals_only: bool = False
+    ) -> Tuple[tf.Tensor, Optional[tf.Tensor]]:
+        """Compute eigenvalues and eigenvectors of a symmetric tridiagonal matrix."""
+        # Use cpu device for eigh_tridiagonal as it's not supported on GPU
+        with tf.device('cpu'):
+            eig_vals, eig_vectors = tf.linalg.eigh_tridiagonal(maindiag, superdiag, eigvals_only=eigvals_only)
+        if eigvals_only:
+            return eig_vals, None
+        return eig_vals, eig_vectors
+
+    @tf.autograph.experimental.do_not_convert
+    def eig(self, tensor: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Compute eigenvalues and eigenvectors of a square matrix."""
+        return tf.linalg.eig(tensor)
+
+    @tf.autograph.experimental.do_not_convert
+    def real(self, tensor: tf.Tensor) -> tf.Tensor:
+        """Return the real part of a complex tensor."""
+        return tf.math.real(tensor)
