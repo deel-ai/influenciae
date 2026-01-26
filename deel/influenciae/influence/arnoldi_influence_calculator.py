@@ -8,10 +8,9 @@ Functions"](https://arxiv.org/pdf/2112.03052.pdf). The Arnoldi algorithm effecti
 reduces the dimension of the problem of computing IHVPs and allows for the calculation
 of influence values on big neural network models.
 """
-import tensorflow as tf
-
 from ..common import InfluenceModel, BaseInfluenceCalculator, ForwardOverBackwardHVP
-from ..types import Tuple
+from ..common.backend import BaseBackend
+from ..types import Tuple, Any
 
 
 class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
@@ -31,9 +30,9 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
     Parameters
     ----------
     model
-        The TF2.X model implementing the InfluenceModel interface.
+        The model implementing the InfluenceModel interface (TensorFlow or PyTorch).
     train_dataset
-        A batched TF dataset with the points with which the model was trained.
+        A batched dataset with the points with which the model was trained.
     subspace_dim
         The dimension of the Krylov subspace for the Arnoldi algorithm.
     force_hermitian
@@ -41,27 +40,33 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
     k_largest_eig_vals
         An integer for the amount of top eigenvalues to keep for the influence estimations.
     dtype
-        Numeric type for the Krylov basis (tf.float32 by default).
+        Numeric type for the Krylov basis (float32 by default).
     """
     def __init__(
             self,
             model: InfluenceModel,
-            train_dataset: tf.data.Dataset,
+            train_dataset: Any,
             subspace_dim: int,
             force_hermitian: bool,
             k_largest_eig_vals: int,
-            dtype: tf.dtypes = tf.float32
+            dtype: Any = None
     ):
         self.subspace_dim = subspace_dim
         self.force_hermitian = force_hermitian
         self.k_largest_eig_vals = k_largest_eig_vals
         self.model = model
+        self.backend: BaseBackend = model.backend
         self.hvp_calculator = ForwardOverBackwardHVP(model, train_dataset)
-        self.dtype = dtype
+
+        # Set default dtype based on backend
+        if dtype is None:
+            self.dtype = self.backend.float32_dtype()
+        else:
+            self.dtype = dtype
 
         self.eig_vals, self.G = self.arnoldi(self.model.nb_params)
 
-    def arnoldi(self, dim: int) -> Tuple[tf.Tensor, tf.Tensor]:
+    def arnoldi(self, dim: int) -> Tuple[Any, Any]:
         """
         Builds the projection of the inverse of the hessian on the Krylov subspaces.
 
@@ -77,19 +82,18 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         G
             The projection matrix
         """
-        v = tf.random.normal((dim,), dtype=self.dtype)
+        v = self.backend.random_normal((dim,), dtype=self.dtype)
         A, W = self._build_orthogonal_basis(v)
         eig_vals, G = self._distill(A, W)
 
         return eig_vals, G
 
-    @tf.function
-    def __build_orthogonal_basis_iter(
+    def _build_orthogonal_basis_iter(
             self,
-            W: tf.Tensor,
-            A: tf.Tensor,
+            W: Any,
+            A: Any,
             index: int
-    ) -> Tuple[tf.Tensor, tf.Tensor, int]:
+    ) -> Tuple[Any, Any, int]:
         """
         Builds the new vector of the Krylov's basis and computes the projection of the hessian for this vector.
 
@@ -112,31 +116,44 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
             The current index of the Krylov's basis
         """
         w_next = self.hvp_calculator(W[index])
-        w_next = tf.squeeze(w_next, axis=1)
+        w_next = self.backend.squeeze(w_next, axis=1)
         size = index + 1
-        A_next_line = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(w_next, axis=0), size, axis=0), axis=1)
-        WA_product = tf.reduce_sum(W[:size] * tf.repeat(tf.expand_dims(A_next_line, axis=1), tf.shape(W)[1], axis=1),
-                                   axis=0)
+
+        # Compute A_next_line = dot product of W[:size] with w_next
+        W_slice = W[:size]
+        w_next_expanded = self.backend.expand_dims(w_next, axis=0)
+        w_next_repeated = self.backend.repeat(w_next_expanded, size, axis=0)
+        A_next_line = self.backend.reduce_sum(W_slice * w_next_repeated, axis=1)
+
+        # Compute WA_product
+        A_next_line_expanded = self.backend.expand_dims(A_next_line, axis=1)
+        W_shape = self.backend.tensor_shape(W)
+        A_next_line_repeated = self.backend.repeat(A_next_line_expanded, W_shape[1], axis=1)
+        WA_product = self.backend.reduce_sum(W_slice * A_next_line_repeated, axis=0)
         w_next = w_next - WA_product
 
-        w_next_norm = tf.norm(w_next)
+        w_next_norm = self.backend.norm(w_next)
 
-        padding_size = tf.shape(A)[1] - tf.shape(A_next_line)[0] - 1
-        A_next_line = tf.concat(
-            [A_next_line, tf.expand_dims(w_next_norm, axis=0), tf.zeros((padding_size,), self.dtype)],
-            axis=0)
+        # Build padded A_next_line
+        A_shape = self.backend.tensor_shape(A)
+        padding_size = A_shape[1] - size - 1
+        w_next_norm_expanded = self.backend.expand_dims(w_next_norm, axis=0)
+        zeros_padding = self.backend.zeros((padding_size,), dtype=self.dtype)
+        A_next_line = self.backend.concat([A_next_line, w_next_norm_expanded, zeros_padding], axis=0)
 
-        W = tf.concat([W[:size], tf.expand_dims(w_next, axis=0) / w_next_norm,
-                       tf.zeros((tf.shape(W)[0] - size - 1, tf.shape(W)[1]), self.dtype)], axis=0)
+        # Update W
+        w_next_normalized = self.backend.expand_dims(w_next / w_next_norm, axis=0)
+        zeros_W = self.backend.zeros((W_shape[0] - size - 1, W_shape[1]), dtype=self.dtype)
+        W = self.backend.concat([W[:size], w_next_normalized, zeros_W], axis=0)
 
-        A = tf.concat(
-            [A[:index], tf.expand_dims(A_next_line, axis=0),
-             tf.zeros((tf.shape(A)[0] - index - 1, tf.shape(A)[1]), self.dtype)],
-            axis=0)
+        # Update A
+        A_next_line_expanded = self.backend.expand_dims(A_next_line, axis=0)
+        zeros_A = self.backend.zeros((A_shape[0] - index - 1, A_shape[1]), dtype=self.dtype)
+        A = self.backend.concat([A[:index], A_next_line_expanded, zeros_A], axis=0)
 
-        return W, A, index + 1
+        return [W, A, index + 1]
 
-    def _build_orthogonal_basis(self, v: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def _build_orthogonal_basis(self, v: Any) -> Tuple[Any, Any]:
         """
         Build orthonormal basis for the Krylov subspaces with the first vector of the basis v.
         Project the hessian on the Krylov subspaces.
@@ -153,18 +170,29 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         W
             The Krylov basis
         """
-        W0 = tf.concat(
-            [tf.expand_dims(v / tf.norm(v), axis=0), tf.zeros((self.subspace_dim, tf.shape(v)[0]), self.dtype)],
-            axis=0)
-        A0 = tf.zeros((self.subspace_dim, self.subspace_dim + 1), dtype=v.dtype)
+        v_shape = self.backend.tensor_shape(v)
+        v_normalized = self.backend.expand_dims(v / self.backend.norm(v), axis=0)
+        zeros_W = self.backend.zeros((self.subspace_dim, v_shape[0]), dtype=self.dtype)
+        W0 = self.backend.concat([v_normalized, zeros_W], axis=0)
+        A0 = self.backend.zeros((self.subspace_dim, self.subspace_dim + 1), dtype=self.dtype)
 
-        W, A, _ = tf.while_loop(lambda W, A, index: index < self.subspace_dim, self.__build_orthogonal_basis_iter,
-                                [W0, A0, tf.constant(0, dtype=tf.int32)],
-                                parallel_iterations=1)
+        # Use backend's while_loop for efficiency (especially for TensorFlow graph compilation)
+        def cond_fn(W, A, index):
+            return index < self.subspace_dim
+
+        def body_fn(W, A, index):
+            return self._build_orthogonal_basis_iter(W, A, index)
+
+        W, A, _ = self.backend.while_loop(
+            cond_fn,
+            body_fn,
+            [W0, A0, 0],
+            maximum_iterations=self.subspace_dim
+        )
 
         return A, W
 
-    def _distill(self, A: tf.Tensor, W: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def _distill(self, A: Any, W: Any) -> Tuple[Any, Any]:
         """
         Inverse the projection by performing the following operations:
 
@@ -194,26 +222,30 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         W = W[:-1, :]
 
         if self.force_hermitian:
-            maindiag = tf.linalg.diag_part(A, k=0)
-            superdiag = tf.linalg.diag_part(A, k=1)
-            subdiag = tf.linalg.diag_part(A, k=-1)
+            maindiag = self.backend.diag_part(A, k=0)
+            superdiag = self.backend.diag_part(A, k=1)
+            subdiag = self.backend.diag_part(A, k=-1)
 
             superdiag = (superdiag + subdiag) / 2.0
 
-            with tf.device('cpu'):
-                eig_vals, eig_vectors = tf.linalg.eigh_tridiagonal(maindiag, superdiag, eigvals_only=False)
+            eig_vals, eig_vectors = self.backend.eigh_tridiagonal(maindiag, superdiag, eigvals_only=False)
         else:
-            eig_vals, eig_vectors = tf.linalg.eig(A)
+            eig_vals, eig_vectors = self.backend.eig(A)
 
-        _, idx = tf.math.top_k(- tf.abs(eig_vals), k=self.k_largest_eig_vals)
-        eig_vals = tf.gather(eig_vals, idx, axis=-1)
-        eig_vectors = tf.gather(eig_vectors, idx, axis=-1)
+        # Get top k eigenvalues by smallest absolute value
+        neg_abs_eig_vals = -self.backend.abs(eig_vals)
+        _, idx = self.backend.top_k(neg_abs_eig_vals, k=self.k_largest_eig_vals)
+        eig_vals = self.backend.gather_along_axis(eig_vals, idx, axis=-1)
+        eig_vectors = self.backend.gather_along_axis(eig_vectors, idx, axis=-1)
 
-        G = tf.matmul(eig_vectors, tf.cast(W, dtype=eig_vectors.dtype), transpose_a=True)
+        G = self.backend.matmul(
+            self.backend.transpose(eig_vectors),
+            self.backend.cast(W, dtype=self.backend.get_dtype(eig_vectors))
+        )
 
         return eig_vals, G
 
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Compute an equivalent of the influence vector for a sample of training points.
 
@@ -229,11 +261,14 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         """
         g_train = self.model.batch_jacobian_tensor(train_samples)
 
-        influence_vectors = tf.matmul(tf.cast(g_train, dtype=self.G.dtype), self.G, transpose_b=True) / self.eig_vals
+        influence_vectors = self.backend.matmul(
+            self.backend.cast(g_train, dtype=self.backend.get_dtype(self.G)),
+            self.backend.transpose(self.G)
+        ) / self.eig_vals
 
         return influence_vectors
 
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
         """
         Pre-process a sample to facilitate evaluation afterwards. In this case, it amounts to transforming
         it into it's "influence vector".
@@ -250,15 +285,18 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         """
         g_sample = self.model.batch_jacobian_tensor(samples)
 
-        evaluate_vect = tf.matmul(tf.cast(g_sample, self.G.dtype), self.G, transpose_b=True)
+        evaluate_vect = self.backend.matmul(
+            self.backend.cast(g_sample, self.backend.get_dtype(self.G)),
+            self.backend.transpose(self.G)
+        )
 
         return evaluate_vect
 
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: tf.Tensor,
-            influence_vector: tf.Tensor
-    ) -> tf.Tensor:
+            preproc_test_sample: Any,
+            influence_vector: Any
+    ) -> Any:
         """
         Compute the influence score of a (pre-processed) sample and an "influence vector" from a training
         data-point
@@ -275,12 +313,12 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         influence_values
             A tensor with the influence scores
         """
-        influence_values = tf.matmul(preproc_test_sample, tf.transpose(influence_vector))
-        influence_values = tf.math.real(influence_values)
+        influence_values = self.backend.matmul(preproc_test_sample, self.backend.transpose(influence_vector))
+        influence_values = self.backend.real(influence_values)
 
         return influence_values
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Compute the influence score for a training sample
 
@@ -294,18 +332,25 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         The influence score
         """
         g_train = self.model.batch_jacobian_tensor(train_samples)
-        influence_vectors = tf.matmul(tf.cast(g_train, dtype=self.G.dtype), self.G, transpose_b=True)
+        influence_vectors = self.backend.matmul(
+            self.backend.cast(g_train, dtype=self.backend.get_dtype(self.G)),
+            self.backend.transpose(self.G)
+        )
 
-        influence_values = tf.reduce_sum(influence_vectors * influence_vectors / self.eig_vals, axis=1, keepdims=True)
-        influence_values = tf.math.real(influence_values)
+        influence_values = self.backend.reduce_sum(
+            influence_vectors * influence_vectors / self.eig_vals,
+            axis=1,
+            keepdims=True
+        )
+        influence_values = self.backend.real(influence_values)
 
         return influence_values
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
+            train_samples: Tuple[Any, ...],
+            samples_to_evaluate: Tuple[Any, ...]
+    ) -> Any:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.
