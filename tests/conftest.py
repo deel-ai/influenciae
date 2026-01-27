@@ -11,6 +11,7 @@ This module provides:
 - Fixtures for common test utilities
 - Command-line options for backend selection
 """
+import sys
 import pytest
 
 # ============================================================================
@@ -43,10 +44,120 @@ def _check_pytorch_available():
 HAS_TENSORFLOW = _check_tensorflow_available()
 HAS_PYTORCH = _check_pytorch_available()
 
+# ============================================================================
+# Collection ignore patterns based on backend availability
+# This prevents ImportError during test collection when backends aren't installed
+# ============================================================================
+
+# Files/patterns that require PyTorch (will fail to import without it)
+# Using glob patterns relative to the tests directory
+_PYTORCH_PATTERNS = [
+    # Pattern to match all *_pytorch.py files anywhere in tests
+    "*_pytorch.py",
+    "**/*_pytorch.py",
+]
+
+# Files/patterns that require TensorFlow (will fail to import without it)
+# These files have top-level TF imports that will cause ImportError
+_TENSORFLOW_PATTERNS = [
+    # Benchmark tests - import tensorflow.keras directly
+    "benchmark/test_bench.py",
+    "benchmark/test_benchmark_base.py",
+    # Boundary tests (non-pytorch versions)
+    "boundary_based/test_sample_boundary.py",
+    "boundary_based/test_weights_boundary.py",
+    # Common module tests
+    "common/test_ihvp.py",
+    "common/test_ihvp_factory.py",
+    "common/test_inf_abstract.py",
+    "common/test_model_wrapper.py",
+    "common/test_backend_tensorflow.py",
+    # Influence tests
+    "influence/test_first_order_influence_calculator.py",
+    "influence/test_second_order_influence.py",
+    "influence/test_arnoldi_influence_calculator.py",
+    # RPS tests
+    "rps/test_representer_point_l2.py",
+    "rps/test_rps_lje.py",
+    # TracIn tests
+    "trac_in/test_tracin.py",
+    # Utils tests (TF-specific)
+    "utils/test_nearest_neighbors.py",
+    "utils/test_sorted_dict.py",
+    "utils/test_tf_operations.py",
+    # Root level test file
+    "utils_test.py",
+]
+
+# Files that require both backends (import both TF and PyTorch at top level)
+_BOTH_BACKENDS_PATTERNS = [
+    "common/test_backend_parity.py",
+    "utils/test_backtracking.py",
+    "utils/test_cgd.py",
+]
+
+# Build collect_ignore_glob dynamically based on what's available
+collect_ignore_glob = []
+
+if not HAS_PYTORCH:
+    collect_ignore_glob.extend(_PYTORCH_PATTERNS)
+
+if not HAS_TENSORFLOW:
+    collect_ignore_glob.extend(_TENSORFLOW_PATTERNS)
+
+if not (HAS_TENSORFLOW and HAS_PYTORCH):
+    collect_ignore_glob.extend(_BOTH_BACKENDS_PATTERNS)
+
 
 # ============================================================================
 # Pytest hooks and configuration
 # ============================================================================
+
+def pytest_ignore_collect(collection_path, config):
+    """
+    Hook to ignore test files that would fail to import due to missing backends.
+    This is more reliable than collect_ignore_glob for complex cases.
+    """
+    path_str = str(collection_path)
+
+    # Check PyTorch patterns
+    if not HAS_PYTORCH:
+        if "_pytorch.py" in path_str or "_pytorch" in path_str.lower():
+            return True
+
+    # Check TensorFlow patterns
+    if not HAS_TENSORFLOW:
+        # Check against known TF-specific files
+        tf_files = [
+            "test_bench.py", "test_benchmark_base.py",
+            "test_sample_boundary.py", "test_weights_boundary.py",
+            "test_ihvp.py", "test_ihvp_factory.py",
+            "test_inf_abstract.py", "test_model_wrapper.py",
+            "test_backend_tensorflow.py",
+            "test_first_order_influence_calculator.py",
+            "test_second_order_influence.py",
+            "test_arnoldi_influence_calculator.py",
+            "test_representer_point_l2.py", "test_rps_lje.py",
+            "test_tracin.py",
+            "test_nearest_neighbors.py", "test_sorted_dict.py",
+            "test_tf_operations.py",
+            "utils_test.py",
+        ]
+        for tf_file in tf_files:
+            if path_str.endswith(tf_file):
+                # Make sure it's not a pytorch version
+                if "_pytorch" not in path_str:
+                    return True
+
+    # Check both-backends patterns
+    if not (HAS_TENSORFLOW and HAS_PYTORCH):
+        both_files = ["test_backend_parity.py", "test_backtracking.py", "test_cgd.py"]
+        for both_file in both_files:
+            if path_str.endswith(both_file):
+                return True
+
+    return None  # Don't ignore, let pytest handle it
+
 
 def pytest_addoption(parser):
     """Add command-line options for backend selection."""
@@ -205,6 +316,7 @@ def pytest_report_header(config):
         "Influenciae Backend Status:",
         f"  TensorFlow: {'available' if HAS_TENSORFLOW else 'NOT available'}",
         f"  PyTorch: {'available' if HAS_PYTORCH else 'NOT available'}",
+        f"  Ignored patterns: {len(collect_ignore_glob)} pattern(s)",
     ]
     backend_option = config.getoption("--backend", default=None)
     if backend_option:
