@@ -1,0 +1,150 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Influenciae"
+version = "0.3.0"
+description = "A Framework-Agnostic Toolbox for Influence Functions"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "DEEL Core Team", email = "agustin-martin.picard@irt-saintexupery.com"}
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core dependencies - no specific backend required
+dependencies = [
+    "numpy>=1.19.0",
+    "matplotlib>=3.3.0",
+]
+
+[project.optional-dependencies]
+# Backend-specific dependencies
+tensorflow = [
+    "tensorflow>=2.7.0,<2.16.0",
+]
+pytorch = [
+    "torch>=1.9.0",
+]
+# Install both backends
+all = [
+    "tensorflow>=2.7.0,<2.16.0",
+    "torch>=1.9.0",
+]
+
+# Development dependencies
+tests = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pylint>=2.15.0",
+]
+docs = [
+    "mkdocs>=1.4.0",
+    "mkdocs-material>=8.0.0",
+    "numkdoc>=0.0.1",
+]
+dev = [
+    "Influenciae[tests,docs]",
+    "tox>=4.0.0",
+    "bump2version>=1.0.0",
+    "mypy>=1.0.0",
+    "mypy-extensions>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/deel-ai/influenciae"
+Documentation = "https://deel-ai.github.io/influenciae/"
+Repository = "https://github.com/deel-ai/influenciae"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["deel.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+]
+markers = [
+    "tensorflow: mark test as requiring TensorFlow backend",
+    "pytorch: mark test as requiring PyTorch backend",
+    "backend_agnostic: mark test as framework-agnostic",
+    "slow: mark test as slow-running",
+    "requires_both_backends: mark test as requiring both backends",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["deel/influenciae"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+[tool.pylint.messages_control]
+disable = [
+    "R0903",  # allows to expose only one public method
+    "R0914",  # allow multiples local variables
+    "C0103",  # allow variable name such as `x` and `y`
+    "E0401",  # pending issue with pylint see pylint#2603
+    "E1123",  # issues between pylint and tensorflow since 2.2.0
+    "E1120",  # see https://github.com/PyCQA/pylint/issues/3613
+    "W0511",  # allow todos
+    "W0221",  # allow arguments override
+]
+
+[tool.pylint.format]
+max-line-length = 120
+max-args = 10
+max-attributes = 12
+
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = false
+
+[tool.mypy]
+check_untyped_defs = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "numpy.*",
+    "sklearn.*",
+    "tensorflow.*",
+    "torch.*",
+]
+ignore_missing_imports = true

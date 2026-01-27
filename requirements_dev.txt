@@ -1,14 +1,29 @@
-docutils
-Markdown
-mkdocs
-mkdocs-material
-Pygments
-pylint
-pymdown-extensions
-pytest
-pytest-cov
-numkdoc
-tox
-bump2version
-mypy
-mypy-extensions
+# Influenciae Development Requirements
+# =====================================
+# Install with: pip install -r requirements_dev.txt
+#
+# For backend-specific testing, also install:
+#   pip install tensorflow>=2.7.0,<2.16.0  # For TensorFlow tests
+#   pip install torch>=1.9.0               # For PyTorch tests
+
+# Documentation
+docutils>=0.18.0
+Markdown>=3.4.0
+mkdocs>=1.4.0
+mkdocs-material>=8.0.0
+Pygments>=2.14.0
+pymdown-extensions>=9.0.0
+numkdoc>=0.0.1
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Linting and type checking
+pylint>=2.15.0
+mypy>=1.0.0
+mypy-extensions>=1.0.0
+
+# Build and release
+tox>=4.0.0
+bump2version>=1.0.0
