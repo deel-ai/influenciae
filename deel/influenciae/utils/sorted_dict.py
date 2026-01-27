@@ -11,7 +11,7 @@ from typing import Tuple, Any, Optional, Union
 
 import numpy as np
 
-from ..common import (
+from ..common.backend import (
     BaseBackend,
     Framework,
     get_backend,

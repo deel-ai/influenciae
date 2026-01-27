@@ -12,7 +12,7 @@ This module is backend-agnostic and supports both TensorFlow and PyTorch.
 from abc import abstractmethod
 
 from .sorted_dict import BatchSort, ORDER
-from ..common import (
+from ..common.backend import (
     BaseBackend,
     Framework,
     get_backend,

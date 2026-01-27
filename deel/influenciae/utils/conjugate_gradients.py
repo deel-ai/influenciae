@@ -13,7 +13,7 @@ https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditio
 """
 import numpy as np
 
-from ..common import BaseBackend, get_backend_for_tensor, Framework
+from ..common.backend import BaseBackend, get_backend_for_tensor, Framework
 from ..types import Callable, Optional, Any
 
 
