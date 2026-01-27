@@ -3,11 +3,34 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 import numpy as np
-import tensorflow as tf
 
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
-from tensorflow.keras.utils import to_categorical
+# Lazy imports for framework-agnostic testing
+# TensorFlow imports are deferred to avoid import errors when TF is not installed
+tf = None
+Sequential = None
+Input = None
+Conv2D = None
+Dense = None
+Flatten = None
+to_categorical = None
+
+
+def _ensure_tensorflow():
+    """Lazily import TensorFlow and Keras components."""
+    global tf, Sequential, Input, Conv2D, Dense, Flatten, to_categorical
+    if tf is None:
+        import tensorflow as _tf
+        tf = _tf
+        from tensorflow.keras.models import Sequential as _Sequential
+        from tensorflow.keras.layers import Input as _Input, Conv2D as _Conv2D, Dense as _Dense, Flatten as _Flatten
+        from tensorflow.keras.utils import to_categorical as _to_categorical
+        Sequential = _Sequential
+        Input = _Input
+        Conv2D = _Conv2D
+        Dense = _Dense
+        Flatten = _Flatten
+        to_categorical = _to_categorical
+
 
 from deel.influenciae.common.base_influence import BaseInfluenceCalculator
 
@@ -55,10 +78,12 @@ def assert_tensor_equal(tensor1, tensor2):
     except ImportError:
         pass
     # TensorFlow tensors
+    _ensure_tensorflow()
     return tf.debugging.assert_equal(tensor1, tensor2)
 
 
 def generate_data(x_shape=(32, 32, 3), num_labels=10, samples=100):
+    _ensure_tensorflow()
     x = np.random.rand(samples, *x_shape).astype(np.float32)
     y = to_categorical(np.random.randint(0, num_labels, samples), num_labels)
 
@@ -66,6 +91,7 @@ def generate_data(x_shape=(32, 32, 3), num_labels=10, samples=100):
 
 
 def generate_model(input_shape=(32, 32, 3), output_shape=10):
+    _ensure_tensorflow()
     model = Sequential()
     model.add(Input(shape=input_shape))
     model.add(Conv2D(4, kernel_size=(2, 2),
@@ -80,6 +106,7 @@ def generate_model(input_shape=(32, 32, 3), output_shape=10):
 
 def jacobian_ground_truth(input_vector, kernel_matrix, target):
     """Symbolically calculates the jacobian for the small 2 layer network in the tests"""
+    _ensure_tensorflow()
     # input_vector = [A0, A1, A2]
     # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
     # target = y
@@ -105,6 +132,7 @@ def jacobian_ground_truth(input_vector, kernel_matrix, target):
 
 def hessian_ground_truth(input_vector, kernel_matrix):
     """Symbolically calculates the hessian for the small 2 layer network in the tests"""
+    _ensure_tensorflow()
     # input_vector = [A0, A1, A2]
     # kernel_matrix = [W03, W04, W13, W14, W23, W24, W35, W45]
     h1 = 2. * tf.square(input_vector[0] * kernel_matrix[0] + input_vector[1] * kernel_matrix[2] +
@@ -197,8 +225,10 @@ def assert_inheritance(
             import torch
             d_type = torch.float64
         else:
+            _ensure_tensorflow()
             d_type = tf.float64
     else:
+        _ensure_tensorflow()
         d_type = tf.float64
     top_k_dataset = method.top_k(test_set, train_set, k=3, d_type=d_type)
     iter_top_k = iter(top_k_dataset)
