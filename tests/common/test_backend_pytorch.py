@@ -100,9 +100,9 @@ class TestPyTorchBackendBasics:
         """Test getting all layers."""
         layers = backend.get_layers(simple_model)
 
-        # modules() returns model + all children
-        # Sequential(Linear, ReLU, Linear) = 4 modules
-        assert len(layers) == 4
+        # children() returns direct child modules
+        # Sequential(Linear, ReLU, Linear) = 3 children
+        assert len(layers) == 3
 
     def test_get_children(self, backend, simple_model):
         """Test getting direct children."""
