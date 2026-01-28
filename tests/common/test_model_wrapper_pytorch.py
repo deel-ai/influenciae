@@ -11,7 +11,50 @@ import itertools
 
 from deel.influenciae.common import BaseInfluenceModel
 from deel.influenciae.common import InfluenceModel
-from tests.utils_test import almost_equal, assert_tensor_equal
+
+# Check if PyTorch is available
+try:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+    import numpy as np
+    HAS_PYTORCH = True
+except (ImportError, OSError):
+    HAS_PYTORCH = False
+    torch = None
+    nn = None
+
+pytestmark = pytest.mark.skipif(
+    not HAS_PYTORCH,
+    reason="PyTorch is required for these tests"
+)
+
+
+# -------------------------
+# Helpers
+# -------------------------
+def almost_equal(a, b, epsilon: float = 1e-6) -> bool:
+    """Match the TF test style: max absolute error <= epsilon."""
+    # Handle PyTorch tensors
+    if torch and isinstance(a, torch.Tensor):
+        a = a.detach().cpu().numpy()
+    if torch and isinstance(b, torch.Tensor):
+        b = b.detach().cpu().numpy()
+    # Handle lists/tuples
+    if isinstance(a, (list, tuple)):
+        a = np.array(a)
+    if isinstance(b, (list, tuple)):
+        b = np.array(b)
+    return np.sum(np.abs(a - b)) < epsilon
+
+
+def assert_tensor_equal(tensor1, tensor2):
+    """Assert two tensors are equal. Works with PyTorch tensors."""
+    if torch and isinstance(tensor1, torch.Tensor):
+        tensor1 = tensor1.detach().cpu().numpy()
+    if torch and isinstance(tensor2, torch.Tensor):
+        tensor2 = tensor2.detach().cpu().numpy()
+    np.testing.assert_array_equal(tensor1, tensor2)
 
 # Check if PyTorch is available
 try:

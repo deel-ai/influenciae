@@ -32,7 +32,16 @@ from deel.influenciae.common import (
     CGDIHVPFactory,
     LissaIHVPFactory
 )
-from tests.utils_test import almost_equal
+
+
+# -------------------------
+# Helpers
+# -------------------------
+def almost_equal(a: torch.Tensor, b: torch.Tensor, epsilon: float = 1e-6) -> bool:
+    """Match the TF test style: max absolute error <= epsilon."""
+    a = a.detach()
+    b = b.detach()
+    return torch.max(torch.abs(a - b)).item() <= epsilon
 
 
 def test_exact_factory():

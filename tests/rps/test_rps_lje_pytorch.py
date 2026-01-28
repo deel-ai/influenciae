@@ -24,7 +24,6 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ExactIHVPFactory
 from deel.influenciae.rps import RepresenterPointLJE
 
-from ..utils_test import assert_inheritance
 
 
 # -------------------------
@@ -394,4 +393,7 @@ def test_inheritance_pytorch():
     rps_lje = RepresenterPointLJE(influence_model, train_loader, ExactIHVPFactory(), target_layer=-1)
 
     nb_params = influence_model.nb_params
+
+    # Import here to avoid module-level TensorFlow import in PyTorch-only tests
+    from ..utils_test import assert_inheritance
     assert_inheritance(rps_lje, nb_params, train_loader, test_loader)
