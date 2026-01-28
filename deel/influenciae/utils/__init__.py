@@ -6,18 +6,21 @@
 Utility classes and functions.
 
 This module uses lazy imports to avoid requiring TensorFlow/PyTorch
-when only basic utilities are needed.
+when only basic utilities are needed, and to avoid circular import issues.
 """
 import importlib
 from typing import TYPE_CHECKING
 
-# Always available (pure Python / numpy only)
-from .conjugate_gradients import conjugate_gradients_solve
-from .sorted_dict import BatchSort, ORDER
-from .nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 
 # Lazy imports for framework-specific utilities
 _LAZY_IMPORTS = {
+    # Utilities that cause circular imports
+    'BatchSort': '.sorted_dict',
+    'ORDER': '.sorted_dict',
+    'BaseNearestNeighbors': '.nearest_neighbors',
+    'LinearNearestNeighbors': '.nearest_neighbors',
+    # Conjugate gradients (imports from common, which imports from utils - circular)
+    'conjugate_gradients_solve': '.conjugate_gradients',
     # TensorFlow operations
     'find_layer': '.tf_operations',
     'from_layer_name_to_layer_idx': '.tf_operations',
