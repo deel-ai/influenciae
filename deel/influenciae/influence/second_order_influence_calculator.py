@@ -191,6 +191,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing the sum of all the interactions of each point we are removing with each other point
             of the group
         """
+        local_ihvp: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP]
         if isinstance(self.ihvp_calculator, ExactIHVP):
             local_ihvp = ExactIHVP(self.model, dataset)
         elif isinstance(self.ihvp_calculator, ConjugateGradientDescentIHVP):

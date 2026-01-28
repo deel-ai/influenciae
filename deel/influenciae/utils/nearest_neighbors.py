@@ -110,9 +110,9 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             The backend to use for tensor operations. Can be a BaseBackend instance,
             a Framework enum (TENSORFLOW or PYTORCH), or None to infer from data.
         """
-        self.dataset = None
-        self.dot_product_fun = None
-        self.batched_sorted_dict = None
+        self.dataset: Optional[Any] = None
+        self.dot_product_fun: Optional[Callable[[Any, Any], Any]] = None
+        self.batched_sorted_dict: Optional[BatchSort] = None
         self._backend_param = backend
         self._backend: Optional[BaseBackend] = None
 

@@ -21,7 +21,7 @@ class BenchmarkDisplay:
     """
 
     @staticmethod
-    def load_bench_result(path: str) -> Dict[str, Tuple[np.array, np.array, float]]:
+    def load_bench_result(path: str) -> Dict[str, Tuple[np.ndarray, np.ndarray, float]]:
         """
         Loads an evaluation's or whole benchmark's results.
 
@@ -39,7 +39,7 @@ class BenchmarkDisplay:
         return result
 
     @staticmethod
-    def plot_bench_from_path(path: str, path_to_save: str = None) -> None:
+    def plot_bench_from_path(path: str, path_to_save: Optional[str] = None) -> None:
         """
         Loads the results from a file on disk, plots it and optionally saves the figure to the disk.
 
@@ -55,7 +55,7 @@ class BenchmarkDisplay:
 
     @staticmethod
     def plot_bench(
-            result: Dict[str, Tuple[np.array, np.array, float]],
+            result: Dict[str, Tuple[np.ndarray, np.ndarray, float]],
             path_to_save: Optional[str] = None,
             title: Optional[str] = None
     ) -> None:

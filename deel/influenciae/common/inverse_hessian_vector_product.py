@@ -477,7 +477,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
     ):
         super().__init__(model, train_dataset)
         self.n_opt_iters = n_opt_iters
-        self._batch_shape_tensor = None
+        self._batch_shape_tensor: Optional[Tuple[int, ...]] = None
         self.extractor_layer = extractor_layer
 
         if feature_extractor is None:

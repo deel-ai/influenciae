@@ -11,7 +11,7 @@ Supports both TensorFlow and PyTorch models through the backend abstraction laye
 """
 from .base_representer_point import BaseRepresenterPoint
 from ..common import Framework
-from ..types import Tuple, Callable, Union, Any
+from ..types import Tuple, Callable, Union, Any, Optional
 
 
 class RepresenterPointL2(BaseRepresenterPoint):
@@ -64,7 +64,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         self.lambda_regularization = lambda_regularization
         self.scaling_factor = scaling_factor
         self.epochs = epochs
-        self.linear_layer = None
+        self.linear_layer: Optional[Any] = None
         self._train_last_layer(self.epochs)
 
     def _train_last_layer(self, epochs: int):
@@ -92,12 +92,13 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
         self.linear_layer = self._create_surrogate_model_tensorflow()
         optimizer = BacktrackingLineSearch(
-            batches_per_epoch=self.n_train / self.backend.get_dataset_batch_size(self.train_set),
+            batches_per_epoch=int(self.n_train / self.backend.get_dataset_batch_size(self.train_set)),
             scaling_factor=self.scaling_factor
         )
         mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
         self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
+        assert self.linear_layer is not None  # Type narrowing for mypy
         for _ in range(epochs):
             for x_batch, _ in self.train_set:
                 loss, grads, z_batch, y_target = self._learn_step_last_layer_tensorflow(x_batch, mse_loss)
@@ -113,12 +114,13 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
         device = next(self.model.parameters()).device
         self.linear_layer = self._create_surrogate_model_pytorch().to(device)
+        assert self.linear_layer is not None  # Type narrowing for mypy
         mse_loss = nn.MSELoss(reduction="mean")
 
         # Create the backtracking line search optimizer
         optimizer = BacktrackingLineSearchPyTorch(
             params=self.linear_layer.parameters(),
-            batches_per_epoch=self.n_train / len(next(iter(self.train_set))[0]),
+            batches_per_epoch=int(self.n_train / len(next(iter(self.train_set))[0])),
             scaling_factor=self.scaling_factor
         )
 
@@ -159,6 +161,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
                 # Define closure for loss re-evaluation
                 def closure():
+                    assert self.linear_layer is not None  # Already checked earlier
                     with torch.no_grad():
                         logits_new = self.linear_layer(z_batch)
                         mse_new = mse_loss(logits_new, y_target)
@@ -195,6 +198,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         """
         import tensorflow as tf
 
+        assert self.linear_layer is not None  # Initialized in __init__
         z_batch = self.feature_extractor(x_batch)
         y_target = self.model.layers[-1](z_batch)
         with tf.GradientTape() as tape:
@@ -302,6 +306,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         """TensorFlow-specific alpha computation."""
         import tensorflow as tf
 
+        assert self.linear_layer is not None  # Initialized in __init__
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
             tape.watch(self.linear_layer.weights)
             logits = self.linear_layer(z_batch)
@@ -330,6 +335,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         """PyTorch-specific alpha computation (stable + matches TF intent)."""
         import torch
 
+        assert self.linear_layer is not None  # Initialized in __init__
         device = z_batch.device
         dtype = z_batch.dtype
         y_batch = y_batch.to(device=device)

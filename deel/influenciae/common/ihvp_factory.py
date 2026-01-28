@@ -95,8 +95,8 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
     ):
         self.n_cgd_iters = n_cgd_iters
         if isinstance(feature_extractor, int):
-            self.extractor_layer = feature_extractor
-            self.feature_extractor = None
+            self.extractor_layer: Union[str, int] = feature_extractor
+            self.feature_extractor: Optional[Any] = None
         else:
             assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
                                                 "provide the id of the last extracted layer"
@@ -161,8 +161,8 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
         self.damping = damping
         self.scale = scale
         if isinstance(feature_extractor, int):
-            self.extractor_layer = feature_extractor
-            self.feature_extractor = None
+            self.extractor_layer: Union[str, int] = feature_extractor
+            self.feature_extractor: Optional[Any] = None
         else:
             assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
                                                 "provide the id of the last extracted layer"

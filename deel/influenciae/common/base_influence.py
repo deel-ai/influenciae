@@ -44,7 +44,7 @@ class SelfInfluenceCalculator:
     """
 
     # Backend should be set by subclasses that have access to a model
-    backend: BaseBackend = None
+    backend: Optional[BaseBackend] = None
 
     @abstractmethod
     def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:

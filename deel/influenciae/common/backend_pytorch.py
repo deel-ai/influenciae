@@ -300,7 +300,7 @@ class PyTorchBackend(BaseBackend):
         # Cross-batch: select columns => shape (B_tensor, B_idx)
         return tensor.index_select(dim=1, index=indices.flatten())
 
-    def get_output_shape(self, model: nn.Module) -> Tuple[int, ...]:
+    def get_output_shape(self, model: nn.Module) -> Tuple[Optional[int], ...]:
         """Get the output shape of a model."""
         # For PyTorch, we need to infer output shape by looking at the last layer
         # or running a forward pass with dummy data
@@ -607,7 +607,7 @@ class PyTorchBackend(BaseBackend):
                             collated.append(elements)
                     batches.append(tuple(collated))
                 else:
-                    batches.append(batch_items)
+                    batches.append(tuple(batch_items) if isinstance(batch_items, list) else batch_items)
             return batches
         else:
             # Assume it's a PyTorch Dataset

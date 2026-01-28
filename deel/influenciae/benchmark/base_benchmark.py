@@ -135,7 +135,7 @@ class MislabelingDetectorEvaluator:
             seed: int = 0,
             verbose: bool = True,
             use_tensorboard: bool = False
-    ) -> Dict[str, Tuple[np.array, np.array, float]]:
+    ) -> Dict[str, Tuple[np.ndarray, np.ndarray, float]]:
         """
         Performs the whole benchmark for a group of influence calculator techniques and a number of
         evaluations for each of them (for statistical significance).
@@ -185,7 +185,7 @@ class MislabelingDetectorEvaluator:
             path_to_save: Optional[str] = None,
             use_tensorboard: bool = False,
             method_name: Optional[str] = None
-    ) -> Tuple[np.array, np.array, float]:
+    ) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Performs one benchmark evaluation over one influence calculator technique the specified number
         of times (for statistical significance).
@@ -230,6 +230,7 @@ class MislabelingDetectorEvaluator:
         for index in range(nbr_of_evaluation):
 
             if use_tensorboard:
+                assert path_to_save is not None  # Ensured by earlier check
                 experiment_name = method_name + "_" + str(index)
 
                 file_writer = tf.summary.create_file_writer(path_to_save + "/" + method_name + "/seed" + str(index),
@@ -278,6 +279,7 @@ class MislabelingDetectorEvaluator:
         curves, mean_curve, roc = self.__build(curves)
 
         if use_tensorboard:
+            assert path_to_save is not None  # Ensured by earlier check
             file_writer = tf.summary.create_file_writer(path_to_save + "/synthesis/" + method_name + "/")
             with file_writer.as_default():
                 tf.summary.scalar("roc_mean", roc, 0)
@@ -321,7 +323,7 @@ class MislabelingDetectorEvaluator:
         return curves, mean_curve, roc
 
     @staticmethod
-    def _compute_roc(curve: np.array) -> float:
+    def _compute_roc(curve: np.ndarray) -> float:
         """
         Computes the ROC value of the curve.
 
@@ -353,7 +355,7 @@ class MislabelingDetectorEvaluator:
         random.seed(seed)
 
     @staticmethod
-    def __compute_curve(sorted_influences_indexes: np.ndarray, noisy_label_indexes: np.ndarray) -> np.array:
+    def __compute_curve(sorted_influences_indexes: np.ndarray, noisy_label_indexes: np.ndarray) -> np.ndarray:
         """
         Computes the mislabeled sample detection curve using the indices of the samples sorted
         by their self-influence and the ground-truth indices of the target points.
@@ -378,7 +380,7 @@ class MislabelingDetectorEvaluator:
 
         return curve
 
-    def build_noisy_training_dataset(self) -> Tuple[tf.data.Dataset, np.array]:
+    def build_noisy_training_dataset(self) -> Tuple[tf.data.Dataset, Tuple[np.ndarray, ...]]:
         """
         Generates a noisy version of the object's own dataset. In particular, it will include noise
         in the label information (i.e. the label will be switched at random). More noise will
@@ -415,7 +417,7 @@ class MislabelingDetectorEvaluator:
         return noisy_dataset, noise_indexes
 
     @staticmethod
-    def __save(path_to_save: str, curves: np.array, mean_curve: np.array, roc: float) -> None:
+    def __save(path_to_save: str, curves: np.ndarray, mean_curve: np.ndarray, roc: float) -> None:
         """
         Saves an evaluation's results to the disk.
 
@@ -456,8 +458,8 @@ class ModelsSaver(tf.keras.callbacks.Callback):
         self.epochs_to_save = epochs_to_save
         self.optimizer = optimizer
 
-        self.models = []
-        self.learning_rates = []
+        self.models: List[Any] = []
+        self.learning_rates: List[float] = []
 
         if saving_path is not None and not os.path.exists(saving_path):
             os.mkdir(saving_path)

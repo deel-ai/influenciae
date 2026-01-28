@@ -22,7 +22,7 @@ from ..trac_in import TracIn
 from ..rps import RepresenterPointL2
 from ..boundary_based import WeightsBoundaryCalculator, SampleBoundaryCalculator
 
-from ..types import Any, Union, Callable
+from ..types import Any, Union, Callable, Optional
 
 
 class InfluenceCalculatorFactory:
@@ -32,7 +32,7 @@ class InfluenceCalculatorFactory:
 
     @abstractmethod
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> BaseInfluenceCalculator:
+              train_info: Optional[Any] = None) -> BaseInfluenceCalculator:
         """
         Builds an instance of an influence calculator class following the provided model, training dataset
         and additional information.
@@ -122,6 +122,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
                 np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
             dataset_hessian = training_dataset.take(take_size)
 
+        ihvp_calculator: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP]
         if self.ihvp_mode == 'exact':
             ihvp_calculator = ExactIHVP(influence_model, dataset_hessian)
         elif self.ihvp_mode == 'cgd':
@@ -204,6 +205,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
             batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
             dataset_hessian = training_dataset.unbatch().take(self.dataset_hessian_size).batch(batch_size)
 
+        ihvp_calculator_factory: Union[ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory]
         if self.ihvp_mode == 'exact':
             ihvp_calculator_factory = ExactIHVPFactory()
         elif self.ihvp_mode == 'cgd':
@@ -235,7 +237,7 @@ class TracInFactory(InfluenceCalculatorFactory):
         self.loss_function = loss_function
 
     def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Any) -> TracIn:
+              train_info: Optional[Any] = None) -> TracIn:
         """
         Builds an instance of the TracIn class following the provided model, training dataset
         and additional information.
@@ -427,7 +429,7 @@ class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
             start_layer: int = -1,
             dataset_hessian_size: int = -1,
             loss_function: Callable = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
-            dtype: tf.dtypes = tf.float32
+            dtype: Any = tf.float32
     ):
         self.subspace_dim = subspace_dim
         self.force_hermitian = force_hermitian

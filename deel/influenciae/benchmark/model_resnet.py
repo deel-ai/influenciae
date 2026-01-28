@@ -20,7 +20,7 @@ Reference material for extended functionality:
 Implementation Adapted from: github.com/raghakot/keras-resnet
 Implementation Adapted from: github.com/keras-team/keras-contrib
 """
-import six
+import six  # type: ignore[import-untyped]
 
 from tensorflow.keras import Model  #pylint:  disable=E0611
 from tensorflow.keras import backend as K  #pylint:  disable=E0611

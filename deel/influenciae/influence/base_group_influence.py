@@ -52,7 +52,7 @@ class BaseGroupInfluenceCalculator:
         choosing the amount of samples for the hessian.
     """
     # Backend should be set by subclasses that have access to a model
-    backend: BaseBackend = None
+    backend: Optional[BaseBackend] = None
 
     def __init__(
             self,
@@ -71,7 +71,9 @@ class BaseGroupInfluenceCalculator:
             # Use backend-agnostic dataset operations
             batch_size = self.backend.get_dataset_batch_size(dataset)
             unbatched = self.backend.unbatch_dataset(dataset)
-            shuffled = self.backend.shuffle_dataset(unbatched, shuffle_buffer_size)
+            # Ensure shuffle_buffer_size has a default value
+            buffer_size = shuffle_buffer_size if shuffle_buffer_size is not None else 10000
+            shuffled = self.backend.shuffle_dataset(unbatched, buffer_size)
             taken = self.backend.take_dataset(shuffled, n_samples_for_hessian)
             dataset_to_estimate_hessian = self.backend.batch_dataset(taken, batch_size)
 

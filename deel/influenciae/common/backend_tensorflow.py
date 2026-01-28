@@ -194,7 +194,7 @@ class TensorFlowBackend(BaseBackend):
         """Gather values from tensor along an axis using indices."""
         return tf.gather(tensor, indices, axis=axis, batch_dims=batch_dims)
 
-    def get_output_shape(self, model: tf.keras.Model) -> Tuple[int, ...]:
+    def get_output_shape(self, model: tf.keras.Model) -> Tuple[Optional[int], ...]:
         """Get the output shape of a model."""
         return tuple(model.output_shape)
 

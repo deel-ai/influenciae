@@ -175,7 +175,7 @@ def dataset_to_tensor(dataset: tf.data.Dataset) -> tf.Tensor:
         A TF tensor with the evaluated dataset.
     """
     assert_batched_dataset(dataset)
-    if isinstance(dataset.element_spec, Tuple):
+    if isinstance(dataset.element_spec, tuple):
         tensor = [list(dataset.map(lambda *w: w[i]).unbatch()) for i in range(len(dataset.element_spec))]  # pylint: disable=W0640
     else:
         tensor = tf.concat(list(dataset), axis=0)
@@ -230,7 +230,7 @@ def array_to_dataset(
     """
     if isinstance(array, np.ndarray):
         array = tf.convert_to_tensor(array, dtype=tf.float32)
-    elif isinstance(array, Tuple) and isinstance(array[0], np.ndarray):
+    elif isinstance(array, tuple) and isinstance(array[0], np.ndarray):
         array = tf.stack(list(
             zip(tf.convert_to_tensor(array[0], dtype=tf.float32), tf.convert_to_tensor(array[1], dtype=tf.float32))
         ), axis=0)

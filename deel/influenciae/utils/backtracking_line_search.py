@@ -10,7 +10,7 @@ Supports both TensorFlow and PyTorch backends.
 """
 from dataclasses import dataclass
 
-from ..types import Callable
+from ..types import Callable, Optional
 
 
 @dataclass()
@@ -196,7 +196,7 @@ if _HAS_TENSORFLOW:
 
 else:
     # TensorFlow not available, define placeholder
-    BacktrackingLineSearch = None
+    BacktrackingLineSearch: Optional[type] = None
 
 
 # =============================================================================
@@ -232,7 +232,7 @@ class BacktrackingLineSearchPyTorch:
             batches_per_epoch: int,
             scaling_factor: float = 0.1,
             beta: float = 0.9,
-            gamma: float = None,
+            gamma: Optional[float] = None,
             max_eta: float = 10.,
             min_eta: float = 1e-6,
     ):

@@ -27,7 +27,7 @@ from .model_resnet import ResNet
 
 from ..types import Tuple, Union, Any, Optional, List
 
-ssl._create_default_https_context = ssl._create_unverified_context # pylint: disable=W0212
+ssl._create_default_https_context = ssl._create_unverified_context # type: ignore[assignment] # pylint: disable=W0212
 
 
 class ConvNetCIFAR(Sequential):
@@ -230,6 +230,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         _, test_stats = model.evaluate(test_dataset, batch_size=test_batch_size, verbose=0)
 
         if self.epochs_to_save is not None:
+            assert model_saver is not None  # model_saver is initialized when epochs_to_save is not None
             return train_stats, test_stats, model, (model_saver.models, model_saver.learning_rates)
 
         return train_stats, test_stats, model, None

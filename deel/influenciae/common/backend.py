@@ -430,7 +430,7 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def get_output_shape(self, model: Any) -> Tuple[int, ...]:
+    def get_output_shape(self, model: Any) -> Tuple[Optional[int], ...]:
         """
         Get the output shape of a model.
 
