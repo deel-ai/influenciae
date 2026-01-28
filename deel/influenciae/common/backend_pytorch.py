@@ -267,12 +267,17 @@ class PyTorchBackend(BaseBackend):
         if b_tensor == b_idx:
             # Row-wise gather: preserve shape to match TensorFlow behavior
             # indices should be (B, K) where K is the number of indices per row
+            indices_was_1d = indices.dim() == 1
             if indices.dim() == 1:
                 indices = indices.view(-1, 1)
 
             # Handle 2D tensors: shape (B, N) -> gather along dim 1
             if tensor.dim() == 2:
-                return tensor.gather(dim=1, index=indices)
+                result = tensor.gather(dim=1, index=indices)
+                # If original indices were 1D, squeeze the result to match TF behavior
+                if indices_was_1d:
+                    result = result.squeeze(-1)
+                return result
 
             # Handle 3D+ tensors: shape (B, N, ...) -> gather along dim 1, keep trailing dims
             # We need to expand indices to match tensor dims
@@ -286,7 +291,11 @@ class PyTorchBackend(BaseBackend):
                 expanded_indices = expanded_indices.unsqueeze(-1)
             # Expand to match tensor's trailing dimensions
             expanded_indices = expanded_indices.expand(-1, -1, *trailing_dims)
-            return tensor.gather(dim=1, index=expanded_indices)
+            result = tensor.gather(dim=1, index=expanded_indices)
+            # If original indices were 1D, squeeze the K dimension to match TF behavior
+            if indices_was_1d:
+                result = result.squeeze(1)
+            return result
 
         # Cross-batch: select columns => shape (B_tensor, B_idx)
         return tensor.index_select(dim=1, index=indices.flatten())
