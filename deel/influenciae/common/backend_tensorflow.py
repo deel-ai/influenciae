@@ -357,13 +357,43 @@ class TensorFlowBackend(BaseBackend):
         map_fn: Callable,
         device: Optional[str] = None
     ) -> tf.data.Dataset:
-        """Apply a mapping function to each batch in a dataset."""
-        if device is not None:
-            def device_map_fn(*args):
-                with tf.device(device):
-                    return map_fn(*args)
-            return dataset.map(device_map_fn)
-        return dataset.map(map_fn)
+        """
+        Apply a mapping function to each batch in a dataset.
+
+        By default, this will execute on GPU if available. The mapping function
+        is compiled with tf.function for better performance on GPU.
+
+        Parameters
+        ----------
+        dataset
+            The TensorFlow dataset to map over.
+        map_fn
+            The function to apply to each batch.
+        device
+            Optional device specification. If None, defaults to GPU:0 if available,
+            otherwise CPU:0. Set to "CPU:0" to force CPU execution.
+
+        Returns
+        -------
+        mapped_dataset
+            A new dataset with the mapping function applied.
+        """
+        # Determine target device: prefer GPU if available
+        if device is None:
+            gpus = tf.config.list_physical_devices('GPU')
+            device = '/GPU:0' if gpus else '/CPU:0'
+
+        # Normalize device string format
+        if not device.startswith('/'):
+            device = '/' + device
+
+        # Wrap the map function to execute on the specified device
+        @tf.function
+        def device_map_fn(*args):
+            with tf.device(device):
+                return map_fn(*args)
+
+        return dataset.map(device_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
 
     def cache_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
         """Cache a dataset in memory."""
