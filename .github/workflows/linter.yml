@@ -1,10 +1,9 @@
-name: Lint
+name: pylint
 
 on:
   push:
-    branches: [main, master, develop, agnostic]
+    branches: [main, master]
   pull_request:
-    branches: [main, master, develop]
   workflow_dispatch:
 
 jobs:
