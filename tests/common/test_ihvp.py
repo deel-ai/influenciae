@@ -2,6 +2,7 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
@@ -13,7 +14,49 @@ from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, Lis
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
 
-def test_compute_ihvp_single_batch():
+def _build_exact_ihvp(influence_model, train_dataset):
+    return ExactIHVP(influence_model, train_dataset)
+
+
+def _build_cgd_ihvp(influence_model, train_dataset):
+    return ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_dataset,
+    )
+
+
+def _build_lissa_ihvp(influence_model, train_dataset):
+    return LissaIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_dataset,
+        scale=4.0,
+        damping=1e-4,
+        n_opt_iters=300,
+    )
+
+
+def _build_lissa_hvp(influence_model, train_dataset):
+    return LissaIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_dataset,
+        scale=4.0,
+        damping=1e-4,
+        n_opt_iters=200,
+    )
+
+
+@pytest.mark.parametrize(
+    "ihvp_builder, epsilon",
+    [
+        pytest.param(_build_exact_ihvp, 1e-2, id="exact"),
+        pytest.param(_build_cgd_ihvp, 5e-2, id="cgd"),
+        pytest.param(_build_lissa_ihvp, 1e-1, id="lissa"),
+    ],
+)
+def test_compute_ihvp_single_batch(ihvp_builder, epsilon):
     tf.random.set_seed(42)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
@@ -32,45 +75,25 @@ def test_compute_ihvp_single_batch():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    ## ExactIHVP
-    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
-
-    # test the compute_ihvp_single_batch
-    ihvp_list = []
-    for batch in train_set.batch(1):
-        batch_ihvp = ihvp_calculator._compute_ihvp_single_batch(batch)
-        assert batch_ihvp.shape == (2,1)
-        ihvp_list.append(batch_ihvp)
-    ihvp_batch = tf.concat(ihvp_list, axis=1)
-    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=1e-2)
-
-    ## ConjugateGradientIHVP
-    ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5))
-
-    # test the compute_ihvp_single_batch
-    ihvp_list = []
-    for batch in train_set.batch(1):
-        batch_ihvp = ihvp_calculator._compute_ihvp_single_batch(batch)
-        assert batch_ihvp.shape == (2,1)
-        ihvp_list.append(batch_ihvp)
-    ihvp_batch = tf.concat(ihvp_list, axis=1)
-    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=5e-2)
-
-    ## LissaIHVP
-    ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                scale=4., damping=1e-4, n_opt_iters=300)
-
-    # test the compute_ihvp_single_batch
+    ihvp_calculator = ihvp_builder(influence_model, train_set.batch(5))
     ihvp_list = []
     for batch in train_set.batch(1):
         batch_ihvp = ihvp_calculator._compute_ihvp_single_batch(batch)
         assert batch_ihvp.shape == (2, 1)
         ihvp_list.append(batch_ihvp)
     ihvp_batch = tf.concat(ihvp_list, axis=1)
-    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=1e-1)
+    assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=epsilon)
 
 
-def test_compute_hvp_single_batch():
+@pytest.mark.parametrize(
+    "ihvp_builder, epsilon, set_hessian",
+    [
+        pytest.param(_build_exact_ihvp, 1e-2, True, id="exact"),
+        pytest.param(_build_cgd_ihvp, 1e-2, False, id="cgd"),
+        pytest.param(_build_lissa_hvp, 1e-2, False, id="lissa"),
+    ],
+)
+def test_compute_hvp_single_batch(ihvp_builder, epsilon, set_hessian):
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
 
@@ -90,43 +113,16 @@ def test_compute_hvp_single_batch():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_hvp = tf.matmul(ground_truth_hessian, ground_truth_grads)
 
-    ## ExactIHVP
-    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
-
-    # test the compute_hvp_single_batch
-    ihvp_calculator.hessian = tf.linalg.pinv(ihvp_calculator.inv_hessian)
-    hvp_list = []
-    for batch in train_set.batch(1):
-        batch_hvp = ihvp_calculator._compute_hvp_single_batch(batch)
-        assert batch_hvp.shape == (2,1)
-        hvp_list.append(batch_hvp)
-    hvp_batch = tf.concat(hvp_list, axis=1)
-    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=1e-2)
-
-    ## ConjugateGradientIHVP
-    ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5))
-
-    # test the compute_hvp_single_batch
-    hvp_list = []
-    for batch in train_set.batch(1):
-        batch_hvp = ihvp_calculator._compute_hvp_single_batch(batch)
-        assert batch_hvp.shape == (2,1)
-        hvp_list.append(batch_hvp)
-    hvp_batch = tf.concat(hvp_list, axis=1)
-    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=1e-2)
-
-    ## LissaIHVP
-    ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                scale=4., damping=1e-4, n_opt_iters=200)
-
-    # test the compute_hvp_single_batch
+    ihvp_calculator = ihvp_builder(influence_model, train_set.batch(5))
+    if set_hessian:
+        ihvp_calculator.hessian = tf.linalg.pinv(ihvp_calculator.inv_hessian)
     hvp_list = []
     for batch in train_set.batch(1):
         batch_hvp = ihvp_calculator._compute_hvp_single_batch(batch)
         assert batch_hvp.shape == (2, 1)
         hvp_list.append(batch_hvp)
     hvp_batch = tf.concat(hvp_list, axis=1)
-    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=1e-2)
+    assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=epsilon)
 
 
 def test_exact_hessian():
