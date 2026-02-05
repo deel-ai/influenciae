@@ -969,6 +969,41 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
+    def compute_hvp_batch(
+        self,
+        model: Any,
+        weights: List[Any],
+        loss_function: Callable,
+        v: Any,
+        inputs: Any,
+        targets: Any
+    ) -> Any:
+        """
+        Compute Hessian-vector product for a batch using forward-over-backward AD.
+
+        Parameters
+        ----------
+        model
+            The model.
+        weights
+            List of weight tensors.
+        loss_function
+            The loss function.
+        v
+            The vector to multiply with the Hessian.
+        inputs
+            Input batch.
+        targets
+            Target batch.
+
+        Returns
+        -------
+        hvp
+            The Hessian-vector product summed over the batch.
+        """
+        pass
+
+    @abstractmethod
     def map_fn(self, fn: Callable, elems: Any) -> Any:
         """
         Apply a function to each element in a batch.

@@ -331,7 +331,17 @@ class ForwardOverBackwardHVP:
         else:
             self.weights = weights
 
-    def _reshape_vector(self, grads: Any, weights: List[Any]) -> List[Any]:
+        self._weight_shapes = [self.backend.tensor_shape(w) for w in self.weights]
+        self._weight_slices = []
+        start = 0
+        for shape in self._weight_shapes:
+            size = 1
+            for dim in shape:
+                size *= int(dim)
+            self._weight_slices.append((start, start + size, shape))
+            start += size
+
+    def _reshape_vector(self, grads: Any) -> List[Any]:
         """
         Reshapes the gradient vector to the right shape for being input into the HVP computation.
 
@@ -339,22 +349,15 @@ class ForwardOverBackwardHVP:
         ----------
         grads
             A tensor with the computed gradients.
-        weights
-            A list of weight tensors.
-
         Returns
         -------
         grads_reshape
             A list with the gradients in the right shape.
         """
         grads_reshape = []
-        index = 0
-        for w in weights:
-            shape = self.backend.tensor_shape(w)
-            size = int(self.backend.reduce_prod(self.backend.constant(shape)))
-            g = grads[index:(index + size)]
+        for start, end, shape in self._weight_slices:
+            g = grads[start:end]
             grads_reshape.append(self.backend.reshape(g, shape))
-            index += size
         return grads_reshape
 
     def _sub_call(
@@ -364,24 +367,23 @@ class ForwardOverBackwardHVP:
             y_hessian_current: Any
     ) -> Any:
         """
-        Performs the hessian-vector product for a single feature map.
+        Performs the hessian-vector product for a batch of feature maps.
 
         Parameters
         ----------
         x
             The gradient vector (reshaped to weight shapes) to be multiplied by the hessian matrix.
         feature_maps_hessian_current
-            The current feature map for the hessian calculation.
+            The current batch of feature maps for the hessian calculation.
         y_hessian_current
-            The label corresponding to the current feature map.
+            The labels corresponding to the current feature maps.
 
         Returns
         -------
         hessian_vector_product
-            A tensor containing the result of the hessian-vector product for a given input point and one pair
-            feature map-label.
+            A tensor containing the summed hessian-vector product for the batch.
         """
-        hvp = self.backend.compute_hvp_single(
+        hvp = self.backend.compute_hvp_batch(
             self.model.model,
             self.weights,
             self.model.loss_function,
@@ -389,12 +391,6 @@ class ForwardOverBackwardHVP:
             feature_maps_hessian_current,
             y_hessian_current
         )
-
-        weight = self.backend.cast(
-            self.backend.get_batch_size(feature_maps_hessian_current),
-            self.backend.get_dtype(hvp)
-        )
-        hvp = hvp * weight
 
         return hvp
 
@@ -412,7 +408,7 @@ class ForwardOverBackwardHVP:
         hessian_vector_product
             Tensor with the hessian-vector product
         """
-        x = self._reshape_vector(x_initial, self.model.weights)
+        x = self._reshape_vector(x_initial)
 
         hvp_init = self.backend.zeros((self.model.nb_params,), dtype=self.backend.get_dtype(x_initial))
         nb_hessian = 0
@@ -420,16 +416,9 @@ class ForwardOverBackwardHVP:
 
         for batch in self.train_dataset:
             features_block, labels_block = batch[0], batch[1]
-            batch_size = self.backend.get_batch_size(features_block)
-
-            # Process each sample in the batch
-            for i in range(batch_size):
-                f = self.backend.expand_dims(features_block[i], axis=0)
-                label = self.backend.expand_dims(labels_block[i], axis=0)
-                hvp_current = self._sub_call(x, f, label)
-                hessian_vector_product = hessian_vector_product + hvp_current
-
-            nb_hessian += batch_size
+            hvp_current = self._sub_call(x, features_block, labels_block)
+            hessian_vector_product = hessian_vector_product + hvp_current
+            nb_hessian += self.backend.get_batch_size(features_block)
 
         hessian_vector_product = self.backend.reshape(
             hessian_vector_product,

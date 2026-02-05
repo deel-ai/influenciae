@@ -891,6 +891,18 @@ class PyTorchBackend(BaseBackend):
 
         return hvp
 
+    def compute_hvp_batch(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        v: List[torch.Tensor],
+        inputs: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute Hessian-vector product for a batch using forward-over-backward AD."""
+        return self.compute_hvp_single(model, weights, loss_function, v, inputs, targets)
+
     def map_fn(self, fn: Callable, elems: torch.Tensor) -> torch.Tensor:
         """Apply a function to each element in a batch."""
         results = [fn(elem) for elem in elems]

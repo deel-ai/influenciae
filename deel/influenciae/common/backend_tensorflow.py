@@ -593,6 +593,33 @@ class TensorFlowBackend(BaseBackend):
 
         return hvp
 
+    @tf.function
+    def compute_hvp_batch(
+        self,
+        model: Any,
+        weights: List[tf.Variable],
+        loss_function: Callable,
+        v: List[tf.Tensor],
+        inputs: tf.Tensor,
+        targets: tf.Tensor
+    ) -> tf.Tensor:
+        """Compute Hessian-vector product for a batch using forward-over-backward AD."""
+        with tf.autodiff.ForwardAccumulator(weights, v) as acc:
+            with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+                tape.watch(weights)
+                predictions = model(inputs)
+                loss = loss_function(targets, predictions)
+                loss = tf.reduce_sum(loss)
+            grads = tape.gradient(loss, weights)
+
+        grads = [tf.zeros_like(w) if g is None else g for g, w in zip(grads, weights)]
+        hvp_list = acc.jvp(grads)
+
+        hvp = [tf.reshape(h, shape=(-1,)) for h in hvp_list]
+        hvp = tf.concat(hvp, axis=0)
+
+        return hvp
+
     def map_fn(self, fn: Callable, elems: tf.Tensor) -> tf.Tensor:
         """Apply a function to each element in a batch."""
         return tf.map_fn(fn=fn, elems=elems)
