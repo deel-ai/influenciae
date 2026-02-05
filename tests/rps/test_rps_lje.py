@@ -302,8 +302,10 @@ def test_compute_pairwise_influence_value_multiclass():
     feature_extractor = Sequential(model.layers[:-1])
     feature_maps_train = feature_extractor(inputs_train)
     feature_maps_test = feature_extractor(inputs_test)
-    indices = tf.argmax(rps_lje.perturbed_head(feature_maps_test), axis=1)
+    indices = tf.argmax(rps_lje.original_head(feature_maps_test), axis=1)
     alpha_test = tf.gather(influence_vector[0], indices, axis=1, batch_dims=1)
+    # Reshape alpha_test to (n, 1) for proper row-wise broadcasting
+    alpha_test = tf.reshape(alpha_test, (-1, 1))
     influence_values_test = alpha_test * tf.matmul(feature_maps_train, feature_maps_test, transpose_b=True)
     influence_values_test = tf.transpose(influence_values_test)
 

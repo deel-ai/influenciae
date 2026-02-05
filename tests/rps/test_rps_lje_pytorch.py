@@ -293,7 +293,7 @@ def test_compute_influence_value_from_influence_vector_multiclass_pytorch():
     influence_values_computed = influence_values_computed.squeeze(-1)
 
     alpha, z_batch = rps_lje._compute_influence_vector((inputs_train, targets_train))
-    indices = torch.argmax(rps_lje.perturbed_head(z_batch), dim=1)  # (B,)
+    indices = torch.argmax(rps_lje.original_head(z_batch), dim=1)  # (B,)
     alpha_i = alpha.gather(1, indices.view(-1, 1)).squeeze(1)  # (B,)
     influence_values = alpha_i.abs()
 
