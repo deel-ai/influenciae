@@ -272,6 +272,10 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             head_output = self.backend.forward(self.original_head, feature_maps_test)
             indices = self.backend.argmax(head_output, axis=1)
             gathered_alpha = self.backend.gather_along_axis(alpha, indices, axis=1, batch_dims=1)
+
+            # Reshape gathered_alpha to (n_train, 1) for proper broadcasting with K (n_train, n_test)
+            # This ensures each row j of K is multiplied by gathered_alpha[j]
+            gathered_alpha = self.backend.reshape(gathered_alpha, (-1, 1))
             influence_values = self.backend.multiply(
                 gathered_alpha,
                 self.backend.matmul(feature_maps_train, self.backend.transpose(feature_maps_test))
