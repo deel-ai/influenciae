@@ -41,7 +41,7 @@ def conjugate_gradients_solve(
     operator
         Function implementing A @ x.
     b
-        Right-hand side vector (typically shape (n, 1) or (n,)).
+        Right-hand side vector or matrix (typically shape (n, 1), (n,), or (n, k)).
     x0
         Initial guess. If None, uses zeros_like(b).
     maxiter
@@ -56,7 +56,7 @@ def conjugate_gradients_solve(
     Returns
     -------
     x
-        Approximate solution with the same type as b.
+        Approximate solution with the same type and shape as b.
     """
     # Handle NumPy arrays separately (no backend needed)
     if isinstance(b, np.ndarray):
@@ -69,6 +69,9 @@ def conjugate_gradients_solve(
     if backend.framework == Framework.TENSORFLOW:
         return _conjugate_gradients_tensorflow(operator, b, x0, maxiter, tol, eps, backend)
 
+    is_batched = backend.tensor_ndim(b) > 1
+    axis = 0 if is_batched else None
+
     # Initialize solution
     x = backend.zeros_like(b) if x0 is None else x0
 
@@ -77,14 +80,14 @@ def conjugate_gradients_solve(
     p = backend.copy(r)
 
     # Compute initial squared residual norm
-    rs_old = backend.reduce_sum(backend.multiply(r, r))
+    rs_old = backend.reduce_sum(backend.multiply(r, r), axis=axis)
 
     for _ in range(maxiter):
         # Compute A @ p
         Ap = operator(p)
 
         # Compute step size: alpha = r^T r / (p^T A p)
-        pAp = backend.reduce_sum(backend.multiply(p, Ap))
+        pAp = backend.reduce_sum(backend.multiply(p, Ap), axis=axis)
         denom = backend.maximum(pAp, eps)
         alpha = rs_old / denom
 
@@ -95,17 +98,21 @@ def conjugate_gradients_solve(
         r = r - alpha * Ap
 
         # Compute new squared residual norm
-        rs_new = backend.reduce_sum(backend.multiply(r, r))
+        rs_new = backend.reduce_sum(backend.multiply(r, r), axis=axis)
 
         # Check convergence
         residual_norm = backend.sqrt(rs_new)
-        # Convert to Python scalar for comparison if needed
-        if hasattr(residual_norm, 'item'):
-            residual_norm = residual_norm.item()
-        elif hasattr(residual_norm, 'numpy'):
-            residual_norm = float(residual_norm.numpy())
+        if is_batched:
+            is_converged = backend.reduce_any(residual_norm > tol)
+        else:
+            is_converged = residual_norm > tol
 
-        if residual_norm <= tol:
+        if hasattr(is_converged, 'item'):
+            is_converged = bool(is_converged.item())
+        elif hasattr(is_converged, 'numpy'):
+            is_converged = bool(is_converged.numpy())
+
+        if not is_converged:
             break
 
         # Update search direction: p = r + (rs_new / rs_old) * p
@@ -136,27 +143,30 @@ def _conjugate_gradients_tensorflow(
     # Use a TF scalar for maxiter to avoid mixed Python/Tensor comparisons in graph mode
     maxiter_t = backend.constant(maxiter, dtype=backend.int32_dtype())
 
+    is_batched = backend.tensor_ndim(b) > 1
+    axis = 0 if is_batched else None
+
     x = backend.zeros_like(b) if x0 is None else x0
     r = b - operator(x)
     p = backend.copy(r)
-    rs = backend.reduce_sum(backend.multiply(r, r))
+    rs = backend.reduce_sum(backend.multiply(r, r), axis=axis)
 
     k0 = backend.constant(0, dtype=backend.int32_dtype())
 
     def cond_fn(k, x, r, p, rs):
         # Continue while k < maxiter and ||r|| > tol
-        return backend.logical_and(k < maxiter_t, backend.sqrt(rs) > tol_t)
+        return backend.logical_and(k < maxiter_t, backend.reduce_any(backend.sqrt(rs) > tol_t))
 
     def body_fn(k, x, r, p, rs):
         Ap = operator(p)
-        pAp = backend.reduce_sum(backend.multiply(p, Ap))
+        pAp = backend.reduce_sum(backend.multiply(p, Ap), axis=axis)
         denom = backend.maximum(pAp, eps_t)
         alpha = rs / denom
 
         x = x + alpha * p
         r = r - alpha * Ap
 
-        rs_new = backend.reduce_sum(backend.multiply(r, r))
+        rs_new = backend.reduce_sum(backend.multiply(r, r), axis=axis)
 
         # Avoid rs==0 division edge case
         rs_safe = backend.maximum(rs, eps_t)
@@ -208,23 +218,33 @@ def _conjugate_gradients_numpy(
     """
     x = np.zeros_like(b) if x0 is None else x0.copy()
 
+    is_batched = b.ndim > 1
+    axis = 0 if is_batched else None
+
     r = b - operator(x)
     p = r.copy()
-    rs_old = float(np.sum(r * r))
+    rs_old = np.sum(r * r, axis=axis)
 
     for _ in range(maxiter):
         Ap = operator(p)
-        denom = max(float(np.sum(p * Ap)), eps)
+        pAp = np.sum(p * Ap, axis=axis)
+        denom = np.maximum(pAp, eps)
         alpha = rs_old / denom
 
         x = x + alpha * p
         r = r - alpha * Ap
 
-        rs_new = float(np.sum(r * r))
-        if np.sqrt(rs_new) <= tol:
-            break
+        rs_new = np.sum(r * r, axis=axis)
+        residual_norm = np.sqrt(rs_new)
+        if is_batched:
+            if not np.any(residual_norm > tol):
+                break
+        else:
+            if residual_norm <= tol:
+                break
 
-        p = r + (rs_new / rs_old) * p
+        rs_safe = np.maximum(rs_old, eps)
+        p = r + (rs_new / rs_safe) * p
         rs_old = rs_new
 
     return x
