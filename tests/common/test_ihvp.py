@@ -31,7 +31,7 @@ def _build_lissa_ihvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=4.0,
+        scale=3.5,
         damping=1e-4,
         n_opt_iters=300,
     )
@@ -42,7 +42,7 @@ def _build_lissa_hvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=4.0,
+        scale=3.5,
         damping=1e-4,
         n_opt_iters=200,
     )
