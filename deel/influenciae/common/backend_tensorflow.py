@@ -620,9 +620,11 @@ class TensorFlowBackend(BaseBackend):
 
         return hvp
 
-    def map_fn(self, fn: Callable, elems: tf.Tensor) -> tf.Tensor:
+    def map_fn(self, fn: Callable, elems: tf.Tensor, output_signature: Optional[Any] = None) -> tf.Tensor:
         """Apply a function to each element in a batch."""
-        return tf.map_fn(fn=fn, elems=elems)
+        if output_signature is None:
+            return tf.map_fn(fn=fn, elems=elems)
+        return tf.map_fn(fn=fn, elems=elems, fn_output_signature=output_signature)
 
     def get_dataset_cardinality(self, dataset: tf.data.Dataset) -> int:
         """Get the number of batches in a dataset."""

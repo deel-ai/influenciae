@@ -1004,7 +1004,7 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def map_fn(self, fn: Callable, elems: Any) -> Any:
+    def map_fn(self, fn: Callable, elems: Any, output_signature: Optional[Any] = None) -> Any:
         """
         Apply a function to each element in a batch.
 
@@ -1014,6 +1014,8 @@ class BaseBackend(ABC):
             The function to apply.
         elems
             The elements to map over.
+        output_signature
+            Optional output signature/type spec for the mapped function.
 
         Returns
         -------
