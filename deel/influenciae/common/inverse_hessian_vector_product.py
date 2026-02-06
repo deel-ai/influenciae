@@ -314,12 +314,21 @@ class ForwardOverBackwardHVP:
         A (batched) dataset with the data-points that will be used for the hessian.
     weights
         The target weights on which to calculate the HVP.
+    stochastic_hvp
+        Whether to use a stochastic approximation by sampling a subset of batches.
+    hvp_steps_per_iter
+        Number of batches to use when stochastic_hvp is enabled.
+    hvp_batch_size
+        Optional batch size to rebatch the train dataset for the HVP operator.
     """
     def __init__(
             self,
             model: BaseInfluenceModel,
             train_dataset: Any,
-            weights: Optional[List[Any]] = None
+            weights: Optional[List[Any]] = None,
+            stochastic_hvp: bool = False,
+            hvp_steps_per_iter: int = 1,
+            hvp_batch_size: Optional[int] = None
     ):
         self.model = model
         self.train_dataset = train_dataset
@@ -340,6 +349,17 @@ class ForwardOverBackwardHVP:
                 size *= int(dim)
             self._weight_slices.append((start, start + size, shape))
             start += size
+
+        self.stochastic_hvp = stochastic_hvp
+        self.hvp_steps_per_iter = max(1, int(hvp_steps_per_iter))
+        self.hvp_batch_size = hvp_batch_size
+        self._stochastic_dataset = None
+        if stochastic_hvp:
+            stochastic_dataset = self.train_dataset
+            if hvp_batch_size is not None:
+                stochastic_dataset = self.backend.unbatch_dataset(stochastic_dataset)
+                stochastic_dataset = self.backend.batch_dataset(stochastic_dataset, hvp_batch_size)
+            self._stochastic_dataset = stochastic_dataset
 
     def _reshape_vector(self, grads: Any) -> List[Any]:
         """
@@ -401,30 +421,61 @@ class ForwardOverBackwardHVP:
         Parameters
         ----------
         x_initial
-            The point of the dataset over which this product will be computed
+            The vector (or matrix of column vectors) over which this product will be computed
 
         Returns
         -------
         hessian_vector_product
-            Tensor with the hessian-vector product
+            Tensor with the hessian-vector product. If x_initial has multiple columns, the result
+            is stacked on the last axis.
         """
-        x = self._reshape_vector(x_initial)
+        if self.backend.tensor_ndim(x_initial) == 1:
+            x_matrix = self.backend.expand_dims(x_initial, axis=-1)
+        else:
+            x_matrix = x_initial
 
-        hvp_init = self.backend.zeros((self.model.nb_params,), dtype=self.backend.get_dtype(x_initial))
+        dataset = self.train_dataset
+        if self.stochastic_hvp:
+            dataset = self._stochastic_dataset
+            dataset = self.backend.take_dataset(dataset, self.hvp_steps_per_iter)
+
+        rhs_list = self.backend.transpose(x_matrix)
+
+        def rhs_hvp(inputs):
+            rhs_vec, features_block, labels_block = inputs
+            rhs_weights = self._reshape_vector(rhs_vec)
+            return self._sub_call(rhs_weights, features_block, labels_block)
+
+        hvp_init = self.backend.transpose(self.backend.zeros_like(rhs_list))
         nb_hessian = 0
         hessian_vector_product = hvp_init
 
-        for batch in self.train_dataset:
+        for batch in dataset:
             features_block, labels_block = batch[0], batch[1]
-            hvp_current = self._sub_call(x, features_block, labels_block)
-            hessian_vector_product = hessian_vector_product + hvp_current
+            rhs_count = self.backend.get_batch_size(rhs_list)
+            features_tiled = self.backend.repeat(
+                self.backend.expand_dims(features_block, axis=0),
+                repeats=rhs_count,
+                axis=0
+            )
+            labels_tiled = self.backend.repeat(
+                self.backend.expand_dims(labels_block, axis=0),
+                repeats=rhs_count,
+                axis=0
+            )
+            hvp_batch = self.backend.map_fn(
+                fn=rhs_hvp,
+                elems=(rhs_list, features_tiled, labels_tiled),
+                output_signature=self.backend.get_dtype(rhs_list)
+            )
+            hvp_batch = self.backend.transpose(hvp_batch)
+            hessian_vector_product = hessian_vector_product + hvp_batch
             nb_hessian += self.backend.get_batch_size(features_block)
 
-        hessian_vector_product = self.backend.reshape(
-            hessian_vector_product,
-            (self.model.nb_params, 1)
-        ) / self.backend.cast(nb_hessian, self.backend.get_dtype(hessian_vector_product))
-
+        hessian_vector_product = hessian_vector_product / self.backend.cast(
+            nb_hessian,
+            self.backend.get_dtype(hessian_vector_product)
+        )
 
         return hessian_vector_product
 
@@ -454,6 +505,12 @@ class IterativeIHVP(InverseHessianVectorProduct):
     feature_extractor
         If the feature extraction model is not Sequential, the full model graph must be provided for the computation of
         the different feature maps.
+    stochastic_hvp
+        Whether to use a stochastic approximation by sampling a subset of batches.
+    hvp_steps_per_iter
+        Number of batches to use when stochastic_hvp is enabled.
+    hvp_batch_size
+        Optional batch size to rebatch the train dataset for the HVP operator.
     """
     def __init__(
             self,
@@ -463,6 +520,9 @@ class IterativeIHVP(InverseHessianVectorProduct):
             train_dataset: Any,
             n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Any] = None,
+            stochastic_hvp: bool = False,
+            hvp_steps_per_iter: int = 1,
+            hvp_batch_size: Optional[int] = None,
     ):
         super().__init__(model, train_dataset)
         self.n_opt_iters = n_opt_iters
@@ -488,7 +548,14 @@ class IterativeIHVP(InverseHessianVectorProduct):
             weights_processed=True
         )
         self.weights = self.model.weights
-        self.hessian_vector_product = ForwardOverBackwardHVP(self.model, self.train_set, self.weights)
+        self.hessian_vector_product = ForwardOverBackwardHVP(
+            self.model,
+            self.train_set,
+            self.weights,
+            stochastic_hvp=stochastic_hvp,
+            hvp_steps_per_iter=hvp_steps_per_iter,
+            hvp_batch_size=hvp_batch_size,
+        )
         self.iterative_function = iterative_function
 
     def batch_shape_tensor(self):
@@ -551,22 +618,8 @@ class IterativeIHVP(InverseHessianVectorProduct):
             grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
 
         # Compute the IHVP for each pair feature map-label
-        def cgd_func(single_grad):
-            inv_hessian_vect_product = self.iterative_function(
-                self.hessian_vector_product,
-                self.backend.expand_dims(single_grad, axis=-1),
-                self.n_opt_iters
-            )
-            return inv_hessian_vect_product
-
-        ihvp_list = self.backend.map_fn(fn=cgd_func, elems=grads)
-
-        shape = self.backend.tensor_shape(ihvp_list)
-        if shape[-1] != 1:
-            ihvp_list = self.backend.transpose(ihvp_list)
-        else:
-            ihvp_list = self.backend.transpose(self.backend.squeeze(ihvp_list, axis=-1))
-
+        rhs = self.backend.transpose(grads)
+        ihvp_list = self.iterative_function(self.hessian_vector_product, rhs, self.n_opt_iters)
         return ihvp_list
 
     def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
@@ -594,18 +647,8 @@ class IterativeIHVP(InverseHessianVectorProduct):
             grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
 
         # Compute the HVP for each pair features map - label
-        def single_hvp(single_grad):
-            hvp = self.hessian_vector_product(self.backend.expand_dims(single_grad, axis=-1))
-            return hvp
-
-        hvp_list = self.backend.map_fn(fn=single_hvp, elems=grads)
-
-        shape = self.backend.tensor_shape(hvp_list)
-        if shape[-1] != 1:
-            hvp_list = self.backend.transpose(hvp_list)
-        else:
-            hvp_list = self.backend.transpose(self.backend.squeeze(hvp_list, axis=-1))
-
+        rhs = self.backend.transpose(grads)
+        hvp_list = self.hessian_vector_product(rhs)
         return hvp_list
 
 
@@ -632,6 +675,12 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
     feature_extractor
         If the feature extraction model is not Sequential, the full model graph must be provided for the computation of
         the different feature maps.
+    stochastic_hvp
+        Whether to use a stochastic approximation by sampling a subset of batches.
+    hvp_steps_per_iter
+        Number of batches to use when stochastic_hvp is enabled.
+    hvp_batch_size
+        Optional batch size to rebatch the train dataset for the HVP operator.
     """
     def __init__(
             self,
@@ -640,10 +689,23 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
             train_dataset: Any,
             n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Any] = None,
+            stochastic_hvp: bool = False,
+            hvp_steps_per_iter: int = 1,
+            hvp_batch_size: Optional[int] = None,
     ):
         def iterative_function(operator, v, maxiter):  # pylint: disable=W0613
             return conjugate_gradients_solve(operator, v, x0=None, maxiter=self.n_opt_iters)
-        super().__init__(iterative_function, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
+        super().__init__(
+            iterative_function,
+            model,
+            extractor_layer,
+            train_dataset,
+            n_opt_iters,
+            feature_extractor,
+            stochastic_hvp=stochastic_hvp,
+            hvp_steps_per_iter=hvp_steps_per_iter,
+            hvp_batch_size=hvp_batch_size,
+        )
 
 
 class LissaIHVP(IterativeIHVP):
@@ -677,6 +739,12 @@ class LissaIHVP(IterativeIHVP):
         A damping parameter to regularize a nearly singular operator.
     scale
         A rescaling factor to verify the hypothesis of norm(operator / scale) < 1.
+    stochastic_hvp
+        Whether to use a stochastic approximation by sampling a subset of batches.
+    hvp_steps_per_iter
+        Number of batches to use when stochastic_hvp is enabled.
+    hvp_batch_size
+        Optional batch size to rebatch the train dataset for the HVP operator.
     """
     def __init__(
             self,
@@ -686,9 +754,22 @@ class LissaIHVP(IterativeIHVP):
             n_opt_iters: Optional[int] = 100,
             feature_extractor: Optional[Any] = None,
             damping: float = 1e-4,
-            scale: float = 10.
+            scale: float = 10.,
+            stochastic_hvp: bool = False,
+            hvp_steps_per_iter: int = 1,
+            hvp_batch_size: Optional[int] = None,
     ):
-        super().__init__(self.lissa, model, extractor_layer, train_dataset, n_opt_iters, feature_extractor)
+        super().__init__(
+            self.lissa,
+            model,
+            extractor_layer,
+            train_dataset,
+            n_opt_iters,
+            feature_extractor,
+            stochastic_hvp=stochastic_hvp,
+            hvp_steps_per_iter=hvp_steps_per_iter,
+            hvp_batch_size=hvp_batch_size,
+        )
         self.damping = self.backend.convert_to_tensor(damping, dtype=self.backend.float32_dtype())
         self.scale = self.backend.convert_to_tensor(scale, dtype=self.backend.float32_dtype())
 
