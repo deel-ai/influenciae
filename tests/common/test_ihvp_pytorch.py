@@ -254,6 +254,71 @@ def test_compute_hvp_single_batch_torch():
     assert almost_equal(hvp_batch, gt_hvp, epsilon=1e-2)
 
 
+def test_stochastic_cgd_ihvp_close_to_full_torch():
+    torch.manual_seed(7)
+    model = make_linear_model()
+    loss_fn = nn.MSELoss(reduction="none")
+
+    n = 8
+    inputs, targets = make_dataset(n, seed=7)
+    ds = TensorDataset(inputs, targets)
+
+    train_loader = DataLoader(ds, batch_size=4, shuffle=False)
+    loader_bs2 = DataLoader(ds, batch_size=2, shuffle=False)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_fn)
+
+    full_cgd = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_loader,
+        n_opt_iters=50,
+    )
+    stochastic_cgd = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_loader,
+        n_opt_iters=50,
+        stochastic_hvp=True,
+        hvp_steps_per_iter=4,
+        hvp_batch_size=2,
+    )
+
+    full_list = []
+    stochastic_list = []
+    for batch in loader_bs2:
+        full_list.append(full_cgd._compute_ihvp_single_batch(batch))
+        stochastic_list.append(stochastic_cgd._compute_ihvp_single_batch(batch))
+
+    full_ihvp = torch.cat(full_list, dim=1)
+    stochastic_ihvp = torch.cat(stochastic_list, dim=1)
+    assert almost_equal(stochastic_ihvp, full_ihvp, epsilon=1e-2)
+
+
+def test_batched_rhs_hvp_matches_scalar_torch():
+    torch.manual_seed(11)
+    model = make_linear_model()
+    loss_fn = nn.MSELoss(reduction="none")
+
+    inputs, targets = make_dataset(6, seed=11)
+    ds = TensorDataset(inputs, targets)
+    train_loader = DataLoader(ds, batch_size=3, shuffle=False)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_fn)
+    ihvp_calculator = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_loader,
+        n_opt_iters=20,
+    )
+
+    rhs = torch.randn(ihvp_calculator.model.nb_params, 3)
+    batched = ihvp_calculator.hessian_vector_product(rhs)
+    single = [ihvp_calculator.hessian_vector_product(rhs[:, i:i + 1]) for i in range(3)]
+    stacked = torch.cat(single, dim=1)
+
+    assert almost_equal(batched, stacked, epsilon=1e-5)
+
 def test_exact_hessian_torch():
     torch.manual_seed(7)
     model = make_linear_model()

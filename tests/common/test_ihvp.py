@@ -31,9 +31,9 @@ def _build_lissa_ihvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=3.5,
+        scale=3.0,
         damping=1e-4,
-        n_opt_iters=300,
+        n_opt_iters=500,
     )
 
 
@@ -42,9 +42,9 @@ def _build_lissa_hvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=3.5,
+        scale=3.0,
         damping=1e-4,
-        n_opt_iters=200,
+        n_opt_iters=350,
     )
 
 
@@ -85,6 +85,43 @@ def test_compute_ihvp_single_batch(ihvp_builder, epsilon):
     assert almost_equal(ihvp_batch, ground_truth_ihvp, epsilon=epsilon)
 
 
+def test_stochastic_cgd_ihvp_close_to_full():
+    tf.random.set_seed(123)
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    inputs = tf.random.normal((8, 1, 3))
+    target = tf.random.normal((8, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
+
+    full_cgd = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_set.batch(4),
+        n_opt_iters=50,
+    )
+    stochastic_cgd = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_set.batch(4),
+        n_opt_iters=50,
+        stochastic_hvp=True,
+        hvp_steps_per_iter=4,
+        hvp_batch_size=2,
+    )
+
+    full_list = []
+    stochastic_list = []
+    for batch in train_set.batch(2):
+        full_list.append(full_cgd._compute_ihvp_single_batch(batch))
+        stochastic_list.append(stochastic_cgd._compute_ihvp_single_batch(batch))
+
+    full_ihvp = tf.concat(full_list, axis=1)
+    stochastic_ihvp = tf.concat(stochastic_list, axis=1)
+    assert almost_equal(stochastic_ihvp, full_ihvp, epsilon=1e-1)
+
+
 @pytest.mark.parametrize(
     "ihvp_builder, epsilon, set_hessian",
     [
@@ -123,6 +160,31 @@ def test_compute_hvp_single_batch(ihvp_builder, epsilon, set_hessian):
         hvp_list.append(batch_hvp)
     hvp_batch = tf.concat(hvp_list, axis=1)
     assert almost_equal(hvp_batch, ground_truth_hvp, epsilon=epsilon)
+
+
+def test_batched_rhs_hvp_matches_scalar():
+    tf.random.set_seed(7)
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    model.build(input_shape=(1, 3))
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    inputs = tf.random.normal((6, 1, 3))
+    target = tf.random.normal((6, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
+
+    ihvp_calculator = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_set.batch(3),
+        n_opt_iters=20,
+    )
+
+    rhs = tf.random.normal((ihvp_calculator.model.nb_params, 3))
+    batched = ihvp_calculator.hessian_vector_product(rhs)
+    single = [ihvp_calculator.hessian_vector_product(rhs[:, i:i + 1]) for i in range(3)]
+    stacked = tf.concat(single, axis=1)
+
+    assert almost_equal(batched, stacked, epsilon=1e-5)
 
 
 def test_exact_hessian():
@@ -373,7 +435,7 @@ def test_lissa_ihvp():
 
     # Compute the IHVP using auto-diff and check shapes
     ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                damping=1e-4, scale=4., n_opt_iters=300)
+                                damping=1e-4, scale=3.0, n_opt_iters=500)
     ihvp = ihvp_calculator.compute_ihvp(train_set.batch(5))
     ihvp_list = []
     for elt in ihvp:

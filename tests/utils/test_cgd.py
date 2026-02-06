@@ -27,6 +27,23 @@ def test_conjugate_gradients_solve_tensorflow():
     almost_equal(actual_solution, cgd_solution, epsilon=1e-4)
 
 
+def test_conjugate_gradients_solve_tensorflow_batched_rhs():
+    """Test conjugate gradients solve with batched RHS (TensorFlow)."""
+    import tensorflow as tf
+
+    matrix_operator = tf.random.uniform((3, 3))
+    diagonal = tf.reduce_sum(tf.abs(matrix_operator), axis=1)
+    matrix_operator = tf.matmul(tf.transpose(tf.linalg.set_diag(matrix_operator, diagonal)),
+                                tf.linalg.set_diag(matrix_operator, diagonal))
+    operator = lambda x: tf.matmul(matrix_operator, x)
+
+    b = tf.convert_to_tensor([[1.0, 0.0], [0.0, 1.0], [2.0, 3.0]], dtype=tf.float32)
+    actual_solution = tf.matmul(tf.linalg.inv(matrix_operator), b)
+    cgd_solution = conjugate_gradients_solve(operator, b, None, maxiter=20)
+
+    almost_equal(actual_solution, cgd_solution, epsilon=1e-4)
+
+
 def test_conjugate_gradients_solve_numpy():
     """Test conjugate gradients solve with NumPy arrays."""
     # Create a random invertible symmetric positive definite matrix
@@ -60,6 +77,27 @@ def test_conjugate_gradients_solve_pytorch():
 
     b = torch.tensor([[1.0], [0.0], [2.0]], dtype=torch.float32)
 
+    operator = lambda x: torch.matmul(A, x)
+    actual_solution = torch.linalg.solve(A, b)
+    cgd_solution = conjugate_gradients_solve(operator, b, None, maxiter=20)
+
+    assert torch.allclose(actual_solution, cgd_solution, atol=1e-4), \
+        f"PyTorch solution mismatch: expected {actual_solution.flatten()}, got {cgd_solution.flatten()}"
+
+
+def test_conjugate_gradients_solve_pytorch_batched_rhs():
+    """Test conjugate gradients solve with batched RHS (PyTorch)."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+
+    torch.manual_seed(7)
+    A = torch.rand(3, 3, dtype=torch.float32)
+    A = A + A.T
+    A = A + 3 * torch.eye(3, dtype=torch.float32)
+
+    b = torch.tensor([[1.0, 0.0], [0.0, 1.0], [2.0, 3.0]], dtype=torch.float32)
     operator = lambda x: torch.matmul(A, x)
     actual_solution = torch.linalg.solve(A, b)
     cgd_solution = conjugate_gradients_solve(operator, b, None, maxiter=20)

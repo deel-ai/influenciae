@@ -201,6 +201,21 @@ class TestTensorFlowBackendTensorOps:
         result = backend.reshape(a, (3, 2))
         assert result.shape == (3, 2)
 
+    def test_map_fn_output_signature(self, backend):
+        """Test map_fn with output signature and tuple elems."""
+        a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
+        b = tf.constant([[5.0, 6.0], [7.0, 8.0]])
+
+        def add_pair(values):
+            x, y = values
+            return x + y
+
+        output_signature = tf.TensorSpec(shape=(2,), dtype=tf.float32)
+        result = backend.map_fn(add_pair, (a, b), output_signature=output_signature)
+        expected = tf.constant([[6.0, 8.0], [10.0, 12.0]])
+
+        assert tf.reduce_all(result == expected)
+
     def test_reduce_sum(self, backend):
         """Test reduce sum."""
         a = tf.constant([[1.0, 2.0], [3.0, 4.0]])

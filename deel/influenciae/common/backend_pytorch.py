@@ -908,7 +908,7 @@ class PyTorchBackend(BaseBackend):
         if isinstance(elems, (tuple, list)):
             first = elems[0]
             if isinstance(first, torch.Tensor):
-                results = [fn(*(e[i] for e in elems)) for i in range(first.shape[0])]
+                results = [fn(tuple(e[i] for e in elems)) for i in range(first.shape[0])]
                 return torch.stack(results)
 
         results = [fn(elem) for elem in elems]
