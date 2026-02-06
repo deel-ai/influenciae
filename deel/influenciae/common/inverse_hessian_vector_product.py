@@ -441,8 +441,11 @@ class ForwardOverBackwardHVP:
 
         rhs_list = self.backend.transpose(x_matrix)
 
-        def rhs_hvp(inputs):
-            rhs_vec, features_block, labels_block = inputs
+        def rhs_hvp(*inputs):
+            if len(inputs) == 1:
+                rhs_vec, features_block, labels_block = inputs[0]
+            else:
+                rhs_vec, features_block, labels_block = inputs
             rhs_weights = self._reshape_vector(rhs_vec)
             return self._sub_call(rhs_weights, features_block, labels_block)
 
