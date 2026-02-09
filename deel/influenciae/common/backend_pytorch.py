@@ -613,11 +613,23 @@ class PyTorchBackend(BaseBackend):
             # Assume it's a PyTorch Dataset
             return DataLoader(dataset, batch_size=batch_size)
 
-    def create_dataset_from_tensors(self, tensors: torch.Tensor, batch_size: int) -> List[Any]:
+    def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> List[Any]:
         """Create a batched dataset from tensors."""
-        # For PyTorch, return a list containing the tensor(s)
-        # This mirrors TensorFlow's from_tensors().batch() behavior
-        return [tensors]
+        # Mirror tf.data.Dataset.from_tensors(t).batch(batch_size): one batched element.
+        if isinstance(tensors, torch.Tensor):
+            return [(tensors.unsqueeze(0),)]
+
+        if isinstance(tensors, (list, tuple)):
+            batched_tensors = []
+            for tensor in tensors:
+                if isinstance(tensor, torch.Tensor):
+                    batched_tensors.append(tensor.unsqueeze(0))
+                else:
+                    batched_tensors.append(tensor)
+            return [tuple(batched_tensors)]
+
+        tensor = self.convert_to_tensor(tensors)
+        return [(tensor.unsqueeze(0),)]
 
     def unbatch_dataset(self, dataset: Any) -> List[Any]:
         """Unbatch a dataset."""
@@ -1082,7 +1094,7 @@ class PyTorchBackend(BaseBackend):
             if not isinstance(loop_vars, (list, tuple)):
                 loop_vars = [loop_vars]
             iteration += 1
-        return loop_vars
+        return list(loop_vars)
 
     # Arnoldi algorithm specific operations
     def random_normal(self, shape: Tuple[int, ...], dtype: Any = None) -> torch.Tensor:

@@ -306,16 +306,12 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         )
 
         if save_influence_vector_ds_path is not None:
-            # Extract just the influence vectors and save
-            inf_vect_list = []
-            for item in inf_vect_ds:
-                if isinstance(item, (list, tuple)):
-                    inf_vect_list.append(item[-1])
-                else:
-                    inf_vect_list.append(item)
-
-            # Unbatch and save
-            unbatched_inf_vect = self.backend.unbatch_dataset(inf_vect_list)
+            inf_vect_only_ds = self.backend.map_dataset(
+                inf_vect_ds,
+                lambda *item: item[-1],
+                device
+            )
+            unbatched_inf_vect = self.backend.unbatch_dataset(inf_vect_only_ds)
             self._save_dataset(unbatched_inf_vect, save_influence_vector_ds_path)
 
         return inf_vect_ds
