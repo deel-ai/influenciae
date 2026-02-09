@@ -1055,7 +1055,7 @@ def test_cnn_shapes():
 
         # Test the group influence methods
         influence_group = influence_calculator.compute_influence_vector_group(train_set)
-        assert influence_group.shape == (1, 650)
+        assert influence_group.shape == (1, nb_params)
         influence_group_values = influence_calculator.estimate_influence_values_group(
             train_set,
             tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).take(50).batch(5)
