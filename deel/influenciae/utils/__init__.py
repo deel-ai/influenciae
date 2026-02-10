@@ -21,17 +21,6 @@ _LAZY_IMPORTS = {
     'LinearNearestNeighbors': '.nearest_neighbors',
     # Conjugate gradients (imports from common, which imports from utils - circular)
     'conjugate_gradients_solve': '.conjugate_gradients',
-    # TensorFlow operations
-    'find_layer': '.tf_operations',
-    'from_layer_name_to_layer_idx': '.tf_operations',
-    'is_dataset_batched': '.tf_operations',
-    'assert_batched_dataset': '.tf_operations',
-    'dataset_size': '.tf_operations',
-    'default_process_batch': '.tf_operations',
-    'dataset_to_tensor': '.tf_operations',
-    'array_to_dataset': '.tf_operations',
-    'map_to_device': '.tf_operations',
-    'split_model': '.tf_operations',
     # Backtracking line search (requires backends)
     'BacktrackingLineSearch': '.backtracking_line_search',
     'BacktrackingLineSearchPyTorch': '.backtracking_line_search',
@@ -63,15 +52,3 @@ def __dir__():
 # For type checking, import everything statically
 if TYPE_CHECKING:
     from .backtracking_line_search import BacktrackingLineSearch, BacktrackingLineSearchPyTorch
-    from .tf_operations import (
-        find_layer,
-        from_layer_name_to_layer_idx,
-        is_dataset_batched,
-        assert_batched_dataset,
-        dataset_size,
-        default_process_batch,
-        dataset_to_tensor,
-        array_to_dataset,
-        map_to_device,
-        split_model,
-    )

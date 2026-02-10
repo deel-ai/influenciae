@@ -220,14 +220,17 @@ class TensorFlowBackend(BaseBackend):
         head
             Model containing the target_layer and beyond.
         """
-        from ..utils import find_layer
-
         # Clone the model to avoid modifying the original
         cloned_model = tf.keras.models.clone_model(model)
         cloned_model.set_weights(model.get_weights())
 
         # Find the cut layer
-        cut_layer = find_layer(cloned_model, target_layer)
+        if isinstance(target_layer, str):
+            cut_layer = cloned_model.get_layer(target_layer)
+        elif isinstance(target_layer, int):
+            cut_layer = cloned_model.layers[target_layer]
+        else:
+            raise ValueError(f"Could not find any layer {target_layer}.")
 
         # Create the feature extractor (up to but not including target layer)
         feature_extractor = tf.keras.Model(
@@ -445,8 +448,14 @@ class TensorFlowBackend(BaseBackend):
 
     def get_dataset_size(self, dataset: tf.data.Dataset) -> int:
         """Get the total number of elements in a dataset."""
-        from ..utils import dataset_size
-        return dataset_size(dataset)
+        self.assert_batched_dataset(dataset)
+        cardinality_value = dataset.cardinality()
+        if isinstance(cardinality_value, int):
+            cardinality = cardinality_value
+        else:
+            cardinality = int(cardinality_value.numpy())
+        batch_size = int(dataset._batch_size)  # pylint: disable=W0212
+        return cardinality * batch_size
 
     def get_dataset_element_spec(self, dataset: tf.data.Dataset) -> Any:
         """Get the element spec of a dataset."""
@@ -454,8 +463,8 @@ class TensorFlowBackend(BaseBackend):
 
     def assert_batched_dataset(self, dataset: tf.data.Dataset) -> None:
         """Assert that a dataset is batched."""
-        from ..utils import assert_batched_dataset
-        assert_batched_dataset(dataset)
+        if not hasattr(dataset, '_batch_size') or dataset._batch_size is None:  # pylint: disable=W0212
+            raise ValueError("The dataset must be batched before performing this operation.")
 
     # Linear algebra operations for IHVP
     def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> tf.Tensor:

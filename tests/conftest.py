@@ -84,7 +84,6 @@ _TENSORFLOW_PATTERNS = [
     # Utils tests (TF-specific)
     "utils/test_nearest_neighbors.py",
     "utils/test_sorted_dict.py",
-    "utils/test_tf_operations.py",
 ]
 
 # Files that require both backends (import both TF and PyTorch at top level)
@@ -138,7 +137,6 @@ def pytest_ignore_collect(collection_path, config):
             "test_representer_point_l2.py", "test_rps_lje.py",
             "test_tracin.py",
             "test_nearest_neighbors.py", "test_sorted_dict.py",
-            "test_tf_operations.py",
         ]
         for tf_file in tf_files:
             if path_str.endswith(tf_file):
