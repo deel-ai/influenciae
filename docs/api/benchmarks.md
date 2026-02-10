@@ -17,6 +17,11 @@ dataset.
 In particular, this module includes interfaces for training procedures and mislabeled sample detection
 benchmarking, and an implementation on the popular CIFAR10 image-classification dataset.
 
+The benchmark core API (training procedure interface, evaluator, and influence-factory wiring) is
+backend-agnostic and can be used with both TensorFlow and PyTorch backends.
+
+The built-in CIFAR-10 helper currently relies on TensorFlow/Keras components.
+
 ## Notebooks
 
 - [**Benchmarking with Mislabeled sample detection**](https://colab.research.google.com/drive/1_5-RC_YBHptVCElBbjxWfWQ1LMU20vOp?usp=sharing)
