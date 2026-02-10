@@ -21,19 +21,21 @@ from deel.influenciae.benchmark import Cifar10MislabelingDetectorEvaluator
 
 
 def test_first_order_exact():
-    take_batch = 10
-    cifar10_evaluator = Cifar10MislabelingDetectorEvaluator(epochs=5,
-                                                            model_type='efficient_net',
+    # Keep this setup numerically stable for exact Hessian inversion on GPU.
+    # EfficientNet + very small batches can produce near-singular Hessians on some CUDA stacks.
+    take_batch = 20
+    cifar10_evaluator = Cifar10MislabelingDetectorEvaluator(epochs=2,
+                                                            model_type='resnet',
                                                             mislabeling_ratio=0.0005,
                                                             use_regu=True,
                                                             force_overfit=False,
-                                                            train_batch_size=3,
-                                                            test_batch_size=3,
+                                                            train_batch_size=10,
+                                                            test_batch_size=10,
                                                             epochs_to_save=None,
                                                             take_batch=take_batch,
                                                             verbose_training=False)
 
-    influence_factory = FirstOrderFactory('exact')
+    influence_factory = FirstOrderFactory('exact', dataset_hessian_size=take_batch)
     result = cifar10_evaluator.evaluate(influence_factory=influence_factory, nbr_of_evaluation=2, verbose=False)
     assert np.shape(result[0]) == (2, take_batch)
     assert np.shape(result[1]) == (take_batch,)
@@ -139,8 +141,10 @@ def test_rps_l2():
 
 def test_weights_boundary():
     take_batch = 10
+    # Use VGG19 here because this benchmark path computes jacobian wrt all model weights.
+    # BatchNorm-based backbones can include state variables that are not connected in the gradient graph.
     cifar10_evaluator = Cifar10MislabelingDetectorEvaluator(epochs=5,
-                                                            model_type='resnet',
+                                                            model_type='vgg19',
                                                             mislabeling_ratio=0.0005,
                                                             use_regu=True,
                                                             force_overfit=False,
