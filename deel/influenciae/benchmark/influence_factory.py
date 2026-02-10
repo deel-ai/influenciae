@@ -8,21 +8,56 @@ This will be useful for streamlining the benchmarks.
 """
 from abc import abstractmethod
 
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.losses import Loss, Reduction, CategoricalCrossentropy  # pylint: disable=E0611
-
-from ..common import InfluenceModel, BaseInfluenceCalculator
-from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
-from ..common import ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
-
+from ..common import (
+    InfluenceModel,
+    Framework,
+    get_backend_for_model,
+    ExactIHVP,
+    ConjugateGradientDescentIHVP,
+    LissaIHVP,
+    ExactIHVPFactory,
+    CGDIHVPFactory,
+    LissaIHVPFactory,
+)
 from ..influence import FirstOrderInfluenceCalculator, ArnoldiInfluenceCalculator
-from ..rps import RepresenterPointLJE
+from ..rps import RepresenterPointLJE, RepresenterPointL2
 from ..trac_in import TracIn
-from ..rps import RepresenterPointL2
 from ..boundary_based import WeightsBoundaryCalculator, SampleBoundaryCalculator
-
 from ..types import Any, Union, Callable, Optional
+
+
+def _resolve_default_loss_function(model: Any) -> Callable:
+    """Resolve default non-reduced loss according to model backend."""
+    backend = get_backend_for_model(model)
+
+    if backend.framework == Framework.TENSORFLOW:
+        import tensorflow as tf
+        from tensorflow.keras.losses import Reduction
+
+        return tf.keras.losses.CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)
+
+    import torch.nn.functional as f
+
+    def pytorch_cross_entropy_no_reduction(predictions, targets):
+        """PyTorch cross-entropy compatible with class indices or one-hot labels."""
+        if hasattr(targets, 'ndim') and hasattr(predictions, 'ndim'):
+            if targets.ndim == predictions.ndim and predictions.ndim >= 2:
+                targets = targets.argmax(dim=-1)
+        return f.cross_entropy(predictions, targets, reduction='none')
+
+    return pytorch_cross_entropy_no_reduction
+
+
+def _get_dataset_subset_for_hessian(training_dataset: Any, n_samples: Optional[int], model: Any) -> Any:
+    """Extract a fixed number of samples from a batched dataset for Hessian estimation."""
+    if n_samples is None or n_samples < 0:
+        return training_dataset
+
+    backend = get_backend_for_model(model)
+    batch_size = backend.get_dataset_batch_size(training_dataset)
+    unbatched_dataset = backend.unbatch_dataset(training_dataset)
+    subset = backend.take_dataset(unbatched_dataset, n_samples)
+    return backend.batch_dataset(subset, batch_size)
 
 
 class InfluenceCalculatorFactory:
@@ -31,60 +66,20 @@ class InfluenceCalculatorFactory:
     """
 
     @abstractmethod
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
-              train_info: Optional[Any] = None) -> BaseInfluenceCalculator:
+    def build(self, training_dataset: Any, model: Any,
+              train_info: Optional[Any] = None) -> Any:
         """
         Builds an instance of an influence calculator class following the provided model, training dataset
         and additional information.
-
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            An object providing additional information about the training procedure. For example, additional
-            information is needed for computing influence values using TracIn.
-
-        Returns
-        -------
-        The desired influence calculator instance.
         """
         raise NotImplementedError
 
 
 class FirstOrderFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of FirstOrderInfluenceCalculator objects.
+    """A factory for creating instances of FirstOrderInfluenceCalculator objects."""
 
-    Attributes
-    ----------
-    ihvp_mode
-        A string indicating whether the IHVPs should be computed using the 'exact' or the 'cgd' method.
-    start_layer
-        An integer for the target layer on which to compute the influence. By default, the last layer of
-        the model is chosen.
-    dataset_hessian_size
-        An integer for the amount of samples that should go into the computation of the hessian matrix. By
-        default, the entire training dataset is used.
-    n_opt_iters
-        An integer indicating how many iterations of the Conjugate Gradient Descent algorithm should be run
-        before prematurely stopping the optimization.
-    feature_extractor
-        Either an integer for the last layer of the feature extractor, or an entire TF graph for computing the
-        embeddings of the samples. Used if ihvp_mode == 'cgd'.
-    loss_function
-        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
-        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
-        for example.
-    """
-
-    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
-                 feature_extractor: Union[int, tf.keras.Model] = -1,
-                 loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-                     from_logits=True, reduction=Reduction.NONE)
-                 ):
+    def __init__(self, ihvp_mode: str, start_layer: int = -1, dataset_hessian_size: int = -1, n_opt_iters: int = 100,
+                 feature_extractor: Any = -1, loss_function: Optional[Callable] = None):
         self.start_layer = start_layer
         self.ihvp_mode = ihvp_mode
         self.n_opt_iters = n_opt_iters
@@ -93,83 +88,50 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         self.loss_function = loss_function
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> FirstOrderInfluenceCalculator:
-        """
-        Builds an instance of the FirstOrderInfluenceCalculator class following the provided model and
-        training dataset. No additional information is required.
+        del train_info
 
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            In this case, None, as no additional information is required.
+        loss_function = self.loss_function or _resolve_default_loss_function(model)
+        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=loss_function)
 
-        Returns
-        -------
-        The desired FirstOrderInfluenceCalculator instance.
-        """
-        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
-
-        if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
-            dataset_hessian = training_dataset
-        else:
-            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
-            take_size = int(
-                np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
-            dataset_hessian = training_dataset.take(take_size)
+        dataset_hessian = _get_dataset_subset_for_hessian(training_dataset, self.dataset_hessian_size, model)
 
         ihvp_calculator: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP]
         if self.ihvp_mode == 'exact':
             ihvp_calculator = ExactIHVP(influence_model, dataset_hessian)
         elif self.ihvp_mode == 'cgd':
-            ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, self.feature_extractor, dataset_hessian,
-                                                           self.n_opt_iters)
+            ihvp_calculator = ConjugateGradientDescentIHVP(
+                influence_model,
+                self.feature_extractor,
+                dataset_hessian,
+                self.n_opt_iters
+            )
         elif self.ihvp_mode == 'lissa':
-            ihvp_calculator = LissaIHVP(influence_model, self.feature_extractor, dataset_hessian, self.n_opt_iters,
-                                        damping=1e-4, scale=5.)
+            ihvp_calculator = LissaIHVP(
+                influence_model,
+                self.feature_extractor,
+                dataset_hessian,
+                self.n_opt_iters,
+                damping=1e-4,
+                scale=5.
+            )
         else:
             raise ValueError("unknown ihvp calculator=" + self.ihvp_mode)
 
-        influence_calculator = FirstOrderInfluenceCalculator(influence_model, training_dataset, ihvp_calculator,
-                                                             n_samples_for_hessian=self.dataset_hessian_size)
-        return influence_calculator
+        return FirstOrderInfluenceCalculator(
+            influence_model,
+            training_dataset,
+            ihvp_calculator,
+            n_samples_for_hessian=self.dataset_hessian_size
+        )
 
 
 class RPSLJEFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of representer point LJE objects.
+    """A factory for creating instances of representer point LJE objects."""
 
-    Attributes
-    ----------
-    ihvp_mode
-        A string indicating whether the IHVPs should be computed using the 'exact' or the 'cgd' method.
-    start_layer
-        An integer for the target layer on which to compute the influence. By default, the last layer of
-        the model is chosen.
-    dataset_hessian_size
-        An integer for the amount of samples that should go into the computation of the hessian matrix. By
-        default, the entire training dataset is used.
-    n_opt_iters
-        An integer indicating how many iterations of the Conjugate Gradient Descent algorithm should be run
-        before prematurely stopping the optimization.
-    feature_extractor
-        Either an integer for the last layer of the feature extractor, or an entire TF graph for computing the
-        embeddings of the samples. Used if ihvp_mode == 'cgd'.
-    loss_function
-        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
-        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
-        for example.
-    """
-
-    def __init__(self, ihvp_mode: str, start_layer=-1, dataset_hessian_size=-1, n_opt_iters=100,
-                 feature_extractor: Union[int, tf.keras.Model] = -1,
-                 loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-                     from_logits=True, reduction=Reduction.NONE)
-                 ):
+    def __init__(self, ihvp_mode: str, start_layer: int = -1, dataset_hessian_size: int = -1, n_opt_iters: int = 100,
+                 feature_extractor: Any = -1, loss_function: Optional[Callable] = None):
         self.start_layer = start_layer
         self.ihvp_mode = ihvp_mode
         self.n_opt_iters = n_opt_iters
@@ -178,32 +140,14 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         self.loss_function = loss_function
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> RepresenterPointLJE:
-        """
-        Builds an instance of the RepresenterPointLJE class following the provided model and training dataset.
-        No additional information is required in this case.
+        del train_info
 
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            None in this case, as no additional information is required
+        loss_function = self.loss_function or _resolve_default_loss_function(model)
+        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=loss_function)
 
-        Returns
-        -------
-        The desired RepresenterPointLJE instance.
-        """
-        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
-
-        if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
-            dataset_hessian = training_dataset
-        else:
-            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
-            dataset_hessian = training_dataset.unbatch().take(self.dataset_hessian_size).batch(batch_size)
+        dataset_hessian = _get_dataset_subset_for_hessian(training_dataset, self.dataset_hessian_size, model)
 
         ihvp_calculator_factory: Union[ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory]
         if self.ihvp_mode == 'exact':
@@ -215,81 +159,39 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         else:
             raise ValueError("unknown ihvp calculator=" + self.ihvp_mode)
 
-        influence_calculator = RepresenterPointLJE(influence_model, dataset_hessian, ihvp_calculator_factory)
-        return influence_calculator
+        return RepresenterPointLJE(influence_model, dataset_hessian, ihvp_calculator_factory)
 
 
 class TracInFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of TracIn objects.
-    As it works by tracking the gradients along the training process, it also requires some
-    training information to be able to compute influence values.
+    """A factory for creating instances of TracIn objects."""
 
-    Attributes
-    ----------
-    loss_function
-        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
-        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
-        for example.
-    """
-
-    def __init__(self, loss_function: Callable = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)):
+    def __init__(self, loss_function: Optional[Callable] = None):
         self.loss_function = loss_function
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Optional[Any] = None) -> TracIn:
-        """
-        Builds an instance of the TracIn class following the provided model, training dataset
-        and additional information.
+        del training_dataset
+        if train_info is None:
+            raise ValueError("TracInFactory requires `train_info=(models, learning_rates)`.")
 
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            A tuple with a list with the model's checkpoints on the first element and the corresponding
-            list of learning rates on the second element.
+        loss_function = self.loss_function or _resolve_default_loss_function(model)
 
-        Returns
-        -------
-        The desired TracIn instance.
-        """
         models = []
         for model_data in train_info[0]:
-            influence_model = InfluenceModel(model_data, loss_function=self.loss_function)
+            influence_model = InfluenceModel(model_data, loss_function=loss_function)
             models.append(influence_model)
-        influence_calculator = TracIn(models, train_info[1])
-        return influence_calculator
+        return TracIn(models, train_info[1])
 
 
 class RPSL2Factory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of RepresenterPointL2 objects.
-
-    Attributes
-    ----------
-    loss_function
-        The loss function with which the model was trained. This loss function MUST NOT be reduced.
-    lambda_regularization
-        The strength of the L2 regularization to add to the surrogate last layer.
-    scaling_factor
-        The Backtracking line-search's scaling factor for training the surrogate last layer. By default, this
-        value is set to 0.1 and should typically converge quite easily.
-    layer_index
-        The index for the layer on which to compute the influence values.
-    epochs
-        An integer indicating for how long the surrogate last layer should be trained. By default, a value of
-        100 is chosen.
-    """
+    """A factory for creating instances of RepresenterPointL2 objects."""
 
     def __init__(
             self,
-            loss_function: Union[Callable[[tf.Tensor, tf.Tensor], tf.Tensor], Loss],
+            loss_function: Any,
             lambda_regularization: float,
             scaling_factor: float = 0.1,
-            layer_index=-2,
+            layer_index: int = -2,
             epochs: int = 100
     ):
         self.loss_function = loss_function
@@ -298,129 +200,50 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         self.epochs = epochs
         self.layer_index = layer_index
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> RepresenterPointL2:
-        """
-        Builds an instance of the RepresenterPointL2 class following the provided model and training dataset.
-        No additional information is required in this case.
-
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            None, as no additional information is required in this case.
-
-        Returns
-        -------
-        The desired RepresenterPointL2 instance.
-        """
-        influence_calculator = RepresenterPointL2(model,
-                                                  training_dataset,
-                                                  self.loss_function,
-                                                  self.lambda_regularization,
-                                                  self.scaling_factor,
-                                                  self.epochs,
-                                                  self.layer_index)
-        return influence_calculator
+        del train_info
+        return RepresenterPointL2(
+            model,
+            training_dataset,
+            self.loss_function,
+            self.lambda_regularization,
+            self.scaling_factor,
+            self.epochs,
+            self.layer_index,
+        )
 
 
 class WeightsBoundaryCalculatorFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of WeightsBoundaryCalculator objects.
+    """A factory for creating instances of WeightsBoundaryCalculator objects."""
 
-    Attributes
-    ----------
-    step_nbr
-        The number of iterations to search the boundary for. By default, a value of 100 is chosen.
-    norm_type
-        The norm type of the distance between the weights to measure the distance to the boundary.
-        By default, the L2 distance is chosen.
-    """
     def __init__(self, step_nbr: int = 100, norm_type: int = 2):
         self.step_nbr = step_nbr
         self.norm_type = norm_type
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> WeightsBoundaryCalculator:
-        """
-        Builds an instance of the WeightsBoundaryCalculator class following the provided model and training dataset.
-        No additional information is required in this case.
-
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            None, as no additional information is required in this case.
-
-        Returns
-        -------
-        The desired WeightsBoundaryCalculator instance.
-        """
+        del training_dataset
+        del train_info
         return WeightsBoundaryCalculator(model, self.step_nbr, self.norm_type)
 
 
 class SampleBoundaryCalculatorFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of SampleBoundaryCalculator objects.
-
-    Attributes
-    ----------
-    step_nbr
-        The number of iterations to search the boundary for. By default, a value of 100 is chosen.
-    """
+    """A factory for creating instances of SampleBoundaryCalculator objects."""
 
     def __init__(self, step_nbr: int = 100):
         self.step_nbr = step_nbr
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> SampleBoundaryCalculator:
-        """
-        Builds an instance of the SampleBoundaryCalculator class following the provided model and training dataset.
-        No additional information is required in this case.
-
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            None, as no additional information is required in this case.
-
-        Returns
-        -------
-        The desired SampleBoundaryCalculator instance.
-        """
+        del training_dataset
+        del train_info
         return SampleBoundaryCalculator(model, self.step_nbr)
 
 
 class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
-    """
-    A factory for creating instances of ArnoldiInfluenceCalculator objects.
+    """A factory for creating instances of ArnoldiInfluenceCalculator objects."""
 
-    Attributes
-    ----------
-    subspace_dim
-        The dimension of the Krylov subspace for the Arnoldi algorithm.
-    force_hermitian
-        A boolean indicating if we should force the projected matrix to be hermitian before the eigenvalue computation.
-    k_largest_eig_vals
-        An integer for the amount of top eigenvalues to keep for the influence estimations.
-    start_layer
-        An integer for the target layer on which to compute the influence. By default, the last layer of
-        the model is chosen.
-    dataset_hessian_size
-        An integer for the amount of samples that should go into the computation of the hessian matrix. By
-        default, the entire training dataset is used.
-    dtype
-        Numeric type for the Krylov basis (tf.float32 by default).
-    """
     def __init__(
             self,
             subspace_dim: int,
@@ -428,8 +251,8 @@ class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
             k_largest_eig_vals: int,
             start_layer: int = -1,
             dataset_hessian_size: int = -1,
-            loss_function: Callable = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE),
-            dtype: Any = tf.float32
+            loss_function: Optional[Callable] = None,
+            dtype: Any = None
     ):
         self.subspace_dim = subspace_dim
         self.force_hermitian = force_hermitian
@@ -439,33 +262,23 @@ class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
         self.dataset_hessian_size = dataset_hessian_size
         self.dtype = dtype
 
-    def build(self, training_dataset: tf.data.Dataset, model: tf.keras.Model,
+    def build(self, training_dataset: Any, model: Any,
               train_info: Any = None) -> ArnoldiInfluenceCalculator:
-        """
-        Builds an instance of the ArnoldiInfluenceCalculator class following the provided model and training dataset.
-        No additional information is required in this case.
+        del train_info
 
-        Parameters
-        ----------
-        training_dataset
-            A TF dataset with the data on which the model was trained.
-        model
-            A TF model for which to compute the influence-related quantities.
-        train_info
-            None, as no additional information is required in this case.
+        loss_function = self.loss_function or _resolve_default_loss_function(model)
+        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=loss_function)
 
-        Returns
-        -------
-        The desired ArnoldiInfluenceCalculator instance.
-        """
-        influence_model = InfluenceModel(model, start_layer=self.start_layer, loss_function=self.loss_function)
+        dataset_hessian = _get_dataset_subset_for_hessian(training_dataset, self.dataset_hessian_size, model)
 
-        if self.dataset_hessian_size is None or self.dataset_hessian_size < 0:
-            dataset_hessian = training_dataset
-        else:
-            batch_size = training_dataset._batch_size.numpy()  # pylint: disable=W0212
-            take_size = int(np.ceil(float(self.dataset_hessian_size) / batch_size)) * batch_size
-            dataset_hessian = training_dataset.take(take_size)
+        backend = get_backend_for_model(model)
+        dtype = self.dtype if self.dtype is not None else backend.float32_dtype()
 
-        return ArnoldiInfluenceCalculator(influence_model, dataset_hessian, self.subspace_dim, self.force_hermitian,
-                                          self.k_largest_eig_vals, self.dtype)
+        return ArnoldiInfluenceCalculator(
+            influence_model,
+            dataset_hessian,
+            self.subspace_dim,
+            self.force_hermitian,
+            self.k_largest_eig_vals,
+            dtype,
+        )

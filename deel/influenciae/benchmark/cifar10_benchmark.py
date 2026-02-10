@@ -22,7 +22,8 @@ from tensorflow.keras.regularizers import L1L2 # pylint: disable=E0611
 from tensorflow.keras.losses import CategoricalCrossentropy # pylint: disable=E0611
 from tensorflow.keras.optimizers import Adam # pylint: disable=E0611
 
-from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator, ModelsSaver
+from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator
+from .tensorflow_benchmark_utils import ModelsSaver
 from .model_resnet import ResNet
 
 from ..types import Tuple, Union, Any, Optional, List
