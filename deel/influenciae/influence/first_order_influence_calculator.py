@@ -206,11 +206,15 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_values
             The influence score of each sample in the batch train_samples.
         """
-        batched_inf_vect = self._compute_influence_vector(train_samples)
         evaluate_vect = self._preprocess_samples(train_samples)
+        batched_inf_vect = self.ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=W0212
+            (evaluate_vect,),
+            use_gradient=False
+        )
+        batched_inf_vect = self._normalize_if_needed(batched_inf_vect)
+        batched_inf_vect = self.backend.transpose(batched_inf_vect)
         influence_values = self.backend.reduce_sum(
             self.backend.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
-        # TODO: improve IHVP to not compute 2 times the gradient
         return influence_values
 
     def compute_influence_vector_group(

@@ -67,8 +67,8 @@ class SelfInfluenceCalculator:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
 
-        If only looking for the values, consider using the utility in deel.influenciae.utils.tf_operations:
-        extract_only_values for converting this result into a tensor.
+        If only looking for the values, use `_compute_influence_values`,
+        which returns a tensor directly.
 
         Parameters
         ----------
@@ -531,11 +531,16 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             batch of the training dataset
             influence scores
         """
+        preproc_samples_to_evaluate = self._preprocess_samples(samples_to_evaluate)
         samples_inf_val_dataset = self.backend.map_dataset(
             inf_vect_dataset,
             lambda *batch: (
                 batch[:-1][0],
-                self._estimate_influence_values_from_influence_vector(samples_to_evaluate, batch[-1])
+                self._estimate_influence_values_from_influence_vector(
+                    samples_to_evaluate,
+                    batch[-1],
+                    preproc_samples_to_evaluate
+                )
             ),
             device
         )
@@ -583,7 +588,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     def _estimate_influence_values_from_influence_vector(
             self,
             samples_to_evaluate: Tuple[Any, ...],
-            inf_vect: Any
+            inf_vect: Any,
+            preproc_samples_to_evaluate: Optional[Any] = None
     ) -> Any:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
@@ -598,6 +604,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             data-points corresponding to the influence vector.
         inf_vect
             A tensor with one influence vector
+        preproc_samples_to_evaluate
+            Optional preprocessed representation of ``samples_to_evaluate`` to avoid recomputing jacobians.
 
         Returns
         -------
@@ -605,7 +613,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             batch of the training dataset
             influence vector
         """
-        v_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        if preproc_samples_to_evaluate is None:
+            v_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        else:
+            v_to_evaluate = preproc_samples_to_evaluate
         value = self._estimate_influence_value_from_influence_vector(v_to_evaluate, inf_vect)
 
         return value
