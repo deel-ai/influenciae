@@ -447,7 +447,7 @@ class MislabelingDetectorEvaluator:
         curve
             A numpy array with the detection curve as we progressively scan the dataset.
         """
-        index = np.in1d(sorted_influences_indexes, noisy_label_indexes)
+        index = np.isin(np.ravel(sorted_influences_indexes), noisy_label_indexes)
         index = index.astype(np.int32)
         curve = np.cumsum(index)
         if curve[-1] != 0:
