@@ -116,6 +116,8 @@ exclude_lines = [
 disable = [
     "R0903",  # allows to expose only one public method
     "R0914",  # allow multiples local variables
+    "R0913",  # ignore too-many-arguments in public APIs
+    "R0917",  # ignore too-many-positional-arguments in public APIs
     "C0103",  # allow variable name such as `x` and `y`
     "E0401",  # pending issue with pylint see pylint#2603
     "E1123",  # issues between pylint and tensorflow since 2.2.0
