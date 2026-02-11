@@ -8,6 +8,7 @@ Supports both TensorFlow and PyTorch.
 """
 from abc import ABC, abstractmethod
 from enum import Enum
+import importlib.util
 from typing import Any, List, Tuple, Callable, Optional, Union
 
 import numpy as np
@@ -29,17 +30,11 @@ def get_available_frameworks() -> List[Framework]:
         List of available frameworks.
     """
     available = []
-    try:
-        import tensorflow  # noqa: F401
+    if importlib.util.find_spec("tensorflow") is not None:
         available.append(Framework.TENSORFLOW)
-    except ImportError:
-        pass
 
-    try:
-        import torch  # noqa: F401
+    if importlib.util.find_spec("torch") is not None:
         available.append(Framework.PYTORCH)
-    except ImportError:
-        pass
 
     return available
 
@@ -1053,7 +1048,12 @@ class BaseBackend(ABC):
 
     # Additional operations for boundary-based calculators
     @abstractmethod
-    def norm(self, tensor: Any, ord: Optional[int] = None, axis: Optional[int] = None) -> Any:
+    def norm(  # pylint: disable=redefined-builtin
+        self,
+        tensor: Any,
+        ord: Optional[int] = None,
+        axis: Optional[int] = None,
+    ) -> Any:
         """
         Compute the norm of a tensor.
 
@@ -1522,11 +1522,12 @@ def get_backend(framework: Framework) -> BaseBackend:
     if framework == Framework.TENSORFLOW:
         from .backend_tensorflow import TensorFlowBackend
         return TensorFlowBackend()
-    elif framework == Framework.PYTORCH:
+
+    if framework == Framework.PYTORCH:
         from .backend_pytorch import PyTorchBackend
         return PyTorchBackend()
-    else:
-        raise ValueError(f"Unsupported framework: {framework}")
+
+    raise ValueError(f"Unsupported framework: {framework}")
 
 
 def get_backend_for_model(model: Any) -> BaseBackend:
@@ -1545,4 +1546,3 @@ def get_backend_for_model(model: Any) -> BaseBackend:
     """
     framework = detect_framework(model)
     return get_backend(framework)
-

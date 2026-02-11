@@ -255,7 +255,11 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
                 axis=0
             )
             g_best = self.backend.squeeze(g_best, axis=0)
-            new_value = w + loss * self.backend.pow(self.backend.abs(g_best), self.norm_type - 1) * self.backend.sign(g_best)
+            new_value = (
+                w + loss
+                * self.backend.pow(self.backend.abs(g_best), self.norm_type - 1)
+                * self.backend.sign(g_best)
+            )
             self.backend.assign_variable(w, new_value)
 
         return loss
@@ -304,7 +308,7 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         def cond_fn(cond, idx):
             return self.backend.logical_and(cond, idx < self.step_nbr)
 
-        def body_fn(cond, idx):
+        def body_fn(_cond, idx):
             new_cond, _ = self._step(x, y_pred)
             return [new_cond, idx + 1]
 

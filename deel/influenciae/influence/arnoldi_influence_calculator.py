@@ -177,7 +177,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         A0 = self.backend.zeros((self.subspace_dim, self.subspace_dim + 1), dtype=self.dtype)
 
         # Use backend's while_loop for efficiency (especially for TensorFlow graph compilation)
-        def cond_fn(W, A, index):
+        def cond_fn(_W, _A, index):
             return index < self.subspace_dim
 
         def body_fn(W, A, index):

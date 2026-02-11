@@ -35,10 +35,9 @@ def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Any, Any, Any]:
     """
     if len(batch) == 2:
         return batch[0], batch[1], None
-    elif len(batch) >= 3:
+    if len(batch) >= 3:
         return batch[0], batch[1], batch[2]
-    else:
-        raise ValueError(f"Batch should have 2 or 3 elements, got {len(batch)}")
+    raise ValueError(f"Batch should have 2 or 3 elements, got {len(batch)}")
 
 
 class BaseInfluenceModel:
@@ -121,9 +120,9 @@ class BaseInfluenceModel:
             return tf.keras.losses.CategoricalCrossentropy(
                 from_logits=False, reduction=Reduction.NONE
             )
-        else:  # PyTorch
-            import torch.nn as nn
-            return nn.CrossEntropyLoss(reduction='none')
+
+        import torch.nn as nn
+        return nn.CrossEntropyLoss(reduction='none')
 
     def _validate_loss_function(self, loss_function: Callable) -> None:
         """Validate that the loss function doesn't have reduction."""

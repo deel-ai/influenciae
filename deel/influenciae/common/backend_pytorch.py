@@ -89,7 +89,7 @@ class PyTorchBackend(BaseBackend):
         # Compute per-sample gradients using vmap if available (PyTorch 2.0+)
         # Otherwise fall back to manual loop
         try:
-            from torch.func import vmap, grad
+            from torch.func import vmap, grad  # pylint: disable=unused-import
 
             def compute_sample_grad(input_sample, target_sample):
                 """Compute gradient for a single sample."""
@@ -128,7 +128,7 @@ class PyTorchBackend(BaseBackend):
                     loss = loss * sample_weight[i]
 
                 loss = loss.sum()
-                loss.backward(retain_graph=(i < batch_size - 1))
+                loss.backward(retain_graph=i < batch_size - 1)
 
                 grads = []
                 for w in weights:
@@ -439,15 +439,17 @@ class PyTorchBackend(BaseBackend):
 
         if layer is None:
             return self.find_last_weight_layer(model) + num_layers
-        elif isinstance(layer, str):
+
+        if isinstance(layer, str):
             idx, _ = self.find_layer_by_name(model, layer)
             return idx
-        elif isinstance(layer, int):
+
+        if isinstance(layer, int):
             if layer < 0:
                 return layer + num_layers
             return layer
-        else:
-            raise ValueError(f"layer should be None, a string, or an int, got {type(layer)}")
+
+        raise ValueError(f"layer should be None, a string, or an int, got {type(layer)}")
 
     def get_weights_for_layer_range(
         self,
@@ -588,7 +590,8 @@ class PyTorchBackend(BaseBackend):
         if isinstance(dataset, DataLoader):
             # Already batched, return as-is or rebatch
             return dataset
-        elif isinstance(dataset, (list, tuple)):
+
+        if isinstance(dataset, (list, tuple)):
             # Create batches from list
             batches = []
             for i in range(0, len(dataset), batch_size):
@@ -609,9 +612,9 @@ class PyTorchBackend(BaseBackend):
                 else:
                     batches.append(tuple(batch_items) if isinstance(batch_items, list) else batch_items)
             return batches
-        else:
-            # Assume it's a PyTorch Dataset
-            return DataLoader(dataset, batch_size=batch_size)
+
+        # Assume it's a PyTorch Dataset
+        return DataLoader(dataset, batch_size=batch_size)
 
     def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> List[Any]:
         """Create a batched dataset from tensors."""
@@ -655,10 +658,7 @@ class PyTorchBackend(BaseBackend):
         For PyTorch, this materializes and shuffles the data.
         """
         import random
-        if isinstance(dataset, list):
-            data = list(dataset)
-        else:
-            data = list(dataset)
+        data = list(dataset)
         random.shuffle(data)
         return data
 
@@ -690,14 +690,16 @@ class PyTorchBackend(BaseBackend):
                 else:
                     total += 1
             return total
-        elif hasattr(dataset, 'dataset'):
+
+        if hasattr(dataset, 'dataset'):
             # DataLoader with underlying dataset
             return len(dataset.dataset)
-        elif hasattr(dataset, '__len__'):
+
+        if hasattr(dataset, '__len__'):
             return len(dataset)
-        else:
-            # Materialize and count
-            return sum(1 for _ in dataset)
+
+        # Materialize and count
+        return sum(1 for _ in dataset)
 
     def get_dataset_element_spec(self, dataset: Any) -> Any:
         """
@@ -710,10 +712,11 @@ class PyTorchBackend(BaseBackend):
             """Recursively get spec for an item."""
             if isinstance(item, torch.Tensor):
                 return {'shape': item.shape, 'dtype': item.dtype}
-            elif isinstance(item, (list, tuple)):
+
+            if isinstance(item, (list, tuple)):
                 return tuple(_get_spec(sub_item) for sub_item in item)
-            else:
-                return type(item)
+
+            return type(item)
 
         for batch in dataset:
             return _get_spec(batch)
@@ -945,7 +948,12 @@ class PyTorchBackend(BaseBackend):
         return nn.Sequential(*layers)
 
     # Additional operations for boundary-based calculators
-    def norm(self, tensor: torch.Tensor, ord: Optional[int] = None, axis: Optional[int] = None) -> torch.Tensor:
+    def norm(  # pylint: disable=redefined-builtin
+        self,
+        tensor: torch.Tensor,
+        ord: Optional[int] = None,
+        axis: Optional[int] = None,
+    ) -> torch.Tensor:
         """Compute the norm of a tensor."""
         if axis is None:
             # Flatten and compute norm
@@ -1021,7 +1029,6 @@ class PyTorchBackend(BaseBackend):
         inputs = inputs.clone().detach().requires_grad_(True)
         outputs = model(inputs)
 
-        batch_size = inputs.shape[0]
         num_outputs = outputs.shape[-1]
 
         # Compute Jacobian row by row
@@ -1086,6 +1093,7 @@ class PyTorchBackend(BaseBackend):
         parallel_iterations: int = 10
     ) -> List[Any]:
         """Execute a while loop with the given condition and body functions."""
+        _ = parallel_iterations
         iteration = 0
         while cond_fn(*loop_vars):
             if maximum_iterations is not None and iteration >= maximum_iterations:
@@ -1118,7 +1126,6 @@ class PyTorchBackend(BaseBackend):
         # Construct the tridiagonal matrix and use eigh
         n = maindiag.shape[0]
         device = maindiag.device
-        dtype = maindiag.dtype
 
         # Build the tridiagonal matrix
         T = torch.diag(maindiag)
@@ -1143,4 +1150,3 @@ class PyTorchBackend(BaseBackend):
     def real(self, tensor: torch.Tensor) -> torch.Tensor:
         """Return the real part of a complex tensor."""
         return tensor.real if tensor.is_complex() else tensor
-

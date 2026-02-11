@@ -52,8 +52,8 @@ if _HAS_TENSORFLOW:
         Parameters
         ----------
         batches_per_epoch
-            An integer indicating the amount of batches that constitute a whole epoch. This information is used for scaling
-            the optimizer updates.
+            An integer indicating the amount of batches that constitute a whole epoch.
+            This information is used for scaling the optimizer updates.
         scaling_factor
             A scaling factor for the Wolfe condition
         """
@@ -236,7 +236,7 @@ class BacktrackingLineSearchPyTorch:
             max_eta: float = 10.,
             min_eta: float = 1e-6,
     ):
-        from torch.optim import SGD
+        from torch.optim import SGD as TorchSGD
 
         self.params = list(params)
         self.scaling_factor = scaling_factor
@@ -255,9 +255,17 @@ class BacktrackingLineSearchPyTorch:
         )
 
         # Internal SGD optimizer for applying gradients
-        self._sgd = SGD(self.params, lr=self.parameters.eta)
+        self._sgd = TorchSGD(self.params, lr=self.parameters.eta)
 
-    def step(self, model, current_loss, x_inputs, labels, gradients, closure: Callable):
+    def step(  # pylint: disable=unused-argument
+        self,
+        model,
+        current_loss,
+        x_inputs,
+        labels,
+        gradients,
+        closure: Callable,
+    ):
         """
         Performs a step of the line-search optimizer by attempting stochastic gradient descents until the Wolfe
         condition is met.
@@ -402,4 +410,3 @@ class BacktrackingLineSearchPyTorch:
         self.parameters.min_eta = state_dict['min_eta']
         self.scaling_factor = state_dict['scaling_factor']
         self.batches_per_epoch = state_dict['batches_per_epoch']
-

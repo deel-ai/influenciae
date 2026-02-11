@@ -153,7 +153,7 @@ def _conjugate_gradients_tensorflow(
 
     k0 = backend.constant(0, dtype=backend.int32_dtype())
 
-    def cond_fn(k, x, r, p, rs):
+    def cond_fn(k, _x, _r, _p, rs):
         # Continue while k < maxiter and ||r|| > tol
         return backend.logical_and(k < maxiter_t, backend.reduce_any(backend.sqrt(rs) > tol_t))
 
@@ -175,7 +175,7 @@ def _conjugate_gradients_tensorflow(
 
         return [k + 1, x, r, p, rs_new]
 
-    k, x, r, p, rs = backend.while_loop(
+    _k, x, _r, _p, _rs = backend.while_loop(
         cond_fn=cond_fn,
         body_fn=body_fn,
         loop_vars=[k0, x, r, p, rs],
@@ -319,7 +319,7 @@ def biconjugate_gradient_stabilized_solve(
         else:
             rs_val = float(rs)
             atol2_val = float(atol2)
-        return (rs_val > atol2_val) and (k < maxiter) and (k >= 0)
+        return (rs_val > atol2_val) and (0 <= k < maxiter)
 
     r0 = b - operator(x0)
     rho = alpha = omega = 1.0
@@ -455,7 +455,7 @@ def _bicgstab_numpy(
     q = r0.copy()
     k = 0
 
-    while dot(r, r) > atol2 and k < maxiter and k >= 0:
+    while dot(r, r) > atol2 and 0 <= k < maxiter:
         rho_ = dot(rhat, r)
 
         if rho_ == 0:

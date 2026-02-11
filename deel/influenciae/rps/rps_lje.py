@@ -129,7 +129,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             dataset: Any,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int],
-            target_layer: Union[int, str]
+            _target_layer: Union[int, str]
     ):
         """PyTorch-specific initialization."""
         import torch
@@ -214,8 +214,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         """
         if self.backend.framework == Framework.TENSORFLOW:
             return self._compute_alpha_tensorflow(z_batch, y_batch)
-        else:
-            return self._compute_alpha_pytorch(z_batch, y_batch)
+        return self._compute_alpha_pytorch(z_batch, y_batch)
 
     def _compute_alpha_tensorflow(self, z_batch: Any, y_batch: Any) -> Any:
         """TensorFlow-specific alpha computation."""
@@ -276,7 +275,6 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
         # Get the weights from the perturbed head
         weights_list = [p for p in self.perturbed_head.parameters() if p.requires_grad]
-        weights = torch.cat([w.view(-1) for w in weights_list])
 
         # First, we compute the second term, which contains the Hessian vector product
         logits = self.perturbed_head(z_batch)
@@ -332,4 +330,3 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         first_term_summed = first_term.sum(dim=1)  # (batch, out)
 
         return first_term_summed - second_term_summed  # alpha is first term minus second term
-

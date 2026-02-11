@@ -26,6 +26,8 @@ _LAZY_IMPORTS = {
     'BacktrackingLineSearchPyTorch': '.backtracking_line_search',
 }
 
+__all__ = list(_LAZY_IMPORTS.keys())
+
 def __getattr__(name):
     """Lazy import of framework-specific utilities."""
     if name in _LAZY_IMPORTS:
@@ -51,4 +53,7 @@ def __dir__():
 
 # For type checking, import everything statically
 if TYPE_CHECKING:
+    from .conjugate_gradients import conjugate_gradients_solve
+    from .nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
     from .backtracking_line_search import BacktrackingLineSearch, BacktrackingLineSearchPyTorch
+    from .sorted_dict import BatchSort, ORDER

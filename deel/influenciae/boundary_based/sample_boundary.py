@@ -245,10 +245,10 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         y_pred = self.backend.forward(self.model, x)
 
         # Use while_loop for graph-compatible iteration
-        def cond_fn(cond, idx, x_current):
+        def cond_fn(cond, idx, _x_current):
             return self.backend.logical_and(cond, idx < self.step_nbr)
 
-        def body_fn(cond, idx, x_current):
+        def body_fn(_cond, idx, x_current):
             new_cond, _, x_new = self._step(x_current, y_pred)
             return [new_cond, idx + 1, x_new]
 

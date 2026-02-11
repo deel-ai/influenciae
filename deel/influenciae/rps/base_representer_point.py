@@ -97,7 +97,6 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             if layers[-1].use_bias:
                 raise ValueError('The last layer of the model must be a Dense layer with no bias.')
         else:  # PyTorch
-            import torch.nn as nn
             # Get the last layer - for PyTorch we need to find the last Linear layer
             last_layer = self._get_last_linear_layer(model)
             if last_layer is None:

@@ -122,6 +122,16 @@ class BatchSort:
         """Return the backend used for tensor operations."""
         return self._backend
 
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        """Return the internal tensor shape used by this sorter."""
+        return self._shape
+
+    @property
+    def dtype(self) -> Any:
+        """Return the dtype used for stored values."""
+        return self._dtype
+
     def add_all(self, batch_key: Any, batch_values: Any) -> None:
         """
         Add a new batch of data (element and values) and update the sorted dictionary retaining only the

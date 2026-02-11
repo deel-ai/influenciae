@@ -15,7 +15,7 @@ from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 
 from ..types import Optional, Union, Tuple, List, Callable, Any
-from ..utils import conjugate_gradients_solve
+from ..utils.conjugate_gradients import conjugate_gradients_solve
 
 
 class InverseHessianVectorProduct(ABC):

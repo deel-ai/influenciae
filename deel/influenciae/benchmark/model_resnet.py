@@ -309,11 +309,24 @@ def _string_to_function(identifier):
     return identifier
 
 
-def ResNet(input_shape=None, classes=10, block='bottleneck', residual_unit='v2',  # pylint: disable=R0912 disable=R0913 disable=R0915
-           repetitions=None, initial_filters=64, activation='softmax', include_top=True,
-           input_tensor=None, dropout=None, transition_dilation_rate=(1, 1),
-           initial_strides=(1, 1), initial_kernel_size=(3, 3), initial_pooling='max',
-           final_pooling='avg', top='classification'):
+def ResNet(  # pylint: disable=R0912,R0915
+    input_shape=None,
+    classes=10,
+    block='bottleneck',
+    residual_unit='v2',
+    repetitions=None,
+    initial_filters=64,
+    activation='softmax',
+    include_top=True,
+    input_tensor=None,
+    dropout=None,
+    transition_dilation_rate=(1, 1),
+    initial_strides=(1, 1),
+    initial_kernel_size=(3, 3),
+    initial_pooling='max',
+    final_pooling='avg',
+    top='classification',
+):
     """
     Builds a custom ResNet like architecture. Defaults to ResNet50 v2.
 

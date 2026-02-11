@@ -481,7 +481,11 @@ class MislabelingDetectorEvaluator:
                 """Flips a single sample's labels following the mask."""
                 (x, y) = z
                 y_noise = tf.random.uniform(shape=(1,)) * tf.cast((tf.shape(y)[-1] - 1), dtype=tf.float32)
-                y_noise = tf.cond(y_noise > tf.cast(tf.argmax(y), dtype=tf.float32), lambda: y_noise + 1, lambda: y_noise)
+                y_noise = tf.cond(
+                    y_noise > tf.cast(tf.argmax(y), dtype=tf.float32),
+                    lambda: y_noise + 1,
+                    lambda: y_noise,
+                )
                 y_noise = tf.cast(y_noise, dtype=tf.int32)
                 y_noise = tf.cast(tf.squeeze(tf.one_hot(y_noise, tf.shape(y)[-1]), axis=0), dtype=y.dtype)
                 y = tf.where(y_mask, y, y_noise)

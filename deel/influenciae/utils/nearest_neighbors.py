@@ -234,8 +234,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         if self.backend.framework == Framework.TENSORFLOW:
             return self._query_tensorflow(vector_to_find, batch_size)
-        else:
-            return self._query_pytorch(vector_to_find, batch_size)
+        return self._query_pytorch(vector_to_find, batch_size)
 
     def _query_tensorflow(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
         """TensorFlow-specific query using reduce for lazy evaluation within graph."""
@@ -243,7 +242,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         k = self.batched_sorted_dict.k
         order = self.batched_sorted_dict.order
-        batch_shape = tuple(self.batched_sorted_dict._shape[2:])  # Remove (1, k) prefix
+        batch_shape = tuple(self.batched_sorted_dict.shape[2:])  # Remove (1, k) prefix
 
         # Initialize state tensors
         if order == ORDER.DESCENDING:
@@ -251,10 +250,10 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         else:
             init_values = tf.fill((batch_size, k), float('inf'))
 
-        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=self.batched_sorted_dict._dtype)
+        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=self.batched_sorted_dict.dtype)
 
         # Cast to the appropriate dtype
-        init_values = tf.cast(init_values, self.batched_sorted_dict._dtype)
+        init_values = tf.cast(init_values, self.batched_sorted_dict.dtype)
 
         def reduce_func(state, batch_data):
             best_values, best_samples = state
@@ -286,7 +285,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             current_batch = tf.concat([best_samples, expanded_batch], axis=1)
 
             # Sort and take top k
-            descending = (order == ORDER.DESCENDING)
+            descending = order == ORDER.DESCENDING
             if descending:
                 indexes = tf.argsort(current_score, axis=1, direction='DESCENDING')
             else:

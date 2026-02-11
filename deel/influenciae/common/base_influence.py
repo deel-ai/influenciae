@@ -17,7 +17,8 @@ from enum import Enum
 from warnings import warn
 
 from .backend import BaseBackend
-from ..utils import BatchSort, BaseNearestNeighbors, LinearNearestNeighbors, ORDER
+from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
+from ..utils.sorted_dict import BatchSort, ORDER
 from ..types import Optional, Tuple, Any
 
 
@@ -577,6 +578,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         training_samples
             Top-k training sample for each sample to evaluate.
         """
+        _ = device
         v_to_evaluate = self._preprocess_samples(sample_to_evaluate)
         if batch_size_eval is None:
             influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)

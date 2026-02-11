@@ -22,7 +22,11 @@ class TensorFlowBackend(BaseBackend):
     def framework(self) -> Framework:
         return Framework.TENSORFLOW
 
-    def get_model_weights(self, model: tf.keras.Model, layers: Optional[List[tf.keras.layers.Layer]] = None) -> List[tf.Variable]:
+    def get_model_weights(
+        self,
+        model: tf.keras.Model,
+        layers: Optional[List[tf.keras.layers.Layer]] = None,
+    ) -> List[tf.Variable]:
         """
         Get trainable weights from a Keras model.
 
@@ -308,15 +312,17 @@ class TensorFlowBackend(BaseBackend):
         """
         if layer is None:
             return self.find_last_weight_layer(model) + len(model.layers)
-        elif isinstance(layer, str):
+
+        if isinstance(layer, str):
             idx, _ = self.find_layer_by_name(model, layer)
             return idx
-        elif isinstance(layer, int):
+
+        if isinstance(layer, int):
             if layer < 0:
                 return layer + len(model.layers)
             return layer
-        else:
-            raise ValueError(f"layer should be None, a string, or an int, got {type(layer)}")
+
+        raise ValueError(f"layer should be None, a string, or an int, got {type(layer)}")
 
     def get_weights_for_layer_range(
         self,
@@ -649,7 +655,12 @@ class TensorFlowBackend(BaseBackend):
         return tf.keras.Sequential(layers)
 
     # Additional operations for boundary-based calculators
-    def norm(self, tensor: tf.Tensor, ord: Optional[int] = None, axis: Optional[int] = None) -> tf.Tensor:
+    def norm(  # pylint: disable=redefined-builtin
+        self,
+        tensor: tf.Tensor,
+        ord: Optional[int] = None,
+        axis: Optional[int] = None,
+    ) -> tf.Tensor:
         """Compute the norm of a tensor."""
         if axis is None:
             # Flatten and compute norm
