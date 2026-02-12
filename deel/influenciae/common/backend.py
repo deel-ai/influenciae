@@ -6,6 +6,7 @@
 Backend abstraction layer for framework-agnostic operations.
 Supports both TensorFlow and PyTorch.
 """
+# pylint: disable=too-many-lines
 from abc import ABC, abstractmethod
 from enum import Enum
 import importlib.util
@@ -179,7 +180,7 @@ def get_backend_for_tensor(tensor: Any) -> "BaseBackend":
     return get_backend(framework)
 
 
-class BaseBackend(ABC):
+class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     """
     Abstract base class for framework-specific backend operations.
     """
@@ -188,7 +189,6 @@ class BaseBackend(ABC):
     @abstractmethod
     def framework(self) -> Framework:
         """Return the framework this backend supports."""
-        pass
 
     @abstractmethod
     def get_model_weights(self, model: Any, layers: Optional[List[Any]] = None) -> List[Any]:
@@ -207,7 +207,6 @@ class BaseBackend(ABC):
         weights
             List of weight tensors.
         """
-        pass
 
     @abstractmethod
     def get_num_params(self, weights: List[Any]) -> int:
@@ -224,7 +223,6 @@ class BaseBackend(ABC):
         num_params
             Total number of parameters.
         """
-        pass
 
     @abstractmethod
     def compute_loss(
@@ -256,7 +254,6 @@ class BaseBackend(ABC):
         loss
             Loss values for each sample (unreduced).
         """
-        pass
 
     @abstractmethod
     def compute_jacobian(
@@ -291,7 +288,6 @@ class BaseBackend(ABC):
         jacobian
             Jacobian matrix (batch_size, num_params).
         """
-        pass
 
     @abstractmethod
     def compute_gradient(
@@ -326,82 +322,66 @@ class BaseBackend(ABC):
         gradient
             Gradient vector (num_params,).
         """
-        pass
 
     @abstractmethod
     def concat(self, tensors: List[Any], axis: int = 0) -> Any:
         """Concatenate tensors along an axis."""
-        pass
 
     @abstractmethod
     def stack(self, tensors: List[Any], axis: int = 0) -> Any:
         """Stack tensors along a new axis."""
-        pass
 
     @abstractmethod
     def reshape(self, tensor: Any, shape: Tuple[int, ...]) -> Any:
         """Reshape a tensor."""
-        pass
 
     @abstractmethod
     def to_numpy(self, tensor: Any) -> np.ndarray:
         """Convert a tensor to numpy array."""
-        pass
 
     @abstractmethod
     def get_batch_size(self, tensor: Any) -> int:
         """Get the batch size (first dimension) of a tensor."""
-        pass
 
     @abstractmethod
     def reduce_sum(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
         """Reduce sum along an axis."""
-        pass
 
     @abstractmethod
     def expand_dims(self, tensor: Any, axis: int) -> Any:
         """Add a new axis to a tensor."""
-        pass
 
     @abstractmethod
     def squeeze(self, tensor: Any, axis: Optional[int] = None) -> Any:
         """Remove dimensions of size 1."""
-        pass
 
     @abstractmethod
     def transpose(self, tensor: Any) -> Any:
         """Transpose a tensor (swap last two dimensions)."""
-        pass
 
     @abstractmethod
     def tensor_shape(self, tensor: Any) -> Tuple[int, ...]:
         """Get the shape of a tensor."""
-        pass
 
     @abstractmethod
     def tensor_ndim(self, tensor: Any) -> int:
         """Get the number of dimensions of a tensor."""
-        pass
 
     @abstractmethod
     def matmul(self, a: Any, b: Any) -> Any:
         """Matrix multiplication."""
-        pass
 
     @abstractmethod
     def multiply(self, a: Any, b: Any) -> Any:
         """Element-wise multiplication."""
-        pass
 
     @abstractmethod
     def abs(self, tensor: Any) -> Any:
         """Compute absolute value of a tensor."""
-        pass
 
     @abstractmethod
     def argmax(self, tensor: Any, axis: int) -> Any:
         """Return indices of maximum values along an axis."""
-        pass
 
     @abstractmethod
     def gather_along_axis(self, tensor: Any, indices: Any, axis: int, batch_dims: int = 0) -> Any:
@@ -424,7 +404,6 @@ class BaseBackend(ABC):
         gathered
             The gathered tensor.
         """
-        pass
 
     @abstractmethod
     def get_output_shape(self, model: Any) -> Tuple[Optional[int], ...]:
@@ -441,7 +420,6 @@ class BaseBackend(ABC):
         shape
             The output shape.
         """
-        pass
 
     @abstractmethod
     def split_model(self, model: Any, target_layer: Union[str, int]) -> Tuple[Any, Any]:
@@ -462,7 +440,6 @@ class BaseBackend(ABC):
         head
             Model containing the target_layer and beyond.
         """
-        pass
 
     @abstractmethod
     def normalize(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
@@ -483,7 +460,6 @@ class BaseBackend(ABC):
         normalized_tensor
             The normalized tensor.
         """
-        pass
 
     @abstractmethod
     def find_layer_by_name(self, model: Any, layer_name: str) -> Tuple[int, Any]:
@@ -504,17 +480,14 @@ class BaseBackend(ABC):
         layer
             The layer object.
         """
-        pass
 
     @abstractmethod
     def get_layers(self, model: Any) -> List[Any]:
         """Get all layers from a model."""
-        pass
 
     @abstractmethod
     def forward(self, model: Any, inputs: Any) -> Any:
         """Run forward pass on a model."""
-        pass
 
     @abstractmethod
     def get_weights_for_layer_range(
@@ -540,7 +513,6 @@ class BaseBackend(ABC):
         weights
             List of weight tensors.
         """
-        pass
 
     # Dataset operations
     @abstractmethod
@@ -562,7 +534,6 @@ class BaseBackend(ABC):
         mapped_dataset
             A new dataset/iterable with the map function applied.
         """
-        pass
 
     @abstractmethod
     def cache_dataset(self, dataset: Any) -> Any:
@@ -579,7 +550,6 @@ class BaseBackend(ABC):
         cached_dataset
             The cached dataset.
         """
-        pass
 
     @abstractmethod
     def save_dataset(self, dataset: Any, path: str) -> None:
@@ -593,7 +563,6 @@ class BaseBackend(ABC):
         path
             Path to save the dataset.
         """
-        pass
 
     @abstractmethod
     def load_dataset(self, path: str) -> Any:
@@ -610,7 +579,6 @@ class BaseBackend(ABC):
         dataset
             The loaded dataset.
         """
-        pass
 
     @abstractmethod
     def get_dataset_batch_size(self, dataset: Any) -> int:
@@ -627,7 +595,6 @@ class BaseBackend(ABC):
         batch_size
             The batch size.
         """
-        pass
 
     @abstractmethod
     def zip_datasets(self, dataset1: Any, dataset2: Any) -> Any:
@@ -646,7 +613,6 @@ class BaseBackend(ABC):
         zipped_dataset
             The zipped dataset.
         """
-        pass
 
     @abstractmethod
     def batch_dataset(self, dataset: Any, batch_size: int) -> Any:
@@ -665,7 +631,6 @@ class BaseBackend(ABC):
         batched_dataset
             The batched dataset.
         """
-        pass
 
     @abstractmethod
     def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> Any:
@@ -684,7 +649,6 @@ class BaseBackend(ABC):
         dataset
             A batched dataset containing the tensors.
         """
-        pass
 
     @abstractmethod
     def unbatch_dataset(self, dataset: Any) -> Any:
@@ -701,7 +665,6 @@ class BaseBackend(ABC):
         unbatched_dataset
             The unbatched dataset.
         """
-        pass
 
     @abstractmethod
     def shuffle_dataset(self, dataset: Any, buffer_size: int) -> Any:
@@ -720,7 +683,6 @@ class BaseBackend(ABC):
         shuffled_dataset
             The shuffled dataset.
         """
-        pass
 
     @abstractmethod
     def take_dataset(self, dataset: Any, count: int) -> Any:
@@ -739,7 +701,6 @@ class BaseBackend(ABC):
         taken_dataset
             The dataset with only the first `count` elements.
         """
-        pass
 
     @abstractmethod
     def get_dataset_size(self, dataset: Any) -> int:
@@ -756,7 +717,6 @@ class BaseBackend(ABC):
         size
             The total number of elements.
         """
-        pass
 
     @abstractmethod
     def get_dataset_element_spec(self, dataset: Any) -> Any:
@@ -773,7 +733,6 @@ class BaseBackend(ABC):
         element_spec
             The element specification.
         """
-        pass
 
     @abstractmethod
     def assert_batched_dataset(self, dataset: Any) -> None:
@@ -790,28 +749,23 @@ class BaseBackend(ABC):
         ValueError
             If the dataset is not batched.
         """
-        pass
 
     # Linear algebra operations for IHVP
     @abstractmethod
     def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
         """Create a tensor of zeros."""
-        pass
 
     @abstractmethod
     def zeros_like(self, tensor: Any) -> Any:
         """Create a tensor of zeros with the same shape and dtype as the input."""
-        pass
 
     @abstractmethod
     def ones(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
         """Create a tensor of ones."""
-        pass
 
     @abstractmethod
     def ones_like(self, tensor: Any) -> Any:
         """Create a tensor of ones with the same shape and dtype as the input."""
-        pass
 
     @abstractmethod
     def argsort(self, tensor: Any, axis: int = -1, descending: bool = False) -> Any:
@@ -832,67 +786,54 @@ class BaseBackend(ABC):
         indices
             Indices that would sort the tensor.
         """
-        pass
 
     @abstractmethod
     def copy(self, tensor: Any) -> Any:
         """Create a copy of a tensor."""
-        pass
 
     @abstractmethod
     def sqrt(self, tensor: Any) -> Any:
         """Compute element-wise square root."""
-        pass
 
     @abstractmethod
     def maximum(self, a: Any, b: Any) -> Any:
         """Element-wise maximum of two tensors/scalars."""
-        pass
 
     @abstractmethod
     def pinv(self, matrix: Any) -> Any:
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
-        pass
 
     @abstractmethod
     def cast(self, tensor: Any, dtype: Any) -> Any:
         """Cast a tensor to a different dtype."""
-        pass
 
     @abstractmethod
     def get_dtype(self, tensor: Any) -> Any:
         """Get the dtype of a tensor."""
-        pass
 
     @abstractmethod
     def float32_dtype(self) -> Any:
         """Return the float32 dtype for the framework."""
-        pass
 
     @abstractmethod
     def int32_dtype(self) -> Any:
         """Return the int32 dtype for the framework."""
-        pass
 
     @abstractmethod
     def int64_dtype(self) -> Any:
         """Return the int64 dtype for the framework."""
-        pass
 
     @abstractmethod
     def constant(self, value: Any, dtype: Any = None) -> Any:
         """Create a constant tensor."""
-        pass
 
     @abstractmethod
     def convert_to_tensor(self, value: Any, dtype: Any = None) -> Any:
         """Convert a value to a tensor."""
-        pass
 
     @abstractmethod
     def reduce_prod(self, tensor: Any, axis: Optional[int] = None) -> Any:
         """Reduce product along an axis."""
-        pass
 
     @abstractmethod
     def compute_hessian(
@@ -928,7 +869,6 @@ class BaseBackend(ABC):
         hessian
             The Hessian matrix.
         """
-        pass
 
     @abstractmethod
     def compute_hvp_single(
@@ -963,7 +903,6 @@ class BaseBackend(ABC):
         hvp
             The Hessian-vector product.
         """
-        pass
 
     @abstractmethod
     def compute_hvp_batch(
@@ -998,7 +937,6 @@ class BaseBackend(ABC):
         hvp
             The Hessian-vector product summed over the batch.
         """
-        pass
 
     @abstractmethod
     def map_fn(self, fn: Callable, elems: Any, output_signature: Optional[Any] = None) -> Any:
@@ -1019,7 +957,6 @@ class BaseBackend(ABC):
         result
             The mapped results.
         """
-        pass
 
     @abstractmethod
     def get_dataset_cardinality(self, dataset: Any) -> int:
@@ -1036,17 +973,14 @@ class BaseBackend(ABC):
         cardinality
             Number of batches.
         """
-        pass
 
     @abstractmethod
     def is_sequential_model(self, model: Any) -> bool:
         """Check if a model is a Sequential model."""
-        pass
 
     @abstractmethod
     def create_sequential_from_layers(self, layers: List[Any]) -> Any:
         """Create a Sequential model from a list of layers."""
-        pass
 
     # Additional operations for boundary-based calculators
     @abstractmethod
@@ -1073,7 +1007,6 @@ class BaseBackend(ABC):
         norm_value
             The computed norm.
         """
-        pass
 
     @abstractmethod
     def top_k(self, tensor: Any, k: int) -> Tuple[Any, Any]:
@@ -1094,7 +1027,6 @@ class BaseBackend(ABC):
         indices
             The indices of the top k values.
         """
-        pass
 
     @abstractmethod
     def arange(self, start: int, end: int, dtype: Any = None) -> Any:
@@ -1115,7 +1047,6 @@ class BaseBackend(ABC):
         range_tensor
             Tensor with values [start, start+1, ..., end-1].
         """
-        pass
 
     @abstractmethod
     def tile(self, tensor: Any, multiples: Tuple[int, ...]) -> Any:
@@ -1134,7 +1065,6 @@ class BaseBackend(ABC):
         tiled_tensor
             The tiled tensor.
         """
-        pass
 
     @abstractmethod
     def repeat(self, tensor: Any, repeats: int, axis: int) -> Any:
@@ -1155,7 +1085,6 @@ class BaseBackend(ABC):
         repeated_tensor
             The repeated tensor.
         """
-        pass
 
     @abstractmethod
     def sign(self, tensor: Any) -> Any:
@@ -1172,7 +1101,6 @@ class BaseBackend(ABC):
         sign_tensor
             Tensor with -1, 0, or 1 based on the sign of each element.
         """
-        pass
 
     @abstractmethod
     def pow(self, tensor: Any, exponent: Any) -> Any:
@@ -1191,7 +1119,6 @@ class BaseBackend(ABC):
         powered_tensor
             The tensor with each element raised to the power.
         """
-        pass
 
     @abstractmethod
     def logical_and(self, a: Any, b: Any) -> Any:
@@ -1210,7 +1137,6 @@ class BaseBackend(ABC):
         result
             Element-wise logical AND result.
         """
-        pass
 
     @abstractmethod
     def reduce_any(self, tensor: Any, axis: Optional[int] = None) -> Any:
@@ -1229,7 +1155,6 @@ class BaseBackend(ABC):
         result
             Reduced tensor.
         """
-        pass
 
     @abstractmethod
     def argmin(self, tensor: Any, axis: int) -> Any:
@@ -1248,7 +1173,6 @@ class BaseBackend(ABC):
         indices
             Indices of the minimum values.
         """
-        pass
 
     @abstractmethod
     def reduce_mean(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
@@ -1269,7 +1193,6 @@ class BaseBackend(ABC):
         mean_tensor
             The mean value(s).
         """
-        pass
 
     @abstractmethod
     def clone_variable(self, variable: Any) -> Any:
@@ -1286,7 +1209,6 @@ class BaseBackend(ABC):
         cloned_variable
             A copy of the variable.
         """
-        pass
 
     @abstractmethod
     def assign_variable(self, variable: Any, value: Any) -> None:
@@ -1300,7 +1222,6 @@ class BaseBackend(ABC):
         value
             The new value.
         """
-        pass
 
     @abstractmethod
     def compute_output_jacobian(
@@ -1325,7 +1246,6 @@ class BaseBackend(ABC):
         jacobian
             The Jacobian of outputs with respect to inputs.
         """
-        pass
 
     @abstractmethod
     def compute_output_jacobian_wrt_weights(
@@ -1353,7 +1273,6 @@ class BaseBackend(ABC):
         jacobian
             List of Jacobians of outputs with respect to each weight tensor.
         """
-        pass
 
     @abstractmethod
     def boolean_mask(self, tensor: Any, mask: Any) -> Any:
@@ -1372,7 +1291,6 @@ class BaseBackend(ABC):
         masked_tensor
             The masked tensor.
         """
-        pass
 
     @abstractmethod
     def while_loop(
@@ -1401,7 +1319,6 @@ class BaseBackend(ABC):
         loop_vars
             Final values of the loop variables.
         """
-        pass
 
     # Arnoldi algorithm specific operations
     @abstractmethod
@@ -1421,7 +1338,6 @@ class BaseBackend(ABC):
         tensor
             Random tensor from normal distribution.
         """
-        pass
 
     @abstractmethod
     def diag_part(self, tensor: Any, k: int = 0) -> Any:
@@ -1440,7 +1356,6 @@ class BaseBackend(ABC):
         diagonal
             The diagonal elements.
         """
-        pass
 
     @abstractmethod
     def eigh_tridiagonal(
@@ -1468,7 +1383,6 @@ class BaseBackend(ABC):
         eig_vectors
             The eigenvectors (None if eigvals_only is True).
         """
-        pass
 
     @abstractmethod
     def eig(self, tensor: Any) -> Tuple[Any, Any]:
@@ -1487,7 +1401,6 @@ class BaseBackend(ABC):
         eig_vectors
             The eigenvectors.
         """
-        pass
 
     @abstractmethod
     def real(self, tensor: Any) -> Any:
@@ -1504,8 +1417,6 @@ class BaseBackend(ABC):
         real_tensor
             The real part of the tensor.
         """
-        pass
-
 
 def get_backend(framework: Framework) -> BaseBackend:
     """

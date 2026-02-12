@@ -5,6 +5,7 @@
 """
 PyTorch backend implementation.
 """
+# pylint: disable=too-many-lines
 import inspect
 import os
 import random
@@ -18,7 +19,7 @@ from torch.utils.data import DataLoader
 from .backend import BaseBackend, Framework
 
 
-class PyTorchBackend(BaseBackend):
+class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     """
     PyTorch-specific backend implementation.
     """

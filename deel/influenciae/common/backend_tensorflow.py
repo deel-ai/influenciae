@@ -15,7 +15,7 @@ import tensorflow as tf
 from .backend import BaseBackend, Framework
 
 
-class TensorFlowBackend(BaseBackend):
+class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     """
     TensorFlow-specific backend implementation.
     """
