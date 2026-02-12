@@ -11,6 +11,7 @@ BiCGSTAB (Biconjugate Gradient Stabilized) solver based also on jax.scipy's impl
 https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.bicgstab.html
 https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditioned_BiCGSTAB
 """
+import importlib
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -38,6 +39,12 @@ def _is_tensorflow_backend(backend: Any) -> bool:
     """Return True when backend belongs to TensorFlow framework."""
     framework = getattr(backend, "framework", None)
     return getattr(framework, "value", framework) == "tensorflow"
+
+
+def _get_backend_for_tensor(tensor: Any) -> "BaseBackend":
+    """Get backend for tensor without module-level common import."""
+    backend_module = importlib.import_module("deel.influenciae.common.backend")
+    return backend_module.get_backend_for_tensor(tensor)
 
 
 def conjugate_gradients_solve(
@@ -83,9 +90,7 @@ def conjugate_gradients_solve(
 
     # Auto-detect backend if not provided
     if backend is None:
-        from ..common.backend import get_backend_for_tensor
-
-        backend = get_backend_for_tensor(b)
+        backend = _get_backend_for_tensor(b)
 
     if _is_tensorflow_backend(backend):
         return _conjugate_gradients_tensorflow(operator, b, x0, maxiter, tol, eps, backend)
@@ -316,9 +321,7 @@ def biconjugate_gradient_stabilized_solve(
 
     # Auto-detect backend if not provided
     if backend is None:
-        from ..common.backend import get_backend_for_tensor
-
-        backend = get_backend_for_tensor(b)
+        backend = _get_backend_for_tensor(b)
 
     if x0 is None:
         x0 = backend.zeros_like(b)
