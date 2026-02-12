@@ -255,98 +255,136 @@ class MislabelingDetectorEvaluator:
         """
         curves = []
 
-        if use_tensorboard and self.backend.framework != Framework.TENSORFLOW:
-            warn("TensorBoard logging is currently only supported with the TensorFlow backend. Disabling it.")
-            use_tensorboard = False
-
-        if use_tensorboard and (path_to_save is None):
-            path_to_save = "./"
-
         method = method_name if method_name is not None else 'experiment'
-
-        if path_to_save is not None:
-            dirname = path_to_save + "/" + method
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
-            with open(dirname + "/config.json", 'w', encoding="utf-8") as fp:
-                json.dump(self.config, fp, indent=4)
+        use_tensorboard, path_to_save = self._resolve_logging_options(use_tensorboard, path_to_save)
+        self._prepare_result_directory(path_to_save, method)
 
         for index in range(nbr_of_evaluation):
-            file_writer = None
-
-            if use_tensorboard:
-                assert path_to_save is not None  # Ensured by earlier check
-                experiment_name = method + "_" + str(index)
-
-                tf = import_optional_module("tensorflow", extra="tensorflow")
-                file_writer = tf.summary.create_file_writer(
-                    path_to_save + "/" + method + "/seed" + str(index),
-                    filename_suffix=experiment_name
-                )
-
-            if self.backend.framework == Framework.TENSORFLOW:
-                tf = import_optional_module("tensorflow", extra="tensorflow")
-                tf.keras.backend.clear_session()
-
-            self.set_seed(seed + index, self.backend)
-
-            noisy_training_dataset, noisy_label_indexes = self.build_noisy_training_dataset()
-            noisy_label_indexes = noisy_label_indexes[0]
-
-            acc_train, acc_test, model, data_train = self.training_procedure.train(
-                noisy_training_dataset,
-                self.test_dataset,
-                self.train_batch_size,
-                self.test_batch_size,
-                log_path=None if path_to_save is None else path_to_save + "/" + method + "/seed" + str(index))
-
-            shuffled_dataset = self.backend.shuffle_dataset(noisy_training_dataset, 1000)
-            influence_dataset = self.backend.batch_dataset(shuffled_dataset, self.influence_batch_size)
-
-            influence_calculator = influence_factory.build(
-                influence_dataset, model, data_train)
-
-            scoring_dataset = self.backend.batch_dataset(noisy_training_dataset, self.influence_batch_size)
-
-            influences_values = influence_calculator._compute_influence_values(  # pylint: disable=W0212
-                scoring_dataset)
-
-            influences_values_np = self.backend.to_numpy(influences_values)
-
-            # compute curve and indexes
-            sorted_influences_indexes = np.argsort(-np.squeeze(influences_values_np))
-
-            sorted_curve = self.__compute_curve(sorted_influences_indexes, noisy_label_indexes)
+            file_writer = self._create_seed_writer(path_to_save, method, index) if use_tensorboard else None
+            sorted_curve = self._evaluate_single_seed(influence_factory, seed, index, path_to_save, method, verbose)
             curves.append(sorted_curve)
-
-            roc = self._compute_roc(sorted_curve)
-            if verbose:
-                print("seed nbr=" + str(index) + " | acc train=" + str(acc_train) + " | acc test=" + str(
-                    acc_test) + " | roc=" + str(roc))
 
             if use_tensorboard:
                 assert file_writer is not None
-                tf = import_optional_module("tensorflow", extra="tensorflow")
-                with file_writer.as_default():
-                    tf.summary.scalar("roc_value", roc, index)
-                    self.plot_tensorboard_roc(sorted_curve, "roc_curve")
+                self._log_seed_metrics(file_writer, sorted_curve, index)
 
             if path_to_save is not None:
-                curves_, mean_curve_, roc_ = self.__build(curves)
-                self.__save(path_to_save + "/" + method + "/data.npy", curves_, mean_curve_, roc_)
+                self._save_intermediate_results(path_to_save, method, curves)
 
         curves, mean_curve, roc = self.__build(curves)
 
         if use_tensorboard:
-            assert path_to_save is not None  # Ensured by earlier check
-            tf = import_optional_module("tensorflow", extra="tensorflow")
-            file_writer = tf.summary.create_file_writer(path_to_save + "/synthesis/" + method + "/")
-            with file_writer.as_default():
-                tf.summary.scalar("roc_mean", roc, 0)
-                tf.summary.scalar("roc_mean", roc, 1)
-                self.plot_tensorboard_roc(mean_curve, "roc_curve_mean")
+            assert path_to_save is not None
+            self._log_summary_metrics(path_to_save, method, roc, mean_curve)
 
         return curves, mean_curve, roc
+
+    def _resolve_logging_options(
+        self,
+        use_tensorboard: bool,
+        path_to_save: Optional[str],
+    ) -> Tuple[bool, Optional[str]]:
+        """Validate logging options and infer default output directory if needed."""
+        if use_tensorboard and self.backend.framework != Framework.TENSORFLOW:
+            warn("TensorBoard logging is currently only supported with the TensorFlow backend. Disabling it.")
+            return False, path_to_save
+
+        if use_tensorboard and path_to_save is None:
+            return True, "./"
+
+        return use_tensorboard, path_to_save
+
+    def _prepare_result_directory(self, path_to_save: Optional[str], method: str) -> None:
+        """Create output directory and save benchmark configuration."""
+        if path_to_save is None:
+            return
+
+        dirname = os.path.join(path_to_save, method)
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+
+        with open(os.path.join(dirname, "config.json"), 'w', encoding="utf-8") as fp:
+            json.dump(self.config, fp, indent=4)
+
+    @staticmethod
+    def _create_seed_writer(path_to_save: Optional[str], method: str, index: int) -> Any:
+        """Create a TensorBoard writer for one seed evaluation."""
+        assert path_to_save is not None
+        experiment_name = method + "_" + str(index)
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        return tf.summary.create_file_writer(
+            os.path.join(path_to_save, method, "seed" + str(index)),
+            filename_suffix=experiment_name,
+        )
+
+    def _evaluate_single_seed(
+        self,
+        influence_factory: InfluenceCalculatorFactory,
+        seed: int,
+        index: int,
+        path_to_save: Optional[str],
+        method: str,
+        verbose: bool,
+    ) -> np.ndarray:
+        """Run one benchmark seed and return its detection curve."""
+        if self.backend.framework == Framework.TENSORFLOW:
+            tf = import_optional_module("tensorflow", extra="tensorflow")
+            tf.keras.backend.clear_session()
+
+        self.set_seed(seed + index, self.backend)
+        noisy_training_dataset, noisy_label_indexes = self.build_noisy_training_dataset()
+        noisy_label_indexes = noisy_label_indexes[0]
+
+        log_path = None if path_to_save is None else os.path.join(path_to_save, method, "seed" + str(index))
+        acc_train, acc_test, model, data_train = self.training_procedure.train(
+            noisy_training_dataset,
+            self.test_dataset,
+            self.train_batch_size,
+            self.test_batch_size,
+            log_path=log_path,
+        )
+
+        shuffled_dataset = self.backend.shuffle_dataset(noisy_training_dataset, 1000)
+        influence_dataset = self.backend.batch_dataset(shuffled_dataset, self.influence_batch_size)
+        influence_calculator = influence_factory.build(influence_dataset, model, data_train)
+        scoring_dataset = self.backend.batch_dataset(noisy_training_dataset, self.influence_batch_size)
+        influences_values = influence_calculator._compute_influence_values(scoring_dataset)  # pylint: disable=W0212
+
+        sorted_influences_indexes = np.argsort(-np.squeeze(self.backend.to_numpy(influences_values)))
+        sorted_curve = self.__compute_curve(sorted_influences_indexes, noisy_label_indexes)
+        roc = self._compute_roc(sorted_curve)
+
+        if verbose:
+            print(
+                "seed nbr=" + str(index)
+                + " | acc train=" + str(acc_train)
+                + " | acc test=" + str(acc_test)
+                + " | roc=" + str(roc)
+            )
+
+        return sorted_curve
+
+    def _log_seed_metrics(self, file_writer: Any, sorted_curve: np.ndarray, index: int) -> None:
+        """Log one seed ROC metrics to TensorBoard."""
+        roc = self._compute_roc(sorted_curve)
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        with file_writer.as_default():
+            tf.summary.scalar("roc_value", roc, index)
+            self.plot_tensorboard_roc(sorted_curve, "roc_curve")
+
+    def _save_intermediate_results(self, path_to_save: str, method: str, curves: List[np.ndarray]) -> None:
+        """Persist intermediate benchmark curves during evaluation."""
+        curves_, mean_curve_, roc_ = self.__build(curves)
+        self.__save(os.path.join(path_to_save, method, "data.npy"), curves_, mean_curve_, roc_)
+
+    def _log_summary_metrics(self, path_to_save: str, method: str, roc: float, mean_curve: np.ndarray) -> None:
+        """Log final aggregated ROC metrics to TensorBoard."""
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        file_writer = tf.summary.create_file_writer(os.path.join(path_to_save, "synthesis", method))
+        with file_writer.as_default():
+            tf.summary.scalar("roc_mean", roc, 0)
+            tf.summary.scalar("roc_mean", roc, 1)
+            self.plot_tensorboard_roc(mean_curve, "roc_curve_mean")
 
     @staticmethod
     def plot_tensorboard_roc(curve: np.ndarray, experiment_name: str):
@@ -471,90 +509,135 @@ class MislabelingDetectorEvaluator:
             during the evaluation).
         """
         if self.backend.framework == Framework.TENSORFLOW:
-            tf = import_optional_module("tensorflow", extra="tensorflow")
+            return self._build_noisy_training_dataset_tensorflow()
 
-            dataset_size = int(tf.data.experimental.cardinality(self.training_dataset).numpy())
-            noise_mask = np.random.uniform(size=(dataset_size,)) > self.mislabeling_ratio
-            noise_mask_dataset = tf.data.Dataset.from_tensor_slices(noise_mask)
-            noisy_dataset = tf.data.Dataset.zip((self.training_dataset, noise_mask_dataset))
+        return self._build_noisy_training_dataset_iterable()
 
-            def noise_map(z, y_mask):
-                """Flips a single sample's labels following the mask."""
-                (x, y) = z
-                y_noise = tf.random.uniform(shape=(1,)) * tf.cast((tf.shape(y)[-1] - 1), dtype=tf.float32)
-                y_noise = tf.cond(
-                    y_noise > tf.cast(tf.argmax(y), dtype=tf.float32),
-                    lambda: y_noise + 1,
-                    lambda: y_noise,
-                )
-                y_noise = tf.cast(y_noise, dtype=tf.int32)
-                y_noise = tf.cast(tf.squeeze(tf.one_hot(y_noise, tf.shape(y)[-1]), axis=0), dtype=y.dtype)
-                y = tf.where(y_mask, y, y_noise)
-                return x, y
+    def _build_noisy_training_dataset_tensorflow(self) -> Tuple[Any, Tuple[np.ndarray, ...]]:
+        """Build a noisy training dataset for the TensorFlow backend."""
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
-            noisy_dataset = noisy_dataset.map(noise_map)
-            noise_indexes = np.where(np.logical_not(noise_mask))
-            return noisy_dataset, noise_indexes
+        dataset_size = int(tf.data.experimental.cardinality(self.training_dataset).numpy())
+        noise_mask = self._build_noise_mask(dataset_size)
+        noise_mask_dataset = tf.data.Dataset.from_tensor_slices(noise_mask)
+        noisy_dataset = tf.data.Dataset.zip((self.training_dataset, noise_mask_dataset))
+        noisy_dataset = noisy_dataset.map(self._noise_map_tensorflow)
 
-        # PyTorch / generic iterable path
-        try:
-            torch = import_optional_module("torch", extra="pytorch")
-            data_loader_cls = import_optional_attr("torch.utils.data", "DataLoader", extra="pytorch")
-        except ImportError as exc:
-            raise ImportError("PyTorch backend requested but PyTorch is not installed.") from exc
+        return noisy_dataset, self._noise_indexes(noise_mask)
 
-        samples = []
-        if isinstance(self.training_dataset, data_loader_cls):
-            for batch in self.training_dataset:
-                x_batch, y_batch = batch[0], batch[1]
-                batch_size = x_batch.shape[0]
-                for i in range(batch_size):
-                    samples.append((x_batch[i], y_batch[i]))
-        else:
-            for item in self.training_dataset:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
-                    samples.append((item[0], item[1]))
-                else:
-                    raise ValueError("Training dataset items should be tuples of (x, y).")
+    @staticmethod
+    def _noise_map_tensorflow(z: Any, y_mask: Any) -> Tuple[Any, Any]:
+        """Flips one TensorFlow sample label according to a boolean mask."""
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        x, y = z
+        y_noise = tf.random.uniform(shape=(1,)) * tf.cast((tf.shape(y)[-1] - 1), dtype=tf.float32)
+        y_noise = tf.cond(
+            y_noise > tf.cast(tf.argmax(y), dtype=tf.float32),
+            lambda: y_noise + 1,
+            lambda: y_noise,
+        )
+        y_noise = tf.cast(y_noise, dtype=tf.int32)
+        y_noise = tf.cast(tf.squeeze(tf.one_hot(y_noise, tf.shape(y)[-1]), axis=0), dtype=y.dtype)
+        y = tf.where(y_mask, y, y_noise)
+        return x, y
 
-        dataset_size = len(samples)
-        noise_mask = np.random.uniform(size=(dataset_size,)) > self.mislabeling_ratio
+    def _build_noisy_training_dataset_iterable(self) -> Tuple[Any, Tuple[np.ndarray, ...]]:
+        """Build a noisy training dataset for iterable / PyTorch inputs."""
+        torch, data_loader_cls = self._load_pytorch_dependencies()
+        samples = self._extract_training_samples(data_loader_cls)
+        noise_mask = self._build_noise_mask(len(samples))
 
         noisy_samples = []
         for idx, (x, y) in enumerate(samples):
             if noise_mask[idx]:
                 noisy_samples.append((x, y))
-                continue
-
-            if isinstance(y, torch.Tensor):
-                if y.ndim == 0 or (y.ndim == 1 and y.numel() == 1):
-                    y_class = int(y.item())
-                    y_noise = np.random.randint(0, self.nb_classes - 1)
-                    if y_noise >= y_class:
-                        y_noise += 1
-                    y_flipped = torch.tensor(y_noise, dtype=y.dtype, device=y.device)
-                else:
-                    num_classes = int(y.shape[-1])
-                    y_class = int(torch.argmax(y).item())
-                    y_noise = np.random.randint(0, num_classes - 1)
-                    if y_noise >= y_class:
-                        y_noise += 1
-                    y_flipped = torch.zeros_like(y)
-                    y_flipped[y_noise] = 1
             else:
-                y_array = np.asarray(y)
-                y_class = int(np.argmax(y_array))
-                num_classes = int(y_array.shape[-1])
-                y_noise = np.random.randint(0, num_classes - 1)
-                if y_noise >= y_class:
-                    y_noise += 1
-                y_flipped = np.zeros_like(y)
-                y_flipped[y_noise] = 1
+                noisy_samples.append((x, self._flip_label(y, torch)))
 
-            noisy_samples.append((x, y_flipped))
+        return noisy_samples, self._noise_indexes(noise_mask)
 
-        noise_indexes = np.where(np.logical_not(noise_mask))
-        return noisy_samples, noise_indexes
+    @staticmethod
+    def _load_pytorch_dependencies() -> Tuple[Any, Any]:
+        """Import and return PyTorch runtime dependencies used by benchmark datasets."""
+        try:
+            torch = import_optional_module("torch", extra="pytorch")
+            data_loader_cls = import_optional_attr("torch.utils.data", "DataLoader", extra="pytorch")
+        except ImportError as exc:
+            raise ImportError("PyTorch backend requested but PyTorch is not installed.") from exc
+        return torch, data_loader_cls
+
+    def _extract_training_samples(self, data_loader_cls: Any) -> List[Tuple[Any, Any]]:
+        """Extract samples from DataLoader or generic iterable datasets."""
+        if isinstance(self.training_dataset, data_loader_cls):
+            return self._extract_samples_from_dataloader()
+        return self._extract_samples_from_iterable()
+
+    def _extract_samples_from_dataloader(self) -> List[Tuple[Any, Any]]:
+        """Flatten DataLoader batches into a list of individual (x, y) samples."""
+        samples = []
+        for batch in self.training_dataset:
+            x_batch, y_batch = batch[0], batch[1]
+            batch_size = x_batch.shape[0]
+            for idx in range(batch_size):
+                samples.append((x_batch[idx], y_batch[idx]))
+        return samples
+
+    def _extract_samples_from_iterable(self) -> List[Tuple[Any, Any]]:
+        """Extract samples from a generic iterable dataset."""
+        samples = []
+        for item in self.training_dataset:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                samples.append((item[0], item[1]))
+            else:
+                raise ValueError("Training dataset items should be tuples of (x, y).")
+        return samples
+
+    def _flip_label(self, label: Any, torch: Any) -> Any:
+        """Flip one label to a random class different from its original class."""
+        if isinstance(label, torch.Tensor):
+            return self._flip_torch_label(label, torch)
+        return self._flip_array_label(label)
+
+    def _flip_torch_label(self, label: Any, torch: Any) -> Any:
+        """Flip a PyTorch label tensor while preserving representation format."""
+        if label.ndim == 0 or (label.ndim == 1 and label.numel() == 1):
+            y_class = int(label.item())
+            y_noise = self._sample_different_class(y_class, self.nb_classes)
+            return torch.tensor(y_noise, dtype=label.dtype, device=label.device)
+
+        num_classes = int(label.shape[-1])
+        y_class = int(torch.argmax(label).item())
+        y_noise = self._sample_different_class(y_class, num_classes)
+        y_flipped = torch.zeros_like(label)
+        y_flipped[y_noise] = 1
+        return y_flipped
+
+    def _flip_array_label(self, label: Any) -> np.ndarray:
+        """Flip a non-torch one-hot encoded label."""
+        y_array = np.asarray(label)
+        y_class = int(np.argmax(y_array))
+        num_classes = int(y_array.shape[-1])
+        y_noise = self._sample_different_class(y_class, num_classes)
+        y_flipped = np.zeros_like(y_array)
+        y_flipped[y_noise] = 1
+        return y_flipped
+
+    @staticmethod
+    def _sample_different_class(y_class: int, num_classes: int) -> int:
+        """Sample a class index in [0, num_classes) that differs from y_class."""
+        y_noise = np.random.randint(0, num_classes - 1)
+        if y_noise >= y_class:
+            y_noise += 1
+        return y_noise
+
+    def _build_noise_mask(self, dataset_size: int) -> np.ndarray:
+        """Sample a boolean mask indicating which labels should remain unchanged."""
+        return np.random.uniform(size=(dataset_size,)) > self.mislabeling_ratio
+
+    @staticmethod
+    def _noise_indexes(noise_mask: np.ndarray) -> Tuple[np.ndarray, ...]:
+        """Return indices of the samples whose labels were flipped."""
+        return np.where(np.logical_not(noise_mask))
 
     @staticmethod
     def __save(path_to_save: str, curves: np.ndarray, mean_curve: np.ndarray, roc: float) -> None:
