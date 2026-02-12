@@ -62,36 +62,8 @@ class BatchSort:
         backend: Optional[Union[BaseBackend, Framework]] = None,
         device: Optional[Any] = None
     ):
-        # Determine the backend
-        if backend is None:
-            # Try to infer backend from dtype if provided
-            if dtype is not None:
-                inferred_framework = detect_dtype_framework(dtype)
-                if inferred_framework is not None:
-                    self._backend = get_backend(inferred_framework)
-                else:
-                    # Default to TensorFlow if available, otherwise PyTorch
-                    try:
-                        self._backend = get_backend(Framework.TENSORFLOW)
-                    except ImportError:
-                        self._backend = get_backend(Framework.PYTORCH)
-            else:
-                # Default to TensorFlow if available, otherwise PyTorch
-                try:
-                    self._backend = get_backend(Framework.TENSORFLOW)
-                except ImportError:
-                    self._backend = get_backend(Framework.PYTORCH)
-        elif isinstance(backend, BaseBackend):
-            self._backend = backend
-        else:
-            # backend is a Framework enum
-            self._backend = get_backend(backend)
-
-        # Set dtype (use framework-specific default if not provided)
-        if dtype is None:
-            self._dtype = self._backend.float32_dtype()
-        else:
-            self._dtype = dtype
+        self._backend = self._resolve_backend(backend, dtype)
+        self._dtype = self._backend.float32_dtype() if dtype is None else dtype
 
         self.k = k_shape[1]
         self.order = order
@@ -103,19 +75,47 @@ class BatchSort:
         self._shape = shape
         self._k_shape = k_shape
 
-        # Initialize best_batch and best_values (will be moved to correct device on first add_all)
         self._best_batch = self._backend.zeros(shape, dtype=self._dtype)
+        self._best_values = self._initialize_best_values(k_shape)
 
-        # Initialize best_values with -inf (descending) or inf (ascending)
-        if self.order == ORDER.DESCENDING:
-            self._best_values = self._backend.ones(k_shape, dtype=self._dtype) * (-np.inf)
-        else:
-            self._best_values = self._backend.ones(k_shape, dtype=self._dtype) * np.inf
-
-        # Move to specified device if provided (PyTorch)
         if device is not None and self._backend.framework == Framework.PYTORCH:
             self._best_batch = self._best_batch.to(device)
             self._best_values = self._best_values.to(device)
+
+    @staticmethod
+    def _default_backend() -> BaseBackend:
+        """Pick TensorFlow backend when available, else fallback to PyTorch."""
+        try:
+            return get_backend(Framework.TENSORFLOW)
+        except ImportError:
+            return get_backend(Framework.PYTORCH)
+
+    @classmethod
+    def _resolve_backend(
+        cls,
+        backend: Optional[Union[BaseBackend, Framework]],
+        dtype: Optional[Any],
+    ) -> BaseBackend:
+        """Resolve backend from explicit arg, dtype inference, or defaults."""
+        if isinstance(backend, BaseBackend):
+            return backend
+
+        if backend is not None:
+            return get_backend(backend)
+
+        if dtype is not None:
+            inferred_framework = detect_dtype_framework(dtype)
+            if inferred_framework is not None:
+                return get_backend(inferred_framework)
+
+        return cls._default_backend()
+
+    def _initialize_best_values(self, k_shape: Tuple[int, ...]) -> Any:
+        """Initialize score storage according to sort order."""
+        values = self._backend.ones(k_shape, dtype=self._dtype)
+        if self.order == ORDER.DESCENDING:
+            return values * (-np.inf)
+        return values * np.inf
 
     @property
     def backend(self) -> BaseBackend:
