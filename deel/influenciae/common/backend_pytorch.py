@@ -5,11 +5,15 @@
 """
 PyTorch backend implementation.
 """
+import inspect
+import os
+import random
 from typing import Any, List, Tuple, Callable, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 
 from .backend import BaseBackend, Framework
 
@@ -89,7 +93,8 @@ class PyTorchBackend(BaseBackend):
         # Compute per-sample gradients using vmap if available (PyTorch 2.0+)
         # Otherwise fall back to manual loop
         try:
-            from torch.func import vmap, grad  # pylint: disable=unused-import
+            _ = torch.func.vmap
+            _ = torch.func.grad
 
             def compute_sample_grad(input_sample, target_sample):
                 """Compute gradient for a single sample."""
@@ -112,7 +117,7 @@ class PyTorchBackend(BaseBackend):
                 for i in range(batch_size)
             ])
 
-        except ImportError:
+        except AttributeError:
             # Fallback for older PyTorch versions
             jacobian = torch.zeros(batch_size, num_params, device=inputs.device)
 
@@ -500,8 +505,6 @@ class PyTorchBackend(BaseBackend):
         For PyTorch, this returns a list of mapped results since DataLoader
         doesn't support lazy mapping like tf.data.Dataset.
         """
-        import inspect
-
         def _move_to_device(obj):
             if device is None:
                 return obj
@@ -547,7 +550,6 @@ class PyTorchBackend(BaseBackend):
 
     def save_dataset(self, dataset: Any, path: str) -> None:
         """Save a dataset to disk using torch.save."""
-        import os
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
         # Materialize dataset if it's a DataLoader
         if hasattr(dataset, '__iter__'):
@@ -558,7 +560,6 @@ class PyTorchBackend(BaseBackend):
 
     def load_dataset(self, path: str) -> List[Any]:
         """Load a dataset from disk."""
-        import os
         if os.path.exists(path):
             return torch.load(path)
         raise FileNotFoundError(f"The dataset path: {path} was not found")
@@ -585,8 +586,6 @@ class PyTorchBackend(BaseBackend):
         For PyTorch, if dataset is a list, create batches manually.
         If it's a Dataset, wrap with DataLoader.
         """
-        from torch.utils.data import DataLoader
-
         if isinstance(dataset, DataLoader):
             # Already batched, return as-is or rebatch
             return dataset
@@ -657,7 +656,6 @@ class PyTorchBackend(BaseBackend):
 
         For PyTorch, this materializes and shuffles the data.
         """
-        import random
         data = list(dataset)
         random.shuffle(data)
         return data

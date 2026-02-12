@@ -5,7 +5,9 @@
 """
 TensorFlow backend implementation.
 """
+import os
 from typing import Any, List, Tuple, Callable, Optional
+from xml.dom import NotFoundErr
 
 import numpy as np
 import tensorflow as tf
@@ -414,9 +416,7 @@ class TensorFlowBackend(BaseBackend):
 
     def load_dataset(self, path: str) -> tf.data.Dataset:
         """Load a dataset from disk."""
-        from os import path as os_path
-        from xml.dom import NotFoundErr
-        if os_path.exists(path):
+        if os.path.exists(path):
             return tf.data.experimental.load(path)
         raise NotFoundErr(f"The dataset path: {path} was not found")
 
@@ -647,8 +647,7 @@ class TensorFlowBackend(BaseBackend):
 
     def is_sequential_model(self, model: tf.keras.Model) -> bool:
         """Check if a model is a Sequential model."""
-        from tensorflow.keras.models import Sequential
-        return isinstance(model, Sequential)
+        return isinstance(model, tf.keras.Sequential)
 
     def create_sequential_from_layers(self, layers: List[tf.keras.layers.Layer]) -> tf.keras.Model:
         """Create a Sequential model from a list of layers."""

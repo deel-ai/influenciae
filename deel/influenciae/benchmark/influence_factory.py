@@ -8,6 +8,7 @@ This will be useful for streamlining the benchmarks.
 """
 from abc import abstractmethod
 
+from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import (
     InfluenceModel,
     Framework,
@@ -31,12 +32,12 @@ def _resolve_default_loss_function(model: Any) -> Callable:
     backend = get_backend_for_model(model)
 
     if backend.framework == Framework.TENSORFLOW:
-        import tensorflow as tf
-        from tensorflow.keras.losses import Reduction
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
 
-        return tf.keras.losses.CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)
+        return tf.keras.losses.CategoricalCrossentropy(from_logits=True, reduction=reduction.NONE)
 
-    import torch.nn.functional as f
+    f = import_optional_module("torch.nn.functional", extra="pytorch")
 
     def pytorch_cross_entropy_no_reduction(predictions, targets):
         """PyTorch cross-entropy compatible with class indices or one-hot labels."""

@@ -9,6 +9,7 @@ Supports both TensorFlow and PyTorch models through the backend abstraction laye
 """
 from abc import abstractmethod
 
+from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import BaseInfluenceCalculator, BaseBackend, Framework, get_backend_for_model
 from ..types import Tuple, Callable, Union, Any, Optional
 
@@ -70,10 +71,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             The loss function to validate.
         """
         if self.backend.framework == Framework.TENSORFLOW:
-            import tensorflow as tf
-            from tensorflow.keras.losses import Reduction
+            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
             if hasattr(loss_function, 'reduction'):
-                assert loss_function.reduction == Reduction.NONE, \
+                assert loss_function.reduction == reduction.NONE, \
                     "The loss function must not have reduction (use Reduction.NONE)."
         else:  # PyTorch
             if hasattr(loss_function, 'reduction'):
@@ -90,7 +90,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             The model to validate.
         """
         if self.backend.framework == Framework.TENSORFLOW:
-            import tensorflow as tf
+            tf = import_optional_module("tensorflow", extra="tensorflow")
             layers = self.backend.get_layers(model)
             if not isinstance(layers[-1], tf.keras.layers.Dense):
                 raise ValueError('The last layer of the model must be a Dense layer with no bias.')
@@ -118,7 +118,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         layer
             The last Linear layer, or None if not found.
         """
-        import torch.nn as nn
+        nn = import_optional_module("torch.nn", extra="pytorch")
         last_linear = None
         for module in model.modules():
             if isinstance(module, nn.Linear):

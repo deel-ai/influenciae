@@ -11,6 +11,7 @@ This module is backend-agnostic and supports both TensorFlow and PyTorch.
 """
 from abc import abstractmethod
 
+from .._optional_imports import import_optional_module
 from .sorted_dict import BatchSort, ORDER
 from ..common.backend import (
     BaseBackend,
@@ -238,7 +239,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
     def _query_tensorflow(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
         """TensorFlow-specific query using reduce for lazy evaluation within graph."""
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         k = self.batched_sorted_dict.k
         order = self.batched_sorted_dict.order

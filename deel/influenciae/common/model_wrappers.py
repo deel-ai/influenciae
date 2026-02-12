@@ -9,6 +9,7 @@ Supports both TensorFlow and PyTorch models.
 import itertools
 from typing import Any, Callable, List, Optional, Tuple, Union
 
+from .._optional_imports import import_optional_attr, import_optional_module
 from .backend import BaseBackend, Framework, get_backend_for_model
 
 # Type aliases
@@ -115,20 +116,20 @@ class BaseInfluenceModel:
     def _get_default_loss_function(self) -> Callable:
         """Get the default loss function for the framework."""
         if self.backend.framework == Framework.TENSORFLOW:
-            import tensorflow as tf
-            from tensorflow.keras.losses import Reduction
+            tf = import_optional_module("tensorflow", extra="tensorflow")
+            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
             return tf.keras.losses.CategoricalCrossentropy(
-                from_logits=False, reduction=Reduction.NONE
+                from_logits=False, reduction=reduction.NONE
             )
 
-        import torch.nn as nn
+        nn = import_optional_module("torch.nn", extra="pytorch")
         return nn.CrossEntropyLoss(reduction='none')
 
     def _validate_loss_function(self, loss_function: Callable) -> None:
         """Validate that the loss function doesn't have reduction."""
         if self.backend.framework == Framework.TENSORFLOW:
-            from tensorflow.keras.losses import Reduction
-            if hasattr(loss_function, 'reduction') and loss_function.reduction is not Reduction.NONE:
+            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
+            if hasattr(loss_function, 'reduction') and loss_function.reduction is not reduction.NONE:
                 raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
         # For PyTorch, we could check loss_function.reduction == 'none' but it's less standardized
 

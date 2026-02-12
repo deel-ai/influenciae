@@ -9,6 +9,9 @@ https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+import copy
+
+from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import InfluenceModel, InverseHessianVectorProductFactory, Framework
 from ..types import Union, Optional, Any
@@ -74,7 +77,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             shuffle_buffer_size: int
     ):
         """TensorFlow-specific initialization."""
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         self.epsilon_tensor = tf.constant(self.epsilon, dtype=tf.float32)
 
@@ -132,9 +135,9 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             _target_layer: Union[int, str]
     ):
         """PyTorch-specific initialization."""
-        import torch
-        from torch.utils.data import DataLoader, TensorDataset
-        import copy
+        torch = import_optional_module("torch", extra="pytorch")
+        data_loader_cls = import_optional_attr("torch.utils.data", "DataLoader", extra="pytorch")
+        tensor_dataset_cls = import_optional_attr("torch.utils.data", "TensorDataset", extra="pytorch")
 
         device = next(influence_model.model.parameters()).device
 
@@ -165,8 +168,8 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
         # Get the batch size from the original dataset
         batch_size = self.backend.get_dataset_batch_size(dataset)
-        dataset_to_estimate_hessian = DataLoader(
-            TensorDataset(f_array, y_array),
+        dataset_to_estimate_hessian = data_loader_cls(
+            tensor_dataset_cls(f_array, y_array),
             batch_size=batch_size,
             shuffle=False
         )
@@ -218,7 +221,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
     def _compute_alpha_tensorflow(self, z_batch: Any, y_batch: Any) -> Any:
         """TensorFlow-specific alpha computation."""
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         # First, we compute the second term, which contains the Hessian vector product
         weights = self.perturbed_head.trainable_weights
@@ -266,7 +269,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
     def _compute_alpha_pytorch(self, z_batch: Any, y_batch: Any) -> Any:
         """PyTorch-specific alpha computation."""
-        import torch
+        torch = import_optional_module("torch", extra="pytorch")
 
         device = z_batch.device
         dtype = z_batch.dtype

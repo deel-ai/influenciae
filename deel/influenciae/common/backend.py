@@ -13,6 +13,8 @@ from typing import Any, List, Tuple, Callable, Optional, Union
 
 import numpy as np
 
+from .._optional_imports import import_optional_attr, import_optional_module
+
 
 class Framework(Enum):
     """Enum for supported deep learning frameworks."""
@@ -59,14 +61,14 @@ def detect_framework(model: Any) -> Framework:
         If the model framework cannot be detected.
     """
     try:
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
         if isinstance(model, tf.keras.Model):
             return Framework.TENSORFLOW
     except ImportError:
         pass
 
     try:
-        import torch.nn as nn
+        nn = import_optional_module("torch.nn", extra="pytorch")
         if isinstance(model, nn.Module):
             return Framework.PYTORCH
     except ImportError:
@@ -98,14 +100,14 @@ def detect_tensor_framework(tensor: Any) -> Framework:
         If the tensor framework cannot be detected.
     """
     try:
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
         if tf.is_tensor(tensor):
             return Framework.TENSORFLOW
     except ImportError:
         pass
 
     try:
-        import torch
+        torch = import_optional_module("torch", extra="pytorch")
         if isinstance(tensor, torch.Tensor):
             return Framework.PYTORCH
     except ImportError:
@@ -133,7 +135,7 @@ def detect_dtype_framework(dtype: Any) -> Optional[Framework]:
     """
     # Check for TensorFlow dtype
     try:
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
         if isinstance(dtype, tf.DType):
             return Framework.TENSORFLOW
         # Also check for string representation of TensorFlow dtypes
@@ -145,7 +147,7 @@ def detect_dtype_framework(dtype: Any) -> Optional[Framework]:
 
     # Check for PyTorch dtype
     try:
-        import torch
+        torch = import_optional_module("torch", extra="pytorch")
         if isinstance(dtype, torch.dtype):
             return Framework.PYTORCH
         # Also check for string representation of PyTorch dtypes
@@ -1520,12 +1522,22 @@ def get_backend(framework: Framework) -> BaseBackend:
         The backend instance for the framework.
     """
     if framework == Framework.TENSORFLOW:
-        from .backend_tensorflow import TensorFlowBackend
-        return TensorFlowBackend()
+        tensorflow_backend_cls = import_optional_attr(
+            ".backend_tensorflow",
+            "TensorFlowBackend",
+            package=__package__,
+            extra="tensorflow",
+        )
+        return tensorflow_backend_cls()
 
     if framework == Framework.PYTORCH:
-        from .backend_pytorch import PyTorchBackend
-        return PyTorchBackend()
+        pytorch_backend_cls = import_optional_attr(
+            ".backend_pytorch",
+            "PyTorchBackend",
+            package=__package__,
+            extra="pytorch",
+        )
+        return pytorch_backend_cls()
 
     raise ValueError(f"Unsupported framework: {framework}")
 

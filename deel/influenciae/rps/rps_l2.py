@@ -9,6 +9,7 @@ https://arxiv.org/abs/1811.09720
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import Framework
 from ..types import Tuple, Callable, Union, Any, Optional
@@ -86,16 +87,24 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _train_last_layer_tensorflow(self, epochs: int):
         """TensorFlow-specific training using BacktrackingLineSearch optimizer."""
-        import tensorflow as tf
-        from tensorflow.keras.losses import MeanSquaredError
-        from ..utils import BacktrackingLineSearch
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        mean_squared_error_cls = import_optional_attr(
+            "tensorflow.keras.losses",
+            "MeanSquaredError",
+            extra="tensorflow",
+        )
+        backtracking_line_search_cls = import_optional_attr(
+            "deel.influenciae.utils",
+            "BacktrackingLineSearch",
+            extra="tensorflow",
+        )
 
         self.linear_layer = self._create_surrogate_model_tensorflow()
-        optimizer = BacktrackingLineSearch(
+        optimizer = backtracking_line_search_cls(
             batches_per_epoch=int(self.n_train / self.backend.get_dataset_batch_size(self.train_set)),
             scaling_factor=self.scaling_factor
         )
-        mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+        mse_loss = mean_squared_error_cls(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
         self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
         assert self.linear_layer is not None  # Type narrowing for mypy
@@ -108,9 +117,13 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _train_last_layer_pytorch(self, epochs: int):
         """PyTorch-specific training using BacktrackingLineSearchPyTorch optimizer."""
-        import torch
-        import torch.nn as nn
-        from ..utils import BacktrackingLineSearchPyTorch
+        torch = import_optional_module("torch", extra="pytorch")
+        nn = import_optional_module("torch.nn", extra="pytorch")
+        backtracking_line_search_cls = import_optional_attr(
+            "deel.influenciae.utils",
+            "BacktrackingLineSearchPyTorch",
+            extra="pytorch",
+        )
 
         device = next(self.model.parameters()).device
         self.linear_layer = self._create_surrogate_model_pytorch().to(device)
@@ -118,7 +131,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         mse_loss = nn.MSELoss(reduction="mean")
 
         # Create the backtracking line search optimizer
-        optimizer = BacktrackingLineSearchPyTorch(
+        optimizer = backtracking_line_search_cls(
             params=self.linear_layer.parameters(),
             batches_per_epoch=int(self.n_train / len(next(iter(self.train_set))[0])),
             scaling_factor=self.scaling_factor
@@ -196,7 +209,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         loss, gradients, z_batch, y_target
             Tuple with loss value, gradients, latent space, and target predictions.
         """
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         assert self.linear_layer is not None  # Initialized in __init__
         z_batch = self.feature_extractor(x_batch)
@@ -216,19 +229,17 @@ class RepresenterPointL2(BaseRepresenterPoint):
         surrogate_model
             A TensorFlow L2-regularized linear model.
         """
-        from tensorflow.keras import Model
-        from tensorflow.keras.layers import Input, Dense
-        from tensorflow.keras.regularizers import L2
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
-        inputs = Input(shape=self.feature_extractor.output_shape[1:], dtype=self.model.output.dtype)
-        last_layer = Dense(
+        inputs = tf.keras.layers.Input(shape=self.feature_extractor.output_shape[1:], dtype=self.model.output.dtype)
+        last_layer = tf.keras.layers.Dense(
             self.model.output_shape[-1],
             use_bias=False,
-            kernel_regularizer=L2(self.lambda_regularization),
+            kernel_regularizer=tf.keras.regularizers.L2(self.lambda_regularization),
             dtype=self.model.output.dtype
         )
         outputs = last_layer(inputs)
-        surrogate_model = Model(inputs=inputs, outputs=outputs)
+        surrogate_model = tf.keras.Model(inputs=inputs, outputs=outputs)
         surrogate_model.layers[-1].trainable = True
         surrogate_model.compile(loss=self.model.compiled_loss)
 
@@ -243,7 +254,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         surrogate_model
             A PyTorch L2-regularized linear model.
         """
-        import torch.nn as nn
+        nn = import_optional_module("torch.nn", extra="pytorch")
 
         # Get input and output dimensions from the feature extractor and model
         children = list(self.model.children())
@@ -302,7 +313,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _compute_alpha_tensorflow(self, z_batch: Any, y_batch: Any) -> Any:
         """TensorFlow-specific alpha computation."""
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         assert self.linear_layer is not None  # Initialized in __init__
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
@@ -334,7 +345,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _compute_alpha_pytorch(self, z_batch: Any, y_batch: Any) -> Any:
         """PyTorch-specific alpha computation (stable + matches TF intent)."""
-        import torch
+        torch = import_optional_module("torch", extra="pytorch")
 
         assert self.linear_layer is not None  # Initialized in __init__
         device = z_batch.device
@@ -395,7 +406,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _predict_with_kernel_tensorflow(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
         """TensorFlow-specific kernel prediction."""
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
 
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
@@ -419,7 +430,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def _predict_with_kernel_pytorch(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
         """PyTorch-specific kernel prediction."""
-        import torch
+        torch = import_optional_module("torch", extra="pytorch")
 
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)

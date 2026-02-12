@@ -10,6 +10,7 @@ Supports both TensorFlow and PyTorch backends.
 """
 from dataclasses import dataclass
 
+from .._optional_imports import import_optional_attr, import_optional_module
 from ..types import Callable, Optional
 
 
@@ -236,7 +237,8 @@ class BacktrackingLineSearchPyTorch:
             max_eta: float = 10.,
             min_eta: float = 1e-6,
     ):
-        from torch.optim import SGD as TorchSGD
+        self._torch = import_optional_module("torch", extra="pytorch")
+        torch_sgd = import_optional_attr("torch.optim", "SGD", extra="pytorch")
 
         self.params = list(params)
         self.scaling_factor = scaling_factor
@@ -255,7 +257,7 @@ class BacktrackingLineSearchPyTorch:
         )
 
         # Internal SGD optimizer for applying gradients
-        self._sgd = TorchSGD(self.params, lr=self.parameters.eta)
+        self._sgd = torch_sgd(self.params, lr=self.parameters.eta)
 
     def step(  # pylint: disable=unused-argument
         self,
@@ -347,7 +349,7 @@ class BacktrackingLineSearchPyTorch:
         called_closure
             The new value of the loss for the model with the updated weights
         """
-        import torch
+        torch = self._torch
 
         # Restore weights to original state
         with torch.no_grad():

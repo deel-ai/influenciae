@@ -17,6 +17,7 @@ from warnings import warn
 import numpy as np
 
 from .influence_factory import InfluenceCalculatorFactory
+from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import BaseBackend, Framework, get_available_frameworks, get_backend, get_backend_for_tensor
 from ..types import Tuple, Dict, Any, Optional, List
 
@@ -277,14 +278,14 @@ class MislabelingDetectorEvaluator:
                 assert path_to_save is not None  # Ensured by earlier check
                 experiment_name = method + "_" + str(index)
 
-                import tensorflow as tf
+                tf = import_optional_module("tensorflow", extra="tensorflow")
                 file_writer = tf.summary.create_file_writer(
                     path_to_save + "/" + method + "/seed" + str(index),
                     filename_suffix=experiment_name
                 )
 
             if self.backend.framework == Framework.TENSORFLOW:
-                import tensorflow as tf
+                tf = import_optional_module("tensorflow", extra="tensorflow")
                 tf.keras.backend.clear_session()
 
             self.set_seed(seed + index, self.backend)
@@ -325,7 +326,7 @@ class MislabelingDetectorEvaluator:
 
             if use_tensorboard:
                 assert file_writer is not None
-                import tensorflow as tf
+                tf = import_optional_module("tensorflow", extra="tensorflow")
                 with file_writer.as_default():
                     tf.summary.scalar("roc_value", roc, index)
                     self.plot_tensorboard_roc(sorted_curve, "roc_curve")
@@ -338,7 +339,7 @@ class MislabelingDetectorEvaluator:
 
         if use_tensorboard:
             assert path_to_save is not None  # Ensured by earlier check
-            import tensorflow as tf
+            tf = import_optional_module("tensorflow", extra="tensorflow")
             file_writer = tf.summary.create_file_writer(path_to_save + "/synthesis/" + method + "/")
             with file_writer.as_default():
                 tf.summary.scalar("roc_mean", roc, 0)
@@ -359,7 +360,7 @@ class MislabelingDetectorEvaluator:
         experiment_name
             A string with the experiment's name
         """
-        import tensorflow as tf
+        tf = import_optional_module("tensorflow", extra="tensorflow")
         for i, c in enumerate(curve):
             tf.summary.scalar(experiment_name, c, i)
 
@@ -415,14 +416,14 @@ class MislabelingDetectorEvaluator:
 
         if backend is None or backend.framework == Framework.TENSORFLOW:
             try:
-                import tensorflow as tf
+                tf = import_optional_module("tensorflow", extra="tensorflow")
                 tf.random.set_seed(seed)
             except ImportError:
                 pass
 
         if backend is None or backend.framework == Framework.PYTORCH:
             try:
-                import torch
+                torch = import_optional_module("torch", extra="pytorch")
                 torch.manual_seed(seed)
                 if torch.cuda.is_available():
                     torch.cuda.manual_seed_all(seed)
@@ -470,7 +471,7 @@ class MislabelingDetectorEvaluator:
             during the evaluation).
         """
         if self.backend.framework == Framework.TENSORFLOW:
-            import tensorflow as tf
+            tf = import_optional_module("tensorflow", extra="tensorflow")
 
             dataset_size = int(tf.data.experimental.cardinality(self.training_dataset).numpy())
             noise_mask = np.random.uniform(size=(dataset_size,)) > self.mislabeling_ratio
@@ -497,13 +498,13 @@ class MislabelingDetectorEvaluator:
 
         # PyTorch / generic iterable path
         try:
-            import torch
-            from torch.utils.data import DataLoader
+            torch = import_optional_module("torch", extra="pytorch")
+            data_loader_cls = import_optional_attr("torch.utils.data", "DataLoader", extra="pytorch")
         except ImportError as exc:
             raise ImportError("PyTorch backend requested but PyTorch is not installed.") from exc
 
         samples = []
-        if isinstance(self.training_dataset, DataLoader):
+        if isinstance(self.training_dataset, data_loader_cls):
             for batch in self.training_dataset:
                 x_batch, y_batch = batch[0], batch[1]
                 batch_size = x_batch.shape[0]
