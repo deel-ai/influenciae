@@ -11,14 +11,33 @@ BiCGSTAB (Biconjugate Gradient Stabilized) solver based also on jax.scipy's impl
 https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.bicgstab.html
 https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditioned_BiCGSTAB
 """
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from ..common.backend import BaseBackend, get_backend_for_tensor, Framework
 from ..types import Callable, Optional, Any
+
+if TYPE_CHECKING:
+    from ..common.backend import BaseBackend
 
 
 def _identity(x):  # pylint: disable=C0116
     return x
+
+
+def _to_python_float(value: Any) -> float:
+    """Convert backend scalar-like values to Python float."""
+    if hasattr(value, 'item'):
+        return float(value.item())
+    if hasattr(value, 'numpy'):
+        return float(value.numpy())
+    return float(value)
+
+
+def _is_tensorflow_backend(backend: Any) -> bool:
+    """Return True when backend belongs to TensorFlow framework."""
+    framework = getattr(backend, "framework", None)
+    return getattr(framework, "value", framework) == "tensorflow"
 
 
 def conjugate_gradients_solve(
@@ -28,7 +47,7 @@ def conjugate_gradients_solve(
     maxiter: int = 100,
     tol: float = 1e-10,
     eps: float = 1e-12,
-    backend: Optional[BaseBackend] = None,
+    backend: Optional["BaseBackend"] = None,
 ) -> Any:
     """
     Solve Ax = b using Conjugate Gradients where operator(x) returns Ax.
@@ -64,9 +83,11 @@ def conjugate_gradients_solve(
 
     # Auto-detect backend if not provided
     if backend is None:
+        from ..common.backend import get_backend_for_tensor
+
         backend = get_backend_for_tensor(b)
 
-    if backend.framework == Framework.TENSORFLOW:
+    if _is_tensorflow_backend(backend):
         return _conjugate_gradients_tensorflow(operator, b, x0, maxiter, tol, eps, backend)
 
     is_batched = backend.tensor_ndim(b) > 1
@@ -130,7 +151,7 @@ def _conjugate_gradients_tensorflow(
     maxiter: int,
     tol: float,
     eps: float,
-    backend: BaseBackend,
+    backend: "BaseBackend",
 ) -> Any:
     """
     TF-safe Conjugate Gradients: uses backend.while_loop so it can run under
@@ -259,7 +280,7 @@ def biconjugate_gradient_stabilized_solve(
         tol: float = 1e-5,
         atol: float = 1e-6,
         M: Callable = _identity,
-        backend: Optional[BaseBackend] = None):
+        backend: Optional["BaseBackend"] = None):
     """
     A BiCGSTAB (Biconjugate Gradient Stabilized) solver.
 
@@ -295,6 +316,8 @@ def biconjugate_gradient_stabilized_solve(
 
     # Auto-detect backend if not provided
     if backend is None:
+        from ..common.backend import get_backend_for_tensor
+
         backend = get_backend_for_tensor(b)
 
     if x0 is None:
@@ -306,19 +329,10 @@ def biconjugate_gradient_stabilized_solve(
 
     bs = dot(b, b)
     atol2 = backend.maximum(tol * tol * bs, atol * atol)
+    atol2_val = _to_python_float(atol2)
 
     def check_convergence(r, k):
-        rs = dot(r, r)
-        # Convert to Python scalar for comparison
-        if hasattr(rs, 'item'):
-            rs_val = rs.item()
-            atol2_val = atol2.item() if hasattr(atol2, 'item') else float(atol2)
-        elif hasattr(rs, 'numpy'):
-            rs_val = float(rs.numpy())
-            atol2_val = float(atol2.numpy()) if hasattr(atol2, 'numpy') else float(atol2)
-        else:
-            rs_val = float(rs)
-            atol2_val = float(atol2)
+        rs_val = _to_python_float(dot(r, r))
         return (rs_val > atol2_val) and (0 <= k < maxiter)
 
     r0 = b - operator(x0)
@@ -333,15 +347,7 @@ def biconjugate_gradient_stabilized_solve(
     while check_convergence(r, k):
         rho_ = dot(rhat, r)
 
-        # Handle potential division by zero
-        if hasattr(rho_, 'item'):
-            rho_val = rho_.item()
-        elif hasattr(rho_, 'numpy'):
-            rho_val = float(rho_.numpy())
-        else:
-            rho_val = float(rho_)
-
-        if rho_val == 0:
+        if _to_python_float(rho_) == 0.0:
             break
 
         beta = (rho_ / rho) * (alpha / omega)
@@ -354,19 +360,8 @@ def biconjugate_gradient_stabilized_solve(
 
         s = r - alpha * q
 
-        # Check for early exit
         ss = dot(s, s)
-        if hasattr(ss, 'item'):
-            ss_val = ss.item()
-            atol2_val = atol2.item() if hasattr(atol2, 'item') else float(atol2)
-        elif hasattr(ss, 'numpy'):
-            ss_val = float(ss.numpy())
-            atol2_val = float(atol2.numpy()) if hasattr(atol2, 'numpy') else float(atol2)
-        else:
-            ss_val = float(ss)
-            atol2_val = float(atol2)
-
-        if ss_val < atol2_val:
+        if _to_python_float(ss) < atol2_val:
             x = x + alpha * phat
             break
 
@@ -377,22 +372,7 @@ def biconjugate_gradient_stabilized_solve(
         tt = dot(t, t)
         omega = ts / tt
 
-        # Check for breakdown
-        if hasattr(omega, 'item'):
-            omega_val = omega.item()
-        elif hasattr(omega, 'numpy'):
-            omega_val = float(omega.numpy())
-        else:
-            omega_val = float(omega)
-
-        if hasattr(alpha, 'item'):
-            alpha_val = alpha.item()
-        elif hasattr(alpha, 'numpy'):
-            alpha_val = float(alpha.numpy())
-        else:
-            alpha_val = float(alpha)
-
-        if omega_val == 0 or alpha_val == 0:
+        if _to_python_float(omega) == 0.0 or _to_python_float(alpha) == 0.0:
             break
 
         x = x + alpha * phat + omega * shat
@@ -439,6 +419,7 @@ def _bicgstab_numpy(
     """
     if x0 is None:
         x0 = np.zeros_like(b)
+    assert x0 is not None
 
     def dot(x, y):
         return float(np.sum(x * y))
