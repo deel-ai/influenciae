@@ -371,7 +371,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
         # Scale by (-2 * lambda * n_train + eps) in *same dtype*
         eps = torch.tensor(1e-5, device=device, dtype=dtype)
-        denom = (-2.0 * self.lambda_regularization * float(self.n_train))
+        denom = -2.0 * self.lambda_regularization * float(self.n_train)
         denom = torch.tensor(denom, device=device, dtype=dtype) + eps
         alpha = alpha / denom
 

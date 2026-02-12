@@ -13,7 +13,7 @@ from typing import Any, List, Tuple, Callable, Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader
 
 from .backend import BaseBackend, Framework
@@ -370,7 +370,12 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         return feature_extractor, head
 
-    def normalize(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
+    def normalize(  # pylint: disable=not-callable
+        self,
+        tensor: torch.Tensor,
+        axis: Optional[int] = None,
+        keepdims: bool = False,
+    ) -> torch.Tensor:
         """Normalize a tensor along an axis using L2 norm."""
         norm = torch.linalg.norm(tensor, dim=axis, keepdim=keepdims)
         return tensor / norm
@@ -776,7 +781,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             b = torch.tensor(b)
         return torch.maximum(a, b)
 
-    def pinv(self, matrix: torch.Tensor) -> torch.Tensor:
+    def pinv(self, matrix: torch.Tensor) -> torch.Tensor:  # pylint: disable=not-callable
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
         return torch.linalg.pinv(matrix)
 
@@ -947,7 +952,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         return nn.Sequential(*layers)
 
     # Additional operations for boundary-based calculators
-    def norm(  # pylint: disable=redefined-builtin
+    def norm(  # pylint: disable=redefined-builtin,not-callable
         self,
         tensor: torch.Tensor,
         ord: Optional[int] = None,
@@ -1114,7 +1119,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Extract diagonal from a matrix with offset k."""
         return torch.diagonal(tensor, offset=k)
 
-    def eigh_tridiagonal(
+    def eigh_tridiagonal(  # pylint: disable=not-callable
         self,
         maindiag: torch.Tensor,
         superdiag: torch.Tensor,
@@ -1142,7 +1147,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             return eig_vals, None
         return eig_vals, eig_vectors
 
-    def eig(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def eig(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:  # pylint: disable=not-callable
         """Compute eigenvalues and eigenvectors of a square matrix."""
         return torch.linalg.eig(tensor)
 

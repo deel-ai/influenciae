@@ -91,17 +91,18 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         perturbed_head.compile(optimizer=optimizer, loss=influence_model.loss_function)
 
         # Get a dataset to compute the SGD step
+        batch_size = self.backend.get_dataset_batch_size(dataset)
         if n_samples_for_hessian is None:
             dataset_to_estimate_hessian = dataset
         else:
-            n_batches_for_hessian = max(n_samples_for_hessian // dataset._batch_size, 1)
+            n_batches_for_hessian = max(n_samples_for_hessian // batch_size, 1)
             dataset_to_estimate_hessian = dataset.shuffle(shuffle_buffer_size).take(n_batches_for_hessian)
         f_array, y_array = None, None
         for x, y in dataset_to_estimate_hessian:
             f = self.feature_extractor(x)
             f_array = f if f_array is None else tf.concat([f_array, f], axis=0)
             y_array = y if y_array is None else tf.concat([y_array, y], axis=0)
-        dataset_to_estimate_hessian = tf.data.Dataset.from_tensor_slices((f_array, y_array)).batch(dataset._batch_size)
+        dataset_to_estimate_hessian = tf.data.Dataset.from_tensor_slices((f_array, y_array)).batch(batch_size)
 
         # Accumulate the gradients for the whole dataset and then update
         trainable_vars = perturbed_head.trainable_variables
