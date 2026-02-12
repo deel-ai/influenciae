@@ -314,7 +314,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         for i in range(batch_size):
             # Flatten and expand dims for IHVP computation
             grad_flat = grads_divided[i].permute(1, 0).reshape(1, -1)  # (1, out*in)
-            ihvp_result = self.ihvp_calculator._compute_ihvp_single_batch(
+            ihvp_result = self.ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=protected-access
                 (grad_flat,),
                 use_gradient=False
             )

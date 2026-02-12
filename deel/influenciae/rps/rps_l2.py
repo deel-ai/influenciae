@@ -173,11 +173,11 @@ class RepresenterPointL2(BaseRepresenterPoint):
                 gradients = [p.grad.clone() for p in self.linear_layer.parameters() if p.grad is not None]
 
                 # Define closure for loss re-evaluation
-                def closure():
+                def closure(z_batch_local=z_batch, y_target_local=y_target):
                     assert self.linear_layer is not None  # Already checked earlier
                     with torch.no_grad():
-                        logits_new = self.linear_layer(z_batch)
-                        mse_new = mse_loss(logits_new, y_target)
+                        logits_new = self.linear_layer(z_batch_local)
+                        mse_new = mse_loss(logits_new, y_target_local)
                         reg_new = self.lambda_regularization * (W.pow(2).sum())
                         return mse_new + reg_new
 
