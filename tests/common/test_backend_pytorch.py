@@ -484,6 +484,48 @@ class TestPyTorchBackendDatasetOperations:
         _ = list(cached)
         assert call_count["value"] == 2
 
+    def test_composed_lazy_pipeline_map_batch_unbatch_take_cache(self, backend):
+        """Test composed lazy pipeline map->batch->unbatch->take->cache."""
+        dataset = [
+            (torch.tensor([1.0]), torch.tensor([10.0])),
+            (torch.tensor([2.0]), torch.tensor([20.0])),
+            (torch.tensor([3.0]), torch.tensor([30.0])),
+            (torch.tensor([4.0]), torch.tensor([40.0])),
+            (torch.tensor([5.0]), torch.tensor([50.0])),
+        ]
+        call_count = {"value": 0}
+
+        def map_fn(x, y):
+            call_count["value"] += 1
+            return x + 1.0, y * 2.0
+
+        mapped = backend.map_dataset(dataset, map_fn)
+        batched = backend.batch_dataset(mapped, batch_size=2)
+        unbatched = backend.unbatch_dataset(batched)
+        taken = backend.take_dataset(unbatched, 3)
+
+        assert call_count["value"] == 0
+
+        cached = backend.cache_dataset(taken)
+        calls_after_cache = call_count["value"]
+
+        assert calls_after_cache >= 3
+        assert len(cached) == 3
+
+        first_pass = list(cached)
+        second_pass = list(cached)
+
+        assert call_count["value"] == calls_after_cache
+
+        for item in [first_pass, second_pass]:
+            assert len(item) == 3
+            assert torch.equal(item[0][0], torch.tensor([2.0]))
+            assert torch.equal(item[0][1], torch.tensor([20.0]))
+            assert torch.equal(item[1][0], torch.tensor([3.0]))
+            assert torch.equal(item[1][1], torch.tensor([40.0]))
+            assert torch.equal(item[2][0], torch.tensor([4.0]))
+            assert torch.equal(item[2][1], torch.tensor([60.0]))
+
     def test_cache_save_load_dataset(self, backend, tmp_path):
         """Test caching, saving and loading datasets."""
         dataset = [torch.tensor([1.0]), torch.tensor([2.0])]
