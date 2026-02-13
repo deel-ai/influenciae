@@ -3,23 +3,40 @@ Lazy, re-iterable dataset wrappers for the PyTorch backend.
 """
 from math import ceil
 import random
-from typing import Any, Callable, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterator, List, Optional, Protocol, Union, cast
 from warnings import warn
 
 from .._optional_imports import import_optional_module
 
 torch = import_optional_module("torch", extra="pytorch")
 
+if TYPE_CHECKING:
+    import tensorflow as tf
 
-def _safe_len(dataset: Any) -> Optional[int]:
+    class PyTorchDatasetLike(Protocol):
+        """Protocol compatible with torch Dataset/DataLoader objects."""
+
+        def __iter__(self) -> Iterator[Any]:
+            ...
+
+    DatasetLike = Union[
+        tf.data.Dataset,
+        PyTorchDatasetLike,
+        "LazyDataset",
+    ]
+else:
+    DatasetLike = Any
+
+
+def _safe_len(dataset: DatasetLike) -> Optional[int]:
     """Return ``len(dataset)`` when available."""
     try:
-        return len(dataset)
+        return len(cast(Any, dataset))
     except TypeError:
         return None
 
 
-def _is_iterator(dataset: Any) -> bool:
+def _is_iterator(dataset: DatasetLike) -> bool:
     """Check whether an object is a one-pass iterator."""
     try:
         return iter(dataset) is dataset
@@ -27,9 +44,16 @@ def _is_iterator(dataset: Any) -> bool:
         return False
 
 
-def ensure_reiterable(dataset: Any, context: str = "dataset") -> Any:
+def ensure_reiterable(
+    dataset: DatasetLike,
+    context: str = "dataset",
+) -> Union[DatasetLike, List[Any]]:
     """
     Ensure a dataset can be iterated multiple times.
+
+    Accepted inputs include ``tf.data.Dataset`` and PyTorch dataset variants
+    (``torch.utils.data.Dataset`` / ``torch.utils.data.DataLoader``), plus
+    other iterable wrappers used internally.
 
     If the provided object is a one-pass iterator, materialize it into a list to
     avoid silent exhaustion in multi-pass workflows.
@@ -74,7 +98,7 @@ class LazyDataset:
 class MappedDataset(LazyDataset):
     """Dataset applying a lazy mapping function."""
 
-    def __init__(self, source: Any, map_fn: Callable[[Any], Any]):
+    def __init__(self, source: DatasetLike, map_fn: Callable[[Any], Any]):
         super().__init__()
         self.source = ensure_reiterable(source, context="map_dataset input")
         self.map_fn = map_fn
@@ -94,7 +118,7 @@ class MappedDataset(LazyDataset):
 class CachedDataset(LazyDataset):
     """Materialized dataset used as an explicit cache boundary."""
 
-    def __init__(self, source: Any):
+    def __init__(self, source: DatasetLike):
         super().__init__()
         source = ensure_reiterable(source, context="cache_dataset input")
         self._cached_data = list(source)
@@ -108,7 +132,7 @@ class CachedDataset(LazyDataset):
 class ZippedDataset(LazyDataset):
     """Lazy zip of two datasets."""
 
-    def __init__(self, dataset1: Any, dataset2: Any):
+    def __init__(self, dataset1: DatasetLike, dataset2: DatasetLike):
         super().__init__()
         self.dataset1 = ensure_reiterable(dataset1, context="zip_datasets first input")
         self.dataset2 = ensure_reiterable(dataset2, context="zip_datasets second input")
@@ -158,7 +182,7 @@ def _collate_batch_items(batch_items: List[Any]) -> Any:
 class BatchedDataset(LazyDataset):
     """Lazy batching wrapper."""
 
-    def __init__(self, source: Any, batch_size: int):
+    def __init__(self, source: DatasetLike, batch_size: int):
         super().__init__()
         if batch_size <= 0:
             raise ValueError("batch_size must be > 0")
@@ -207,7 +231,7 @@ def _infer_batch_len(batch: Any) -> Optional[int]:
 class UnbatchedDataset(LazyDataset):
     """Lazy unbatching wrapper."""
 
-    def __init__(self, source: Any):
+    def __init__(self, source: DatasetLike):
         super().__init__()
         self.source = ensure_reiterable(source, context="unbatch_dataset input")
 
@@ -240,7 +264,7 @@ class UnbatchedDataset(LazyDataset):
 class TakenDataset(LazyDataset):
     """Lazy dataset restricted to a fixed number of items."""
 
-    def __init__(self, source: Any, count: int):
+    def __init__(self, source: DatasetLike, count: int):
         super().__init__()
         self.source = source
         self.count = max(0, int(count))
@@ -272,7 +296,7 @@ class TakenDataset(LazyDataset):
 class BufferedShuffleDataset(LazyDataset):
     """Lazy shuffle with bounded memory via a finite buffer."""
 
-    def __init__(self, source: Any, buffer_size: int):
+    def __init__(self, source: DatasetLike, buffer_size: int):
         super().__init__()
         if buffer_size <= 0:
             raise ValueError("buffer_size must be > 0")
