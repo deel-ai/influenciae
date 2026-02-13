@@ -1510,6 +1510,47 @@ class TestWeightRangeOperationsParity:
         assert pt_idx_last == 1
 
 
+class TestBackendUtilitiesParity:
+    """Test framework detection and backend utility helpers."""
+
+    def test_get_available_frameworks(self):
+        """Test framework discovery includes both installed backends."""
+        from deel.influenciae.common import get_available_frameworks, Framework
+
+        frameworks = get_available_frameworks()
+
+        assert Framework.TENSORFLOW in frameworks
+        assert Framework.PYTORCH in frameworks
+
+    def test_detect_tensor_framework(self):
+        """Test tensor framework detection for TF and PyTorch tensors."""
+        from deel.influenciae.common import detect_tensor_framework, Framework
+
+        tf_tensor = tf.constant([1.0, 2.0], dtype=tf.float32)
+        pt_tensor = torch.tensor([1.0, 2.0], dtype=torch.float32)
+
+        assert detect_tensor_framework(tf_tensor) == Framework.TENSORFLOW
+        assert detect_tensor_framework(pt_tensor) == Framework.PYTORCH
+
+    def test_get_backend_for_tensor(self):
+        """Test backend lookup from tensor type."""
+        from deel.influenciae.common import get_backend_for_tensor, Framework
+
+        tf_backend = get_backend_for_tensor(tf.constant([1.0], dtype=tf.float32))
+        pt_backend = get_backend_for_tensor(torch.tensor([1.0], dtype=torch.float32))
+
+        assert tf_backend.framework == Framework.TENSORFLOW
+        assert pt_backend.framework == Framework.PYTORCH
+
+    def test_detect_dtype_framework(self):
+        """Test dtype framework detection and unknown dtype fallback."""
+        from deel.influenciae.common import detect_dtype_framework, Framework
+
+        assert detect_dtype_framework(tf.float32) == Framework.TENSORFLOW
+        assert detect_dtype_framework(torch.float32) == Framework.PYTORCH
+        assert detect_dtype_framework(np.float32) is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
 

@@ -490,6 +490,208 @@ class TestTensorFlowLossValidation:
         assert influence_model is not None
 
 
+class TestTensorFlowBackendDatasetOperations:
+    """Test TensorFlow backend dataset helpers."""
+
+    def test_map_dataset(self, backend):
+        """Test mapping a function over a batched dataset."""
+        x = tf.constant([[1.0], [2.0], [3.0], [4.0]])
+        y = tf.constant([[5.0], [6.0], [7.0], [8.0]])
+        dataset = tf.data.Dataset.from_tensor_slices((x, y)).batch(2)
+
+        mapped = backend.map_dataset(dataset, lambda a, b: (a + 1.0, b + 2.0), device="CPU:0")
+        first_x, first_y = next(iter(mapped))
+
+        assert almost_equal(first_x, tf.constant([[2.0], [3.0]]))
+        assert almost_equal(first_y, tf.constant([[7.0], [8.0]]))
+
+    def test_cache_save_load_dataset(self, backend, tmp_path):
+        """Test caching, saving and loading datasets."""
+        dataset = tf.data.Dataset.from_tensor_slices((tf.constant([1, 2]), tf.constant([3, 4]))).batch(1)
+        cached = backend.cache_dataset(dataset)
+
+        save_path = str(tmp_path / "tf_dataset")
+        backend.save_dataset(cached, save_path)
+        loaded = backend.load_dataset(save_path)
+
+        loaded_values = list(loaded.as_numpy_iterator())
+        assert len(loaded_values) == 2
+        assert np.array_equal(loaded_values[0][0], np.array([1]))
+
+    def test_get_dataset_batch_size_and_cardinality(self, backend):
+        """Test dataset batch size and cardinality helpers."""
+        dataset = tf.data.Dataset.from_tensor_slices(tf.constant([1, 2, 3, 4])).batch(2)
+
+        assert backend.get_dataset_batch_size(dataset) == 2
+        assert backend.get_dataset_cardinality(dataset) == 2
+
+    def test_zip_batch_unbatch_take_dataset(self, backend):
+        """Test zip, batch, unbatch and take operations."""
+        d1 = tf.data.Dataset.from_tensor_slices(tf.constant([1, 2, 3, 4])).batch(2)
+        d2 = tf.data.Dataset.from_tensor_slices(tf.constant([5, 6, 7, 8])).batch(2)
+
+        zipped = backend.zip_datasets(d1, d2)
+        first_pair = next(iter(zipped))
+        assert np.array_equal(first_pair[0].numpy(), np.array([1, 2]))
+        assert np.array_equal(first_pair[1].numpy(), np.array([5, 6]))
+
+        unbatched = backend.unbatch_dataset(d1)
+        taken = backend.take_dataset(unbatched, 3)
+        taken_values = list(taken.as_numpy_iterator())
+        assert taken_values == [1, 2, 3]
+
+        rebatched = backend.batch_dataset(unbatched, 2)
+        rebatched_values = list(rebatched.as_numpy_iterator())
+        assert len(rebatched_values) == 2
+        assert np.array_equal(rebatched_values[0], np.array([1, 2]))
+
+    def test_create_dataset_from_tensors(self, backend):
+        """Test creating a dataset from a tuple of tensors."""
+        tensors = (tf.constant([1.0, 2.0]), tf.constant([3.0, 4.0]))
+        dataset = backend.create_dataset_from_tensors(tensors, batch_size=8)
+        element = next(iter(dataset))
+
+        assert element[0].shape == (1, 2)
+        assert element[1].shape == (1, 2)
+
+    def test_shuffle_dataset_and_size(self, backend):
+        """Test shuffling and counting dataset elements."""
+        x = tf.constant([[1.0], [2.0], [3.0], [4.0]])
+        y = tf.constant([[5.0], [6.0], [7.0], [8.0]])
+        dataset = tf.data.Dataset.from_tensor_slices((x, y))
+
+        shuffled = backend.shuffle_dataset(dataset, buffer_size=4)
+        shuffled_batched = backend.batch_dataset(shuffled, 2)
+        assert backend.get_dataset_size(shuffled_batched) == 4
+
+    def test_get_dataset_element_spec_and_assert_batched(self, backend):
+        """Test element_spec lookup and batch assertion."""
+        batched = tf.data.Dataset.from_tensor_slices((tf.constant([1, 2]), tf.constant([3, 4]))).batch(1)
+        spec = backend.get_dataset_element_spec(batched)
+        assert isinstance(spec, tuple)
+        assert spec[0].shape == tf.TensorShape([None])
+
+        backend.assert_batched_dataset(batched)
+
+        unbatched = tf.data.Dataset.from_tensor_slices(tf.constant([1, 2]))
+        with pytest.raises(ValueError):
+            backend.assert_batched_dataset(unbatched)
+
+
+class TestTensorFlowBackendAdvancedOperations:
+    """Test TensorFlow backend operations not covered elsewhere."""
+
+    def test_ones_ones_like_and_argsort(self, backend):
+        """Test ones constructors and argsort ordering."""
+        ones = backend.ones((2, 3), dtype=backend.float32_dtype())
+        ones_like = backend.ones_like(tf.constant([[0.0, 0.0], [0.0, 0.0]]))
+        sorted_idx = backend.argsort(tf.constant([3.0, 1.0, 2.0]))
+
+        assert ones.shape == (2, 3)
+        assert tf.reduce_all(ones == 1.0)
+        assert tf.reduce_all(ones_like == 1.0)
+        assert np.array_equal(sorted_idx.numpy(), np.array([1, 2, 0]))
+
+    def test_assign_variable(self, backend, simple_model):
+        """Test in-place variable assignment."""
+        variable = backend.get_model_weights(simple_model)[0]
+        new_value = tf.zeros_like(variable)
+
+        backend.assign_variable(variable, new_value)
+        assert tf.reduce_all(variable == 0.0)
+
+    def test_compute_hessian(self, backend):
+        """Test Hessian computation shape and finiteness."""
+        model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+        weights = backend.get_model_weights(model)
+        nb_params = backend.get_num_params(weights)
+        loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+        inputs = tf.constant([[1.0, 0.0], [0.5, -1.0]], dtype=tf.float32)
+        targets = tf.constant([[1.0], [0.0]], dtype=tf.float32)
+        dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+
+        hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+
+        assert hessian.shape == (nb_params, nb_params)
+        assert tf.reduce_all(tf.math.is_finite(hessian))
+
+    def test_compute_hvp_batch(self, backend):
+        """Test batched Hessian-vector product computation."""
+        model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+        weights = backend.get_model_weights(model)
+        nb_params = backend.get_num_params(weights)
+        loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+        inputs = tf.constant([[1.0, 0.0], [0.5, -1.0]], dtype=tf.float32)
+        targets = tf.constant([[1.0], [0.0]], dtype=tf.float32)
+        vector = [tf.ones_like(w) for w in weights]
+
+        hvp = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+
+        assert hvp.shape == (nb_params,)
+        assert tf.reduce_all(tf.math.is_finite(hvp))
+
+    def test_compute_output_jacobians(self, backend):
+        """Test output Jacobian computations w.r.t inputs and weights."""
+        model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+        inputs = tf.constant([[1.0, 2.0], [3.0, 4.0]], dtype=tf.float32)
+        weights = backend.get_model_weights(model)
+
+        outputs, jac_inputs = backend.compute_output_jacobian(model, inputs)
+        outputs_w, jac_weights = backend.compute_output_jacobian_wrt_weights(model, weights, inputs)
+
+        assert outputs.shape == (2, 1)
+        assert outputs_w.shape == (2, 1)
+        assert jac_inputs.shape == (2, 1, 2, 2)
+        assert len(jac_weights) == len(weights)
+        assert jac_weights[0].shape[:2] == (2, 1)
+
+    def test_while_loop(self, backend):
+        """Test while_loop helper with simple integer accumulation."""
+        def cond_fn(i, total):
+            return i < 3
+
+        def body_fn(i, total):
+            return [i + 1, total + i]
+
+        result_i, result_total = backend.while_loop(
+            cond_fn,
+            body_fn,
+            [tf.constant(0, dtype=tf.int32), tf.constant(0, dtype=tf.int32)],
+            maximum_iterations=10,
+        )
+
+        assert int(result_i.numpy()) == 3
+        assert int(result_total.numpy()) == 3
+
+    def test_random_diag_eig_and_real(self, backend):
+        """Test random normal, diagonal extraction and eigen helpers."""
+        random_tensor = backend.random_normal((2, 3), dtype=backend.float32_dtype())
+        assert random_tensor.shape == (2, 3)
+
+        matrix = tf.constant([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=tf.float32)
+        diag = backend.diag_part(matrix, k=1)
+        assert np.array_equal(diag.numpy(), np.array([2.0, 6.0]))
+
+        maindiag = tf.constant([2.0, 3.0], dtype=tf.float32)
+        superdiag = tf.constant([1.0], dtype=tf.float32)
+        eig_vals, eig_vecs = backend.eigh_tridiagonal(maindiag, superdiag)
+        eig_vals_only, eig_vecs_none = backend.eigh_tridiagonal(maindiag, superdiag, eigvals_only=True)
+
+        assert eig_vals.shape == (2,)
+        assert eig_vecs.shape == (2, 2)
+        assert eig_vals_only.shape == (2,)
+        assert eig_vecs_none is None
+
+        eig_input = tf.constant([[0.0, -1.0], [1.0, 0.0]], dtype=tf.float32)
+        eigvals, eigvecs = backend.eig(eig_input)
+        real_part = backend.real(eigvals)
+
+        assert eigvals.shape == (2,)
+        assert eigvecs.shape == (2, 2)
+        assert real_part.shape == (2,)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

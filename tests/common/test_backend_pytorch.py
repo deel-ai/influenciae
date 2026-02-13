@@ -13,11 +13,14 @@ import numpy as np
 try:
     import torch
     import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
     HAS_PYTORCH = True
 except (ImportError, OSError):
     HAS_PYTORCH = False
     torch = None
     nn = None
+    DataLoader = None
+    TensorDataset = None
 
 pytestmark = pytest.mark.skipif(
     not HAS_PYTORCH,
@@ -387,6 +390,216 @@ class TestPyTorchInfluenceModel:
         loss = influence_model.batch_loss(dataset)
 
         assert loss.shape == (4,)
+
+
+class TestPyTorchBackendDatasetOperations:
+    """Test PyTorch backend dataset helpers."""
+
+    def test_map_dataset_tuple_and_unpacked(self, backend):
+        """Test map_dataset behavior with one-arg and two-arg map functions."""
+        dataset = [
+            (torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0], [4.0]])),
+            (torch.tensor([[5.0], [6.0]]), torch.tensor([[7.0], [8.0]])),
+        ]
+
+        one_arg = backend.map_dataset(dataset, lambda batch: batch[0] + batch[1])
+        two_args = backend.map_dataset(dataset, lambda a, b: a + b)
+
+        assert torch.equal(one_arg[0], torch.tensor([[4.0], [6.0]]))
+        assert torch.equal(two_args[1], torch.tensor([[12.0], [14.0]]))
+
+    def test_cache_save_load_dataset(self, backend, tmp_path):
+        """Test caching, saving and loading datasets."""
+        dataset = [torch.tensor([1.0]), torch.tensor([2.0])]
+        cached = backend.cache_dataset(dataset)
+        path = str(tmp_path / "pt_dataset.pt")
+
+        backend.save_dataset(cached, path)
+        loaded = backend.load_dataset(path)
+
+        assert len(loaded) == 2
+        assert torch.equal(loaded[0], torch.tensor([1.0]))
+
+    def test_get_dataset_batch_size_and_cardinality(self, backend):
+        """Test dataset batch size and cardinality helpers."""
+        dataset = TensorDataset(torch.randn(4, 2), torch.randn(4, 1))
+        loader = DataLoader(dataset, batch_size=2)
+
+        assert backend.get_dataset_batch_size(loader) == 2
+        assert backend.get_dataset_cardinality(loader) == 2
+
+    def test_zip_batch_unbatch_take_dataset(self, backend):
+        """Test zip, batch, unbatch and take operations."""
+        d1 = [1, 2, 3]
+        d2 = [4, 5, 6]
+        zipped = backend.zip_datasets(d1, d2)
+        assert zipped[0] == (1, 4)
+
+        samples = [
+            (torch.tensor([1.0, 2.0]), torch.tensor([3.0])),
+            (torch.tensor([4.0, 5.0]), torch.tensor([6.0])),
+            (torch.tensor([7.0, 8.0]), torch.tensor([9.0])),
+            (torch.tensor([10.0, 11.0]), torch.tensor([12.0])),
+        ]
+        batched = backend.batch_dataset(samples, batch_size=2)
+        assert len(batched) == 2
+        assert batched[0][0].shape == (2, 2)
+
+        unbatched = backend.unbatch_dataset(batched)
+        assert len(unbatched) == 4
+        assert torch.equal(unbatched[0][0], torch.tensor([1.0, 2.0]))
+
+        taken = backend.take_dataset(unbatched, 2)
+        assert len(taken) == 2
+
+    def test_create_dataset_from_tensors(self, backend):
+        """Test creating datasets from tensor inputs."""
+        tensor_dataset = backend.create_dataset_from_tensors(torch.tensor([1.0, 2.0]), batch_size=4)
+        assert len(tensor_dataset) == 1
+        assert tensor_dataset[0][0].shape == (1, 2)
+
+        tuple_dataset = backend.create_dataset_from_tensors(
+            (torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])),
+            batch_size=4,
+        )
+        assert tuple_dataset[0][0].shape == (1, 2)
+        assert tuple_dataset[0][1].shape == (1, 2)
+
+    def test_shuffle_dataset_size_and_element_spec(self, backend):
+        """Test shuffle, size and element spec helpers."""
+        batched = [
+            (torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0], [4.0]])),
+            (torch.tensor([[5.0], [6.0]]), torch.tensor([[7.0], [8.0]])),
+        ]
+
+        shuffled = backend.shuffle_dataset(batched, buffer_size=8)
+        assert backend.get_dataset_size(shuffled) == 4
+
+        spec = backend.get_dataset_element_spec(shuffled)
+        assert isinstance(spec, tuple)
+        assert spec[0]['shape'] == torch.Size([2, 1])
+
+    def test_assert_batched_dataset(self, backend):
+        """Test batched dataset assertion for valid and invalid data."""
+        valid = [(torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0], [4.0]]))]
+        backend.assert_batched_dataset(valid)
+
+        invalid = [torch.tensor(1.0), torch.tensor(2.0)]
+        with pytest.raises(ValueError):
+            backend.assert_batched_dataset(invalid)
+
+
+class TestPyTorchBackendAdvancedOperations:
+    """Test PyTorch backend operations not covered elsewhere."""
+
+    def test_ones_ones_like_and_argsort(self, backend):
+        """Test ones constructors and argsort ordering."""
+        ones = backend.ones((2, 3), dtype=backend.float32_dtype())
+        ones_like = backend.ones_like(torch.tensor([[0.0, 0.0], [0.0, 0.0]]))
+        sorted_idx = backend.argsort(torch.tensor([3.0, 1.0, 2.0]))
+
+        assert ones.shape == (2, 3)
+        assert torch.equal(ones, torch.ones((2, 3)))
+        assert torch.equal(ones_like, torch.ones((2, 2)))
+        assert torch.equal(sorted_idx, torch.tensor([1, 2, 0]))
+
+    def test_assign_variable(self, backend, simple_model):
+        """Test in-place variable assignment."""
+        variable = backend.get_model_weights(simple_model)[0]
+        new_value = torch.zeros_like(variable)
+
+        backend.assign_variable(variable, new_value)
+        assert torch.equal(variable, torch.zeros_like(variable))
+
+    def test_compute_hessian(self, backend):
+        """Test Hessian computation shape and finiteness."""
+        model = nn.Sequential(nn.Linear(2, 1))
+        weights = backend.get_model_weights(model)
+        nb_params = backend.get_num_params(weights)
+
+        inputs = torch.tensor([[1.0, 0.0], [0.5, -1.0]])
+        targets = torch.tensor([[1.0], [0.0]])
+        dataset = [(inputs, targets)]
+
+        def loss_fn(pred, target):
+            return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+        hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+
+        assert hessian.shape == (nb_params, nb_params)
+        assert torch.all(torch.isfinite(hessian))
+
+    def test_compute_hvp_batch(self, backend):
+        """Test batched Hessian-vector product computation."""
+        model = nn.Sequential(nn.Linear(2, 1))
+        weights = backend.get_model_weights(model)
+        nb_params = backend.get_num_params(weights)
+        vector = [torch.ones_like(w) for w in weights]
+
+        inputs = torch.tensor([[1.0, 0.0], [0.5, -1.0]])
+        targets = torch.tensor([[1.0], [0.0]])
+
+        def loss_fn(pred, target):
+            return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+        hvp = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+
+        assert hvp.shape == (nb_params,)
+        assert torch.all(torch.isfinite(hvp))
+
+    def test_compute_output_jacobians(self, backend):
+        """Test output Jacobian computations w.r.t inputs and weights."""
+        model = nn.Sequential(nn.Linear(2, 1))
+        weights = backend.get_model_weights(model)
+        inputs = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+        outputs, jac_inputs = backend.compute_output_jacobian(model, inputs)
+        outputs_w, jac_weights = backend.compute_output_jacobian_wrt_weights(model, weights, inputs)
+
+        assert outputs.shape == (2, 1)
+        assert outputs_w.shape == (2, 1)
+        assert jac_inputs.shape == (2, 1, 2)
+        assert len(jac_weights) == len(weights)
+        assert jac_weights[0].shape[:2] == (2, 1)
+
+    def test_while_loop(self, backend):
+        """Test while_loop helper with simple integer accumulation."""
+        def cond_fn(i, total):
+            return i < 3
+
+        def body_fn(i, total):
+            return [i + 1, total + i]
+
+        result = backend.while_loop(cond_fn, body_fn, [0, 0], maximum_iterations=10)
+
+        assert result[0] == 3
+        assert result[1] == 3
+
+    def test_random_diag_eig_and_real(self, backend):
+        """Test random normal, diagonal extraction and eigen helpers."""
+        random_tensor = backend.random_normal((2, 3), dtype=backend.float32_dtype())
+        assert random_tensor.shape == (2, 3)
+
+        matrix = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        diag = backend.diag_part(matrix, k=1)
+        assert torch.equal(diag, torch.tensor([2.0, 6.0]))
+
+        maindiag = torch.tensor([2.0, 3.0])
+        superdiag = torch.tensor([1.0])
+        eig_vals, eig_vecs = backend.eigh_tridiagonal(maindiag, superdiag)
+        eig_vals_only, eig_vecs_none = backend.eigh_tridiagonal(maindiag, superdiag, eigvals_only=True)
+
+        assert eig_vals.shape == (2,)
+        assert eig_vecs.shape == (2, 2)
+        assert eig_vals_only.shape == (2,)
+        assert eig_vecs_none is None
+
+        eigvals, eigvecs = backend.eig(torch.tensor([[0.0, -1.0], [1.0, 0.0]]))
+        real_part = backend.real(eigvals)
+
+        assert eigvals.shape == (2,)
+        assert eigvecs.shape == (2, 2)
+        assert real_part.shape == (2,)
 
 
 if __name__ == '__main__':

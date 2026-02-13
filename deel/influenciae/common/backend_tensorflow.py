@@ -801,9 +801,10 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Compute eigenvalues and eigenvectors of a symmetric tridiagonal matrix."""
         # Use cpu device for eigh_tridiagonal as it's not supported on GPU
         with tf.device('cpu'):
-            eig_vals, eig_vectors = tf.linalg.eigh_tridiagonal(maindiag, superdiag, eigvals_only=eigvals_only)
+            result = tf.linalg.eigh_tridiagonal(maindiag, superdiag, eigvals_only=eigvals_only)
         if eigvals_only:
-            return eig_vals, None
+            return result, None
+        eig_vals, eig_vectors = result
         return eig_vals, eig_vectors
 
     @tf.autograph.experimental.do_not_convert
