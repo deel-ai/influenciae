@@ -142,7 +142,8 @@ def conjugate_gradients_solve(
             break
 
         # Update search direction: p = r + (rs_new / rs_old) * p
-        beta = rs_new / rs_old
+        rs_safe = backend.maximum(rs_old, eps)
+        beta = rs_new / rs_safe
         p = r + beta * p
         rs_old = rs_new
 
