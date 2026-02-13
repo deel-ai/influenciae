@@ -170,3 +170,14 @@ class BaseGroupInfluenceCalculator:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
 
         return size_a
+
+    def _reduce_ihvp_batches(self, ihvp_ds: Any, keepdims: bool = True) -> Any:
+        """Sum per-batch IHVP tensors across all batches."""
+        reduced_ihvp = None
+        for batch in ihvp_ds:
+            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=keepdims)
+            if reduced_ihvp is None:
+                reduced_ihvp = batch_sum
+            else:
+                reduced_ihvp = reduced_ihvp + batch_sum
+        return reduced_ihvp

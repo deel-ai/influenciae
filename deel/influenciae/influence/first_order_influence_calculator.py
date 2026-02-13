@@ -239,15 +239,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         self.backend.assert_batched_dataset(group)
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(group)
-
-        # Reduce IHVP across all batches
-        reduced_ihvp = None
-        for batch in ihvp_ds:
-            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=True)
-            if reduced_ihvp is None:
-                reduced_ihvp = batch_sum
-            else:
-                reduced_ihvp = reduced_ihvp + batch_sum
+        reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
@@ -300,13 +292,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         # Compute and reduce IHVP
         ihvp_ds = self.ihvp_calculator.compute_ihvp(group_train)
-        reduced_ihvp = None
-        for batch in ihvp_ds:
-            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=True)
-            if reduced_ihvp is None:
-                reduced_ihvp = batch_sum
-            else:
-                reduced_ihvp = reduced_ihvp + batch_sum
+        reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 

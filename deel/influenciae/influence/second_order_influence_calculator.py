@@ -159,17 +159,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing the addition of the influence of the points in the group
         """
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
-
-        # Reduce IHVP across all batches
-        reduced_ihvp = None
-        for batch in ihvp_ds:
-            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=True)
-            if reduced_ihvp is None:
-                reduced_ihvp = batch_sum
-            else:
-                reduced_ihvp = reduced_ihvp + batch_sum
-
-        return reduced_ihvp
+        return self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
     def _compute_pairwise_interactions(self, dataset: Any) -> Any:
         """
@@ -204,18 +194,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
                                    self.ihvp_calculator.feature_extractor)
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
-
-        # Reduce IHVP across all batches
-        reduced_ihvp = None
-        dtype = None
-        for batch in ihvp_ds:
-            if dtype is None:
-                dtype = self.backend.get_dtype(batch)
-            batch_sum = self.backend.reduce_sum(batch, axis=1)
-            if reduced_ihvp is None:
-                reduced_ihvp = batch_sum
-            else:
-                reduced_ihvp = reduced_ihvp + batch_sum
+        reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=False)
 
         # Create a dataset from the reduced IHVP
         batch_size = self.backend.get_dataset_batch_size(dataset)
