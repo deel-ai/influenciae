@@ -17,9 +17,10 @@ Supports both TensorFlow and PyTorch models through the backend abstraction laye
 """
 from ..common import SelfInfluenceCalculator, BaseBackend, get_backend_for_model
 from ..types import Tuple, Any
+from ._base_boundary import _BaseBoundaryCalculatorMixin
 
 
-class SampleBoundaryCalculator(SelfInfluenceCalculator):
+class SampleBoundaryCalculator(_BaseBoundaryCalculatorMixin, SelfInfluenceCalculator):
     """
     A class implementing an influence score based on the distance of a sample to the
     boundary of the classifier.
@@ -50,37 +51,6 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
 
         self.step_nbr = step_nbr
         self.eps = eps
-
-    def _delta_to_index(self, indexes_1: Any, indexes_2: Any, x: Any) -> Any:
-        """
-        Compute the difference between the logit of a given class and the other logits
-
-        Parameters
-        ----------
-        indexes_1
-            The indices of other classes
-        indexes_2
-            The indices of the predicted class
-        x
-            The logits
-
-        Returns
-        -------
-        delta_x
-            The difference between the logits
-        """
-        x1 = self.backend.gather_along_axis(x, indexes_1, axis=1, batch_dims=1)
-        x2 = self.backend.gather_along_axis(
-            x,
-            self.backend.expand_dims(indexes_2, axis=1),
-            axis=1,
-            batch_dims=1
-        )
-
-        x1_shape = self.backend.tensor_shape(x1)
-        delta_x = x1 - self.backend.repeat(x2, x1_shape[1], axis=1)
-
-        return delta_x
 
     def _step(self, x: Any, y_pred: Any) -> Tuple[Any, Any, Any]:
         """
@@ -113,17 +83,8 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         # Compute output and jacobian with respect to input
         y, jac = self.backend.compute_output_jacobian(self.model, x)
 
-        y_computed = self.backend.argmax(y, axis=1)
         y_shape = self.backend.tensor_shape(y)
-
-        # Check if prediction changed
-        computation = self.backend.reduce_any(y_computed == y_pred_class)
-
-        # Check if top 2 logits are close enough
-        top_k_values, _ = self.backend.top_k(self.backend.squeeze(y, axis=0), k=2)
-        enough_close = self.backend.abs(top_k_values[0] - top_k_values[1]) > self.eps
-
-        computation = self.backend.logical_and(computation, enough_close)
+        computation = self._compute_step_condition(y, y_pred_class, self.eps)
 
         # Default values if we don't need to update
         x_dtype = self.backend.get_dtype(x)
@@ -162,32 +123,10 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         x_new
             The updated sample
         """
-        batch_size = y_shape[0]
-        num_classes = y_shape[1]
-
-        # Create indices for all classes and other classes
-        indexes_all = self.backend.tile(
-            self.backend.expand_dims(self.backend.arange(0, num_classes), axis=0),
-            (batch_size, 1)
-        )
-        indexes_class = self.backend.cast(
-            self.backend.tile(
-                self.backend.expand_dims(y_pred_class, axis=1),
-                (1, num_classes)
-            ),
-            dtype=self.backend.int32_dtype()
-        )
-
-        # Get indices of other classes (not the predicted class)
-        mask = indexes_all != indexes_class
-        indexes_other = self.backend.reshape(
-            self.backend.boolean_mask(indexes_all, mask),
-            (-1, num_classes - 1)
-        )
+        indexes_other = self._build_other_class_indices(y_pred_class, y_shape)
 
         # Compute delta in logits
-        delta_y = self._delta_to_index(indexes_other, y_pred_class, y)
-        delta_y = self.backend.abs(self.backend.reduce_mean(delta_y, axis=0))
+        delta_y = self._compute_delta_y(indexes_other, y_pred_class, y)
 
         # Compute delta in jacobian
         jac_delta = self.backend.reduce_mean(
