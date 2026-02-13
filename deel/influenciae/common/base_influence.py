@@ -307,6 +307,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         )
 
         if save_influence_vector_ds_path is not None:
+            # Explicit cache boundary: we save and return the same computed dataset.
+            inf_vect_ds = self.backend.cache_dataset(inf_vect_ds)
             inf_vect_only_ds = self.backend.map_dataset(
                 inf_vect_ds,
                 lambda *item: item[-1],
