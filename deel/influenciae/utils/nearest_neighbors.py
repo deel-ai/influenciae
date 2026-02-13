@@ -10,6 +10,7 @@ examples of datasets, as implemented in the influence calculator interface.
 This module is backend-agnostic and supports both TensorFlow and PyTorch.
 """
 from abc import abstractmethod
+from warnings import warn
 
 from .._optional_imports import import_optional_module
 from .sorted_dict import BatchSort, ORDER
@@ -19,6 +20,21 @@ from ..common.backend import (
     get_backend,
 )
 from ..types import Any, Callable, Optional, Tuple, Union
+
+
+def _ensure_reiterable_dataset(dataset: Any, context: str = "dataset") -> Any:
+    """Materialize one-pass iterators to preserve multi-pass behavior."""
+    try:
+        if iter(dataset) is dataset:
+            warn(
+                f"{context} is a one-pass iterator; materializing it to preserve multi-pass behavior.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return list(dataset)
+    except TypeError:
+        pass
+    return dataset
 
 
 class BaseNearestNeighbors:
@@ -164,11 +180,11 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         order
             Either descending or ascending for the top or bottom results as per the similarity metric
         """
-        self.dataset = dataset
+        self.dataset = _ensure_reiterable_dataset(dataset, context="nearest-neighbor dataset")
         self.dot_product_fun = dot_product_fun
 
         # Get batch shape from dataset element spec
-        elt_spec = self.backend.get_dataset_element_spec(dataset)
+        elt_spec = self.backend.get_dataset_element_spec(self.dataset)
         batch_shape: Tuple[int, ...] = ()
 
         # Handle nested specs: we expect ((batch_samples, ...), ihvp) structure
@@ -189,7 +205,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         # Fallback: iterate to get shape from first batch if not available from spec
         if not batch_shape:
-            for item in dataset:
+            for item in self.dataset:
                 if isinstance(item, (list, tuple)):
                     first_item = item[0]
                     if isinstance(first_item, (list, tuple)):
