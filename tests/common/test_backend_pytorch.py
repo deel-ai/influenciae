@@ -408,6 +408,82 @@ class TestPyTorchBackendDatasetOperations:
         assert torch.equal(one_arg[0], torch.tensor([[4.0], [6.0]]))
         assert torch.equal(two_args[1], torch.tensor([[12.0], [14.0]]))
 
+    def test_map_dataset_is_lazy_and_reiterable(self, backend):
+        """Test lazy execution and multi-pass behavior of mapped datasets."""
+        dataset = [
+            (torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0], [4.0]])),
+            (torch.tensor([[5.0], [6.0]]), torch.tensor([[7.0], [8.0]])),
+        ]
+
+        call_count = {"value": 0}
+
+        def map_fn(a, b):
+            call_count["value"] += 1
+            return a + b
+
+        mapped = backend.map_dataset(dataset, map_fn)
+        assert call_count["value"] == 0
+
+        first_pass = list(mapped)
+        assert call_count["value"] == 2
+
+        second_pass = list(mapped)
+        assert call_count["value"] == 4
+        assert torch.equal(first_pass[0], second_pass[0])
+
+    def test_map_dataset_one_pass_iterator_materializes(self, backend):
+        """Test one-pass iterators are materialized for safe re-iteration."""
+
+        def dataset_iter():
+            for idx in range(3):
+                x = torch.tensor([[float(idx)]])
+                y = torch.tensor([[1.0]])
+                yield x, y
+
+        with pytest.warns(RuntimeWarning, match="one-pass iterator"):
+            mapped = backend.map_dataset(dataset_iter(), lambda a, b: a + b)
+
+        first = list(mapped)
+        second = list(mapped)
+        assert len(first) == 3
+        assert len(second) == 3
+
+    def test_take_dataset_short_circuits_iteration(self, backend):
+        """Test take_dataset only consumes the requested number of elements."""
+        consumed = {"value": 0}
+
+        def dataset_iter():
+            for idx in range(10):
+                consumed["value"] += 1
+                yield torch.tensor([float(idx)])
+
+        taken = backend.take_dataset(dataset_iter(), 3)
+        assert consumed["value"] == 0
+
+        values = list(taken)
+        assert consumed["value"] == 3
+        assert len(values) == 3
+
+    def test_cache_dataset_freezes_mapped_results(self, backend):
+        """Test cache_dataset materializes mapped results once."""
+        dataset = [
+            (torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0], [4.0]])),
+            (torch.tensor([[5.0], [6.0]]), torch.tensor([[7.0], [8.0]])),
+        ]
+        call_count = {"value": 0}
+
+        def map_fn(a, b):
+            call_count["value"] += 1
+            return a + b
+
+        mapped = backend.map_dataset(dataset, map_fn)
+        cached = backend.cache_dataset(mapped)
+        assert call_count["value"] == 2
+
+        _ = list(cached)
+        _ = list(cached)
+        assert call_count["value"] == 2
+
     def test_cache_save_load_dataset(self, backend, tmp_path):
         """Test caching, saving and loading datasets."""
         dataset = [torch.tensor([1.0]), torch.tensor([2.0])]
@@ -604,4 +680,3 @@ class TestPyTorchBackendAdvancedOperations:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-
