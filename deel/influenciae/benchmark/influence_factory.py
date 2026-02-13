@@ -24,7 +24,7 @@ from ..influence import FirstOrderInfluenceCalculator, ArnoldiInfluenceCalculato
 from ..rps import RepresenterPointLJE, RepresenterPointL2
 from ..trac_in import TracIn
 from ..boundary_based import WeightsBoundaryCalculator, SampleBoundaryCalculator
-from ..types import Any, Union, Callable, Optional
+from ..types import Any, Union, Callable, Optional, DatasetLike
 
 
 def _resolve_default_loss_function(model: Any) -> Callable:
@@ -49,7 +49,11 @@ def _resolve_default_loss_function(model: Any) -> Callable:
     return pytorch_cross_entropy_no_reduction
 
 
-def _get_dataset_subset_for_hessian(training_dataset: Any, n_samples: Optional[int], model: Any) -> Any:
+def _get_dataset_subset_for_hessian(
+    training_dataset: DatasetLike,
+    n_samples: Optional[int],
+    model: Any,
+) -> DatasetLike:
     """Extract a fixed number of samples from a batched dataset for Hessian estimation."""
     if n_samples is None or n_samples < 0:
         return training_dataset
@@ -67,7 +71,7 @@ class InfluenceCalculatorFactory:
     """
 
     @abstractmethod
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Optional[Any] = None) -> Any:
         """
         Builds an instance of an influence calculator class following the provided model, training dataset
@@ -89,7 +93,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
         self.loss_function = loss_function
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> FirstOrderInfluenceCalculator:
         del train_info
 
@@ -141,7 +145,7 @@ class RPSLJEFactory(InfluenceCalculatorFactory):
         self.loss_function = loss_function
         assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> RepresenterPointLJE:
         del train_info
 
@@ -169,7 +173,7 @@ class TracInFactory(InfluenceCalculatorFactory):
     def __init__(self, loss_function: Optional[Callable] = None):
         self.loss_function = loss_function
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Optional[Any] = None) -> TracIn:
         del training_dataset
         if train_info is None:
@@ -201,7 +205,7 @@ class RPSL2Factory(InfluenceCalculatorFactory):
         self.epochs = epochs
         self.layer_index = layer_index
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> RepresenterPointL2:
         del train_info
         return RepresenterPointL2(
@@ -222,7 +226,7 @@ class WeightsBoundaryCalculatorFactory(InfluenceCalculatorFactory):
         self.step_nbr = step_nbr
         self.norm_type = norm_type
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> WeightsBoundaryCalculator:
         del training_dataset
         del train_info
@@ -235,7 +239,7 @@ class SampleBoundaryCalculatorFactory(InfluenceCalculatorFactory):
     def __init__(self, step_nbr: int = 100):
         self.step_nbr = step_nbr
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> SampleBoundaryCalculator:
         del training_dataset
         del train_info
@@ -263,7 +267,7 @@ class ArnoldiCalculatorFactory(InfluenceCalculatorFactory):
         self.dataset_hessian_size = dataset_hessian_size
         self.dtype = dtype
 
-    def build(self, training_dataset: Any, model: Any,
+    def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> ArnoldiInfluenceCalculator:
         del train_info
 

@@ -19,7 +19,7 @@ from warnings import warn
 from .backend import BaseBackend
 from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 from ..utils.sorted_dict import BatchSort, ORDER
-from ..types import Optional, Tuple, Any
+from ..types import Optional, Tuple, Any, DatasetLike
 
 
 class CACHE(Enum):
@@ -44,8 +44,8 @@ class SelfInfluenceCalculator:
         The framework-specific backend for operations.
     """
 
-    # Backend should be set by subclasses that have access to a model
-    backend: Optional[BaseBackend] = None
+    # Backend is set by subclasses that have access to a model.
+    backend: BaseBackend
 
     @abstractmethod
     def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
@@ -64,7 +64,7 @@ class SelfInfluenceCalculator:
         """
         raise NotImplementedError()
 
-    def compute_influence_values(self, train_set: Any, device: Optional[str] = None) -> Any:
+    def compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> DatasetLike:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
 
@@ -89,7 +89,7 @@ class SelfInfluenceCalculator:
             device
         )
 
-    def _compute_influence_values(self, train_set: Any, device: Optional[str] = None) -> Any:
+    def _compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> Any:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
         This version returns a tensor instead of a dataset.
@@ -121,7 +121,7 @@ class SelfInfluenceCalculator:
 
     def compute_top_k_from_training_dataset(
             self,
-            train_set: Any,
+            train_set: DatasetLike,
             k: int,
             order: ORDER = ORDER.DESCENDING
     ) -> Tuple[Any, Any]:
@@ -198,7 +198,7 @@ class SelfInfluenceCalculator:
 
         return training_samples, influence_values
 
-    def _save_dataset(self, dataset: Any, load_or_save_path: str) -> None:
+    def _save_dataset(self, dataset: DatasetLike, load_or_save_path: str) -> None:
         """
         Save a dataset in the appropriate format for the backend.
 
@@ -211,7 +211,7 @@ class SelfInfluenceCalculator:
         """
         self.backend.save_dataset(dataset, load_or_save_path)
 
-    def _load_dataset(self, dataset_path: str) -> Any:
+    def _load_dataset(self, dataset_path: str) -> DatasetLike:
         """
         Loads a dataset from the specified path.
 
@@ -277,10 +277,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def compute_influence_vector(
             self,
-            train_set: Any,
+            train_set: DatasetLike,
             save_influence_vector_ds_path: Optional[str] = None,
             device: Optional[str] = None
-    ) -> Any:
+    ) -> DatasetLike:
         """
         Compute the influence vector for each sample of the provided (full or partial) model's training dataset.
 
@@ -321,14 +321,14 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def estimate_influence_values_in_batches(
             self,
-            dataset_to_evaluate: Any,
-            train_set: Any,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
             load_influence_vector_path: Optional[str] = None,
             save_influence_vector_path: Optional[str] = None,
             save_influence_value_path: Optional[str] = None,
             device: Optional[str] = None
-    ) -> Any:
+    ) -> DatasetLike:
         """
         Estimates the influence that each point in the provided training dataset has on each of the test points.
         This can provide some insights as to what makes the model predict a certain way for the given test points,
@@ -397,8 +397,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def top_k(  # pylint: disable=R0913
             self,
-            dataset_to_evaluate: Any,
-            train_set: Any,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
             k: int = 5,
             nearest_neighbors: Optional[BaseNearestNeighbors] = None,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
@@ -408,7 +408,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             order: ORDER = ORDER.DESCENDING,
             d_type: Any = None,
             device: Optional[str] = None
-    ) -> Any:
+    ) -> DatasetLike:
         """
         Find the top-k closest elements for each element of dataset to evaluate in the training dataset
         The method will return a dataset containing a tuple of:
@@ -509,10 +509,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _estimate_inf_values_with_inf_vect_dataset(
             self,
-            inf_vect_dataset: Any,
+            inf_vect_dataset: DatasetLike,
             samples_to_evaluate: Tuple[Any, ...],
             device: Optional[str] = None
-    ) -> Tuple[Tuple[Any, ...], Any]:
+    ) -> Tuple[Tuple[Any, ...], DatasetLike]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 

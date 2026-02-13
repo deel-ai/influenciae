@@ -3,29 +3,13 @@ Lazy, re-iterable dataset wrappers for the PyTorch backend.
 """
 from math import ceil
 import random
-from typing import TYPE_CHECKING, Any, Callable, Iterator, List, Optional, Protocol, Union, cast
+from typing import cast
 from warnings import warn
 
 from .._optional_imports import import_optional_module
+from ..types import DatasetLike, Any, Callable, Iterator, List, Optional, Union
 
 torch = import_optional_module("torch", extra="pytorch")
-
-if TYPE_CHECKING:
-    import tensorflow as tf
-
-    class PyTorchDatasetLike(Protocol):
-        """Protocol compatible with torch Dataset/DataLoader objects."""
-
-        def __iter__(self) -> Iterator[Any]:
-            ...
-
-    DatasetLike = Union[
-        tf.data.Dataset,
-        PyTorchDatasetLike,
-        "LazyDataset",
-    ]
-else:
-    DatasetLike = Any
 
 
 def _safe_len(dataset: DatasetLike) -> Optional[int]:

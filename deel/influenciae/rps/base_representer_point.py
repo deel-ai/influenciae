@@ -11,7 +11,7 @@ from abc import abstractmethod
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import BaseInfluenceCalculator, BaseBackend, Framework, get_backend_for_model
-from ..types import Tuple, Callable, Union, Any, Optional
+from ..types import Tuple, Callable, Union, Any, Optional, DatasetLike
 
 
 class BaseRepresenterPoint(BaseInfluenceCalculator):
@@ -37,7 +37,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
     def __init__(
             self,
             model: Any,
-            train_set: Any,
+            train_set: DatasetLike,
             loss_function: Union[Callable, Any],
             target_layer: Union[str, int] = -1
     ):

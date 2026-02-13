@@ -21,7 +21,7 @@ from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, IHVPCalculator, ExactIHVP
 from ..common import BaseBackend
 
-from ..types import Optional, Union, Any
+from ..types import Optional, Union, Any, DatasetLike
 
 
 class BaseGroupInfluenceCalculator:
@@ -51,13 +51,13 @@ class BaseGroupInfluenceCalculator:
         An integer indicating the buffer size of the train dataset's shuffle operation -- when
         choosing the amount of samples for the hessian.
     """
-    # Backend should be set by subclasses that have access to a model
-    backend: Optional[BaseBackend] = None
+    # Backend is set by subclasses that have access to a model.
+    backend: BaseBackend
 
     def __init__(
             self,
             model: InfluenceModel,
-            dataset: Any,
+            dataset: DatasetLike,
             ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = ExactIHVP,
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
@@ -94,7 +94,7 @@ class BaseGroupInfluenceCalculator:
     @abstractmethod
     def compute_influence_vector_group(
             self,
-            group: Any
+            group: DatasetLike
     ) -> Any:
         """
         Computes the influence function vector -- an estimation of the weights difference when
@@ -116,8 +116,8 @@ class BaseGroupInfluenceCalculator:
     @abstractmethod
     def estimate_influence_values_group(
             self,
-            group_train: Any,
-            group_to_evaluate: Optional[Any] = None
+            group_train: DatasetLike,
+            group_to_evaluate: Optional[DatasetLike] = None
     ) -> Any:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
@@ -146,7 +146,7 @@ class BaseGroupInfluenceCalculator:
         """
         raise NotImplementedError()
 
-    def assert_compatible_datasets(self, dataset_a: Any, dataset_b: Any) -> int:
+    def assert_compatible_datasets(self, dataset_a: DatasetLike, dataset_b: DatasetLike) -> int:
         """
         Assert that the datasets are compatible: that they contain the same number of points. Else,
         throw an error.

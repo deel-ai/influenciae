@@ -14,7 +14,7 @@ import copy
 from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import InfluenceModel, InverseHessianVectorProductFactory, Framework
-from ..types import Union, Optional, Any
+from ..types import Union, Optional, Any, DatasetLike
 
 
 class RepresenterPointLJE(BaseRepresenterPoint):
@@ -50,7 +50,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
     def __init__(
             self,
             influence_model: InfluenceModel,
-            dataset: Any,
+            dataset: DatasetLike,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int] = None,
             target_layer: Union[int, str] = -1,
@@ -70,7 +70,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
     def _init_tensorflow(
             self,
             influence_model: InfluenceModel,
-            dataset: Any,
+            dataset: DatasetLike,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int],
             target_layer: Union[int, str],
@@ -130,7 +130,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
     def _init_pytorch(
             self,
             influence_model: InfluenceModel,
-            dataset: Any,
+            dataset: DatasetLike,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int],
             _target_layer: Union[int, str]

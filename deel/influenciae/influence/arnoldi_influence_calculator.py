@@ -10,7 +10,7 @@ of influence values on big neural network models.
 """
 from ..common import InfluenceModel, BaseInfluenceCalculator, ForwardOverBackwardHVP
 from ..common.backend import BaseBackend
-from ..types import Tuple, Any
+from ..types import Tuple, Any, DatasetLike
 
 
 class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
@@ -45,7 +45,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
     def __init__(
             self,
             model: InfluenceModel,
-            train_dataset: Any,
+            train_dataset: DatasetLike,
             subspace_dim: int,
             force_hermitian: bool,
             k_largest_eig_vals: int,

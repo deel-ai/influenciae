@@ -20,7 +20,7 @@ from ..common import InfluenceModel
 from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
-from ..types import Optional, Union, Tuple, Any
+from ..types import Optional, Union, Tuple, Any, DatasetLike
 
 
 class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceCalculator):
@@ -69,7 +69,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     def __init__(
             self,
             model: InfluenceModel,
-            dataset: Any,
+            dataset: DatasetLike,
             ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000,
@@ -219,7 +219,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def compute_influence_vector_group(
             self,
-            group: Any
+            group: DatasetLike
     ) -> Any:
         """
         Computes the influence function vector -- an estimation of the weights difference when
@@ -249,8 +249,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def estimate_influence_values_group(
             self,
-            group_train: Any,
-            group_to_evaluate: Optional[Any] = None
+            group_train: DatasetLike,
+            group_to_evaluate: Optional[DatasetLike] = None
     ) -> Any:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the

@@ -9,10 +9,12 @@ https://arxiv.org/abs/1811.09720
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from typing import cast
+
 from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import Framework
-from ..types import Tuple, Callable, Union, Any, Optional
+from ..types import Tuple, Callable, Union, Any, Optional, DatasetLike
 
 
 class RepresenterPointL2(BaseRepresenterPoint):
@@ -52,7 +54,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
     def __init__(
             self,
             model: Any,
-            train_set: Any,
+            train_set: DatasetLike,
             loss_function: Union[Callable, Any],
             lambda_regularization: float,
             scaling_factor: float = 0.1,
@@ -106,8 +108,8 @@ class RepresenterPointL2(BaseRepresenterPoint):
         )
         mse_loss = mean_squared_error_cls(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
 
-        self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
         assert self.linear_layer is not None  # Type narrowing for mypy
+        self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
         for _ in range(epochs):
             for x_batch, _ in self.train_set:
                 loss, grads, z_batch, y_target = self._learn_step_last_layer_tensorflow(x_batch, mse_loss)
@@ -410,6 +412,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
+        dataset_influence: tf.data.Dataset
         dataset_influence = dataset_influence.map(lambda x, v: v)
         dataset_iterator = iter(dataset_influence)
 

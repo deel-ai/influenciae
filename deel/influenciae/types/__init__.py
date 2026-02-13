@@ -6,4 +6,21 @@
 Typing module
 """
 
-from typing import Union, Tuple, List, Callable, Dict, Optional, Any, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Sequence, Tuple, Union
+
+
+class TensorflowDatasetLike(Protocol):
+    """Structural type compatible with ``tf.data.Dataset``."""
+
+    def __iter__(self) -> Iterator[Any]:
+        ...
+
+
+class PyTorchDatasetLike(Protocol):
+    """Structural type compatible with PyTorch dataset/data loader objects."""
+
+    def __iter__(self) -> Iterator[Any]:
+        ...
+
+
+DatasetLike = Union[TensorflowDatasetLike, PyTorchDatasetLike]
