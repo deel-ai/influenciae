@@ -131,6 +131,7 @@ def test_stochastic_cgd_ihvp_close_to_full():
     ],
 )
 def test_compute_hvp_single_batch(ihvp_builder, epsilon, set_hessian):
+    tf.random.set_seed(42)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
     model.build(input_shape=(1, 3))
 
@@ -423,6 +424,7 @@ def test_cgd_ihvp():
 
 
 def test_lissa_ihvp():
+    tf.random.set_seed(42)
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
