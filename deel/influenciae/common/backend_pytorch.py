@@ -17,13 +17,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from .backend import BaseBackend, Framework
 from .pytorch_lazy_dataset import (
-    BatchedDataset,
-    BufferedShuffleDataset,
     CachedDataset,
-    MappedDataset,
-    TakenDataset,
-    UnbatchedDataset,
-    ZippedDataset,
+    to_lazy_dataset,
 )
 
 
@@ -547,7 +542,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
             return map_fn(batch)
 
-        return MappedDataset(dataset, _apply_map)
+        return to_lazy_dataset(dataset).map(_apply_map)
 
     def cache_dataset(self, dataset: Any) -> Any:
         """
@@ -555,7 +550,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         For PyTorch, this is an explicit materialization boundary.
         """
-        return CachedDataset(dataset)
+        return to_lazy_dataset(dataset).cache()
 
     def save_dataset(self, dataset: Any, path: str) -> None:
         """Save a dataset to disk using torch.save."""
@@ -600,7 +595,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def zip_datasets(self, dataset1: Any, dataset2: Any) -> Any:
         """Zip two datasets together."""
-        return ZippedDataset(dataset1, dataset2)
+        return to_lazy_dataset(dataset1).zip(dataset2)
 
     def batch_dataset(self, dataset: Any, batch_size: int) -> Any:
         """
@@ -618,7 +613,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         if hasattr(dataset, 'batch_size') and dataset.batch_size is not None:
             return dataset
 
-        return BatchedDataset(dataset, batch_size=batch_size)
+        return to_lazy_dataset(dataset).batch(batch_size=batch_size)
 
     def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> Any:
         """Create a batched dataset from tensors."""
@@ -641,7 +636,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def unbatch_dataset(self, dataset: Any) -> Any:
         """Unbatch a dataset."""
-        return UnbatchedDataset(dataset)
+        return to_lazy_dataset(dataset).unbatch()
 
     def shuffle_dataset(self, dataset: Any, buffer_size: int) -> Any:
         """
@@ -649,11 +644,11 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         For PyTorch, this uses a lazy finite-buffer shuffle.
         """
-        return BufferedShuffleDataset(dataset, buffer_size)
+        return to_lazy_dataset(dataset).shuffle(buffer_size)
 
     def take_dataset(self, dataset: Any, count: int) -> Any:
         """Take a number of elements from a dataset."""
-        return TakenDataset(dataset, count)
+        return to_lazy_dataset(dataset).take(count)
 
     def get_dataset_size(self, dataset: Any) -> int:
         """Get the total number of elements in a dataset."""

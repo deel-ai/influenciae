@@ -22,6 +22,9 @@ def _safe_len(dataset: DatasetLike) -> Optional[int]:
 
 def _is_iterator(dataset: DatasetLike) -> bool:
     """Check whether an object is a one-pass iterator."""
+    if bool(getattr(dataset, "_is_one_pass_iterator", False)) and getattr(dataset, "_materialized", None) is None:
+        return True
+
     try:
         return iter(dataset) is dataset
     except TypeError:
@@ -77,6 +80,66 @@ class LazyDataset:
 
     def __getitem__(self, index: int) -> Any:
         return self.materialize()[index]
+
+    def map(self, map_fn: Callable[[Any], Any]) -> "LazyDataset":
+        """Apply a lazy map transformation."""
+        return MappedDataset(self, map_fn)
+
+    def cache(self) -> "LazyDataset":
+        """Materialize and cache dataset values."""
+        return CachedDataset(self)
+
+    def zip(self, other: DatasetLike) -> "LazyDataset":
+        """Zip this dataset with another one."""
+        return ZippedDataset(self, other)
+
+    def batch(self, batch_size: int) -> "LazyDataset":
+        """Batch dataset elements lazily."""
+        if hasattr(self, "batch_size") and getattr(self, "batch_size") is not None:
+            return self
+        return BatchedDataset(self, batch_size=batch_size)
+
+    def unbatch(self) -> "LazyDataset":
+        """Unbatch dataset elements lazily."""
+        return UnbatchedDataset(self)
+
+    def shuffle(self, buffer_size: int) -> "LazyDataset":
+        """Shuffle dataset lazily with a finite buffer."""
+        return BufferedShuffleDataset(self, buffer_size)
+
+    def take(self, count: int) -> "LazyDataset":
+        """Take the first `count` elements lazily."""
+        return TakenDataset(self, count)
+
+
+class IterableDatasetAdapter(LazyDataset):
+    """Adapter exposing a generic iterable with the LazyDataset fluent API."""
+
+    def __init__(self, source: DatasetLike):
+        super().__init__()
+        self.source = source
+        self.batch_size = getattr(source, "batch_size", None)
+        self._is_one_pass_iterator = _is_iterator(source)
+
+    def _iter_impl(self) -> Iterator[Any]:
+        return iter(self.source)
+
+    def __len__(self) -> int:
+        if self._materialized is not None:
+            return len(self._materialized)
+
+        source_len = _safe_len(self.source)
+        if source_len is not None:
+            return source_len
+
+        raise TypeError("object of type 'IterableDatasetAdapter' has no len()")
+
+
+def to_lazy_dataset(dataset: DatasetLike) -> LazyDataset:
+    """Return a LazyDataset view over any dataset-like input."""
+    if isinstance(dataset, LazyDataset):
+        return dataset
+    return IterableDatasetAdapter(dataset)
 
 
 class MappedDataset(LazyDataset):
