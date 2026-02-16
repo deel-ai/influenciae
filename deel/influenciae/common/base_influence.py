@@ -47,6 +47,13 @@ class SelfInfluenceCalculator:
     # Backend is set by subclasses that have access to a model.
     backend: BaseBackend
 
+    @property
+    def _backend(self) -> BaseBackend:
+        """Return initialized backend instance."""
+        if self.backend is None:
+            raise ValueError("Backend is not initialized. Instantiate a calculator with a valid model first.")
+        return self.backend
+
     @abstractmethod
     def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
@@ -83,7 +90,7 @@ class SelfInfluenceCalculator:
         train_set
             A dataset containing the tuple: (batch of training samples, influence score)
         """
-        return self.backend.map_dataset(
+        return self._backend.map_dataset(
             train_set,
             lambda *batch_data: (batch_data, self._compute_influence_value_from_batch(batch_data)),
             device
@@ -116,7 +123,7 @@ class SelfInfluenceCalculator:
                 inf_val_list.append(item)
 
         if inf_val_list:
-            return self.backend.concat(inf_val_list, axis=0)
+            return self._backend.concat(inf_val_list, axis=0)
         return None
 
     def compute_top_k_from_training_dataset(
@@ -147,10 +154,10 @@ class SelfInfluenceCalculator:
             provided.
             - influences_values: The influence score corresponding to these k most influential samples.
         """
-        self.backend.assert_batched_dataset(train_set)
+        self._backend.assert_batched_dataset(train_set)
 
         # Get element spec for BatchSort initialization
-        elt_spec = self.backend.get_dataset_element_spec(train_set)
+        elt_spec = self._backend.get_dataset_element_spec(train_set)
         if isinstance(elt_spec, (list, tuple)):
             first_spec = elt_spec[0]
         else:
@@ -170,7 +177,7 @@ class SelfInfluenceCalculator:
         if shape is None:
             for batch in train_set:
                 first_tensor = batch[0] if isinstance(batch, (list, tuple)) else batch
-                shape = self.backend.tensor_shape(first_tensor)[1:]
+                shape = self._backend.tensor_shape(first_tensor)[1:]
                 dtype = first_tensor.dtype
                 break
 
@@ -181,20 +188,20 @@ class SelfInfluenceCalculator:
 
         for batch in train_set:
             influence_values = self._compute_influence_value_from_batch(batch)
-            if self.backend.tensor_ndim(influence_values) == 1:
-                influence_values = self.backend.expand_dims(influence_values, axis=-1)
+            if self._backend.tensor_ndim(influence_values) == 1:
+                influence_values = self._backend.expand_dims(influence_values, axis=-1)
 
             batch_input = batch[0] if isinstance(batch, (list, tuple)) else batch
             batch_sorted_dict.add_all(
-                self.backend.expand_dims(batch_input, axis=0),
-                self.backend.transpose(influence_values)
+                self._backend.expand_dims(batch_input, axis=0),
+                self._backend.transpose(influence_values)
             )
 
         best_samples, best_values = batch_sorted_dict.get()
         # best_values is already a tensor of shape (1, k), just squeeze the first dimension
-        influence_values = self.backend.squeeze(best_values, axis=0)
+        influence_values = self._backend.squeeze(best_values, axis=0)
         # best_samples is of shape (1, k, ...), squeeze the first dimension
-        training_samples = self.backend.squeeze(best_samples, axis=0)
+        training_samples = self._backend.squeeze(best_samples, axis=0)
 
         return training_samples, influence_values
 
@@ -209,7 +216,7 @@ class SelfInfluenceCalculator:
         load_or_save_path
             The path to save the dataset
         """
-        self.backend.save_dataset(dataset, load_or_save_path)
+        self._backend.save_dataset(dataset, load_or_save_path)
 
     def _load_dataset(self, dataset_path: str) -> DatasetLike:
         """
@@ -225,7 +232,7 @@ class SelfInfluenceCalculator:
         dataset
             The target dataset
         """
-        return self.backend.load_dataset(dataset_path)
+        return self._backend.load_dataset(dataset_path)
 
 
 class BaseInfluenceCalculator(SelfInfluenceCalculator):
@@ -300,7 +307,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         inf_vect_ds
             A dataset containing the tuple: (batch of training samples, influence vector)
         """
-        inf_vect_ds = self.backend.map_dataset(
+        inf_vect_ds = self._backend.map_dataset(
             train_set,
             lambda *batch: (batch, self._compute_influence_vector(batch)),
             device
@@ -308,13 +315,13 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         if save_influence_vector_ds_path is not None:
             # Explicit cache boundary: we save and return the same computed dataset.
-            inf_vect_ds = self.backend.cache_dataset(inf_vect_ds)
-            inf_vect_only_ds = self.backend.map_dataset(
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
+            inf_vect_only_ds = self._backend.map_dataset(
                 inf_vect_ds,
                 lambda *item: item[-1],
                 device
             )
-            unbatched_inf_vect = self.backend.unbatch_dataset(inf_vect_only_ds)
+            unbatched_inf_vect = self._backend.unbatch_dataset(inf_vect_only_ds)
             self._save_dataset(unbatched_inf_vect, save_influence_vector_ds_path)
 
         return inf_vect_ds
@@ -370,18 +377,18 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         if load_influence_vector_path is not None and influence_vector_in_cache == CACHE.DISK:
             inf_vect_ds = self._load_dataset(load_influence_vector_path)
-            batch_size = self.backend.get_dataset_batch_size(train_set)
-            inf_vect_ds = self.backend.zip_datasets(
+            batch_size = self._backend.get_dataset_batch_size(train_set)
+            inf_vect_ds = self._backend.zip_datasets(
                 train_set,
-                self.backend.batch_dataset(inf_vect_ds, batch_size)
+                self._backend.batch_dataset(inf_vect_ds, batch_size)
             )
         else:
             inf_vect_ds = self.compute_influence_vector(train_set, save_influence_vector_path, device)
 
         if influence_vector_in_cache == CACHE.MEMORY:
-            inf_vect_ds = self.backend.cache_dataset(inf_vect_ds)
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
 
-        influence_value_dataset = self.backend.map_dataset(
+        influence_value_dataset = self._backend.map_dataset(
             dataset_to_evaluate,
             lambda *batch_evaluate: self._estimate_inf_values_with_inf_vect_dataset(
                 inf_vect_ds, batch_evaluate, device
@@ -456,25 +463,25 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         # Create nearest_neighbors with the correct backend if not provided
         if nearest_neighbors is None:
-            nearest_neighbors = LinearNearestNeighbors(backend=self.backend)
+            nearest_neighbors = LinearNearestNeighbors(backend=self._backend)
 
         if influence_vector_in_cache == CACHE.MEMORY:
             load_influence_vector_ds_path = None
 
         if load_influence_vector_ds_path is not None and influence_vector_in_cache == CACHE.DISK:
             inf_vect_ds = self._load_dataset(load_influence_vector_ds_path)
-            batch_size = self.backend.get_dataset_batch_size(train_set)
-            inf_vect_ds = self.backend.zip_datasets(
+            batch_size = self._backend.get_dataset_batch_size(train_set)
+            inf_vect_ds = self._backend.zip_datasets(
                 train_set,
-                self.backend.batch_dataset(inf_vect_ds, batch_size)
+                self._backend.batch_dataset(inf_vect_ds, batch_size)
             )
         else:
             inf_vect_ds = self.compute_influence_vector(train_set, save_influence_vector_ds_path, device)
 
         if influence_vector_in_cache == CACHE.MEMORY:
-            inf_vect_ds = self.backend.cache_dataset(inf_vect_ds)
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
 
-        batch_size_eval = self.backend.get_dataset_batch_size(dataset_to_evaluate)
+        batch_size_eval = self._backend.get_dataset_batch_size(dataset_to_evaluate)
 
         # Infer dtype if not provided
         if d_type is None:
@@ -495,7 +502,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             order=order,
         )
 
-        top_k_dataset = self.backend.map_dataset(
+        top_k_dataset = self._backend.map_dataset(
             dataset_to_evaluate,
             lambda *batch_evaluate: self._top_k_with_inf_vect_dataset_train(
                 batch_evaluate, nearest_neighbors, batch_size_eval, device
@@ -535,7 +542,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             influence scores
         """
         preproc_samples_to_evaluate = self._preprocess_samples(samples_to_evaluate)
-        samples_inf_val_dataset = self.backend.map_dataset(
+        samples_inf_val_dataset = self._backend.map_dataset(
             inf_vect_dataset,
             lambda *batch: (
                 batch[:-1][0],

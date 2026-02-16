@@ -70,7 +70,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             shuffle_buffer_size
         )
 
-        self.train_size = self.backend.get_dataset_size(dataset)
+        self.train_size = self._backend.get_dataset_size(dataset)
 
     def compute_influence_vector_group(
             self,
@@ -91,18 +91,18 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         influence_group
             A tensor containing one vector for the whole group.
         """
-        self.backend.assert_batched_dataset(group)
+        self._backend.assert_batched_dataset(group)
 
-        group_size = self.backend.get_dataset_size(group)
-        fraction = self.backend.cast(
+        group_size = self._backend.get_dataset_size(group)
+        fraction = self._backend.cast(
             group_size,
-            self.backend.float32_dtype()
-        ) / self.backend.cast(
+            self._backend.float32_dtype()
+        ) / self._backend.cast(
             self.train_size,
-            self.backend.float32_dtype()
+            self._backend.float32_dtype()
         )
 
-        train_size_float = self.backend.cast(self.train_size, self.backend.float32_dtype())
+        train_size_float = self._backend.cast(self.train_size, self._backend.float32_dtype())
         one_minus_fraction = 1.0 - fraction
         one_minus_fraction_sq = one_minus_fraction * one_minus_fraction
 
@@ -116,7 +116,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         pairwise = self._scalar_multiply(pairwise, coeff_pairwise_term)
 
         influence_group = additive + pairwise
-        influence_group = self.backend.transpose(influence_group)  # to get the right shape for the output
+        influence_group = self._backend.transpose(influence_group)  # to get the right shape for the output
 
         return influence_group
 
@@ -137,11 +137,11 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             The multiplied tensor.
         """
         # Convert scalar to tensor if needed and multiply
-        scalar_tensor = self.backend.cast(
-            self.backend.constant(scalar) if not hasattr(scalar, 'dtype') else scalar,
-            self.backend.get_dtype(tensor)
+        scalar_tensor = self._backend.cast(
+            self._backend.constant(scalar) if not hasattr(scalar, 'dtype') else scalar,
+            self._backend.get_dtype(tensor)
         )
-        return self.backend.multiply(tensor, scalar_tensor)
+        return self._backend.multiply(tensor, scalar_tensor)
 
     def _compute_additive_term(self, dataset: DatasetLike) -> Any:
         """
@@ -188,21 +188,23 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             local_ihvp = ConjugateGradientDescentIHVP(self.model, self.ihvp_calculator.extractor_layer,
                                                       dataset, self.ihvp_calculator.n_opt_iters,
                                                       self.ihvp_calculator.feature_extractor)
-        else:
+        elif isinstance(self.ihvp_calculator, LissaIHVP):
             local_ihvp = LissaIHVP(self.model, self.ihvp_calculator.extractor_layer,
                                    dataset, self.ihvp_calculator.n_opt_iters,
                                    self.ihvp_calculator.feature_extractor)
+        else:
+            raise TypeError("Unsupported IHVP calculator type for second-order interactions.")
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
         reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=False)
 
         # Create a dataset from the reduced IHVP
-        batch_size = self.backend.get_dataset_batch_size(dataset)
-        reduced_ihvp_ds = self.backend.create_dataset_from_tensors(reduced_ihvp, batch_size)
+        batch_size = self._backend.get_dataset_batch_size(dataset)
+        reduced_ihvp_ds = self._backend.create_dataset_from_tensors(reduced_ihvp, batch_size)
 
         # Compute HVP
         local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False)
-        local_hvp_batched = self.backend.batch_dataset(local_hvp, batch_size)
+        local_hvp_batched = self._backend.batch_dataset(local_hvp, batch_size)
 
         # Compute final IHVP
         interactions = self.ihvp_calculator.compute_ihvp(
@@ -210,11 +212,11 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         )
 
         # Multiply by dataset size and return single element
-        ds_size = self.backend.get_dataset_size(dataset)
+        ds_size = self._backend.get_dataset_size(dataset)
 
         result = None
         for batch in interactions:
-            scaled_batch = self._scalar_multiply(batch, self.backend.cast(ds_size, self.backend.get_dtype(batch)))
+            scaled_batch = self._scalar_multiply(batch, self._backend.cast(ds_size, self._backend.get_dtype(batch)))
             if result is None:
                 result = scaled_batch
             else:
@@ -256,12 +258,12 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             group_to_evaluate = group_train
         ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
 
-        influence = self.backend.transpose(self.compute_influence_vector_group(group_train))
+        influence = self._backend.transpose(self.compute_influence_vector_group(group_train))
 
         jacobian = self.model.batch_jacobian(group_to_evaluate)
-        reduced_grads = self.backend.reduce_sum(
-            self.backend.reshape(jacobian, (ds_size, -1)),
+        reduced_grads = self._backend.reduce_sum(
+            self._backend.reshape(jacobian, (ds_size, -1)),
             axis=0, keepdims=True
         )
 
-        return self.backend.matmul(reduced_grads, influence)
+        return self._backend.matmul(reduced_grads, influence)

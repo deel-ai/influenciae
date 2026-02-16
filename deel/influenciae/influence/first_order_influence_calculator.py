@@ -100,7 +100,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             The normalized vector if the normalize property is True, otherwise the input vector
         """
         if self.normalize:
-            v = self.backend.normalize(v, axis=0, keepdims=True)
+            v = self._backend.normalize(v, axis=0, keepdims=True)
         return v
 
     def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
@@ -120,7 +120,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         """
         influence_vector = self.ihvp_calculator._compute_ihvp_single_batch(train_samples)  # pylint: disable=W0212
         influence_vector = self._normalize_if_needed(influence_vector)
-        influence_vector = self.backend.transpose(influence_vector)
+        influence_vector = self._backend.transpose(influence_vector)
         return influence_vector
 
     def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
@@ -186,9 +186,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_values
             A tensor with the resulting influence value.
         """
-        influence_values = self.backend.matmul(
+        influence_values = self._backend.matmul(
             preproc_test_sample,
-            self.backend.transpose(influence_vector)
+            self._backend.transpose(influence_vector)
         )
         return influence_values
 
@@ -212,9 +212,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             use_gradient=False
         )
         batched_inf_vect = self._normalize_if_needed(batched_inf_vect)
-        batched_inf_vect = self.backend.transpose(batched_inf_vect)
-        influence_values = self.backend.reduce_sum(
-            self.backend.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
+        batched_inf_vect = self._backend.transpose(batched_inf_vect)
+        influence_values = self._backend.reduce_sum(
+            self._backend.multiply(evaluate_vect, batched_inf_vect), axis=1, keepdims=True)
         return influence_values
 
     def compute_influence_vector_group(
@@ -236,14 +236,14 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_group
             A tensor containing one vector for the whole group.
         """
-        self.backend.assert_batched_dataset(group)
+        self._backend.assert_batched_dataset(group)
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(group)
         reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
-        influence_group = self.backend.reshape(reduced_ihvp, (1, -1))
+        influence_group = self._backend.reshape(reduced_ihvp, (1, -1))
 
         return influence_group
 
@@ -285,8 +285,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         # Compute reduced gradients
         jacobian = self.model.batch_jacobian(group_to_evaluate)
-        reduced_grads = self.backend.reduce_sum(
-            self.backend.reshape(jacobian, (ds_size, -1)),
+        reduced_grads = self._backend.reduce_sum(
+            self._backend.reshape(jacobian, (ds_size, -1)),
             axis=0, keepdims=True
         )
 
@@ -296,6 +296,6 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         reduced_ihvp = self._normalize_if_needed(reduced_ihvp)
 
-        influence_values_group = self.backend.matmul(reduced_grads, reduced_ihvp)
+        influence_values_group = self._backend.matmul(reduced_grads, reduced_ihvp)
 
         return influence_values_group

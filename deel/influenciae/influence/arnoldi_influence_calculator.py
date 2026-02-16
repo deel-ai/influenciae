@@ -93,7 +93,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
             W: Any,
             A: Any,
             index: int
-    ) -> Tuple[Any, Any, int]:
+    ) -> Any:
         """
         Builds the new vector of the Krylov's basis and computes the projection of the hessian for this vector.
 

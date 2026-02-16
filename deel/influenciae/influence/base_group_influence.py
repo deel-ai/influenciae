@@ -18,7 +18,7 @@ https://arxiv.org/abs/1911.00418
 from abc import abstractmethod
 
 from ..common import InfluenceModel
-from ..common import InverseHessianVectorProduct, IHVPCalculator, ExactIHVP
+from ..common import InverseHessianVectorProduct, IHVPCalculator
 from ..common import BaseBackend
 
 from ..types import Optional, Union, Any, DatasetLike
@@ -54,11 +54,18 @@ class BaseGroupInfluenceCalculator:
     # Backend is set by subclasses that have access to a model.
     backend: BaseBackend
 
+    @property
+    def _backend(self) -> BaseBackend:
+        """Return initialized backend instance."""
+        if self.backend is None:
+            raise ValueError("Backend is not initialized. Instantiate a calculator with a valid model first.")
+        return self.backend
+
     def __init__(
             self,
             model: InfluenceModel,
             dataset: DatasetLike,
-            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = ExactIHVP,
+            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
     ):
@@ -69,27 +76,42 @@ class BaseGroupInfluenceCalculator:
             dataset_to_estimate_hessian = dataset
         else:
             # Use backend-agnostic dataset operations
-            batch_size = self.backend.get_dataset_batch_size(dataset)
-            unbatched = self.backend.unbatch_dataset(dataset)
+            batch_size = self._backend.get_dataset_batch_size(dataset)
+            unbatched = self._backend.unbatch_dataset(dataset)
             # Ensure shuffle_buffer_size has a default value
             buffer_size = shuffle_buffer_size if shuffle_buffer_size is not None else 10000
-            shuffled = self.backend.shuffle_dataset(unbatched, buffer_size)
-            taken = self.backend.take_dataset(shuffled, n_samples_for_hessian)
-            dataset_to_estimate_hessian = self.backend.batch_dataset(taken, batch_size)
+            shuffled = self._backend.shuffle_dataset(unbatched, buffer_size)
+            taken = self._backend.take_dataset(shuffled, n_samples_for_hessian)
+            dataset_to_estimate_hessian = self._backend.batch_dataset(taken, batch_size)
 
         self.train_set = dataset_to_estimate_hessian
+        self.ihvp_calculator: InverseHessianVectorProduct
 
         # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object
         if isinstance(ihvp_calculator, str):
-            self.ihvp_calculator = IHVPCalculator.from_string(ihvp_calculator).value(self.model, self.train_set) if \
-                ihvp_calculator == 'exact' else \
-                IHVPCalculator.from_string(ihvp_calculator).value(self.model,
-                                                                  self.model.start_layer,
-                                                                  self.train_set)
+            self.ihvp_calculator = self._build_ihvp(IHVPCalculator.from_string(ihvp_calculator))
         elif isinstance(ihvp_calculator, IHVPCalculator):
-            self.ihvp_calculator = ihvp_calculator.value(self.model, self.train_set)
+            self.ihvp_calculator = self._build_ihvp(ihvp_calculator)
         elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
             self.ihvp_calculator = ihvp_calculator
+        else:
+            raise ValueError("Unsupported ihvp_calculator argument type.")
+
+    def _resolve_extractor_layer(self) -> Union[str, int]:
+        """Return a valid extractor layer for approximate IHVP calculators."""
+        if self.model.start_layer is None:
+            raise ValueError(
+                "An extractor layer must be provided in the model wrapper when using 'cgd' or 'lissa' IHVP."
+            )
+        return self.model.start_layer
+
+    def _build_ihvp(self, ihvp_calculator: IHVPCalculator) -> InverseHessianVectorProduct:
+        """Instantiate IHVP calculators from enum values."""
+        if ihvp_calculator is IHVPCalculator.Exact:
+            return ihvp_calculator.value(self.model, self.train_set)
+
+        extractor_layer = self._resolve_extractor_layer()
+        return ihvp_calculator.value(self.model, extractor_layer, self.train_set)
 
     @abstractmethod
     def compute_influence_vector_group(
@@ -163,8 +185,8 @@ class BaseGroupInfluenceCalculator:
         size
             The size of the dataset.
         """
-        size_a = self.backend.get_dataset_size(dataset_a)
-        size_b = self.backend.get_dataset_size(dataset_b)
+        size_a = self._backend.get_dataset_size(dataset_a)
+        size_b = self._backend.get_dataset_size(dataset_b)
 
         if size_a != size_b:
             raise ValueError("The amount of points in the train and evaluation groups must match.")
@@ -175,7 +197,7 @@ class BaseGroupInfluenceCalculator:
         """Sum per-batch IHVP tensors across all batches."""
         reduced_ihvp = None
         for batch in ihvp_ds:
-            batch_sum = self.backend.reduce_sum(batch, axis=1, keepdims=keepdims)
+            batch_sum = self._backend.reduce_sum(batch, axis=1, keepdims=keepdims)
             if reduced_ihvp is None:
                 reduced_ihvp = batch_sum
             else:

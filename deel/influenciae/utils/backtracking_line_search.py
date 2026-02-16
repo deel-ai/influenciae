@@ -44,8 +44,10 @@ except (ImportError, ModuleNotFoundError):
     SGD = None
     tf = None
 
+_BACKTRACKING_LINE_SEARCH_TF: Optional[type] = None
+
 if _HAS_TENSORFLOW:
-    class BacktrackingLineSearch(Optimizer):
+    class TensorFlowBacktrackingLineSearch(Optimizer):
         """
         Implementation of a batched Backtracking Line Search optimizer with SGD steps.
         TensorFlow-specific implementation using Keras Optimizer interface.
@@ -106,7 +108,7 @@ if _HAS_TENSORFLOW:
             direction = self.attempt_step(model, curr_weights, gradients, closure)
 
             # Repeat progressively smaller steps until the (approximate) Wolfe condition is verified
-            while not BacktrackingLineSearch.wolfe_condition(direction, current_loss, norm, self.parameters.eta):
+            while not self.wolfe_condition(direction, current_loss, norm, self.parameters.eta):
                 self.parameters.eta *= self.parameters.beta
                 if self.parameters.max_eta < self.parameters.eta < self.parameters.min_eta:
                     break
@@ -195,9 +197,10 @@ if _HAS_TENSORFLOW:
             base_config["scaling_factor"] = self.scaling_factor
             return base_config
 
-else:
-    # TensorFlow not available, define placeholder
-    BacktrackingLineSearch: Optional[type] = None
+    _BACKTRACKING_LINE_SEARCH_TF = TensorFlowBacktrackingLineSearch
+
+
+BacktrackingLineSearch = _BACKTRACKING_LINE_SEARCH_TF
 
 
 # =============================================================================

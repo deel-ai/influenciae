@@ -253,7 +253,7 @@ class MislabelingDetectorEvaluator:
         curves, mean_curve, roc
             A tuple with the experience's results: (each of the individual curves, the mean curve, the ROC)
         """
-        curves = []
+        curve_list: List[np.ndarray] = []
 
         method = method_name if method_name is not None else 'experiment'
         use_tensorboard, path_to_save = self._resolve_logging_options(use_tensorboard, path_to_save)
@@ -262,22 +262,22 @@ class MislabelingDetectorEvaluator:
         for index in range(nbr_of_evaluation):
             file_writer = self._create_seed_writer(path_to_save, method, index) if use_tensorboard else None
             sorted_curve = self._evaluate_single_seed(influence_factory, seed, index, path_to_save, method, verbose)
-            curves.append(sorted_curve)
+            curve_list.append(sorted_curve)
 
             if use_tensorboard:
                 assert file_writer is not None
                 self._log_seed_metrics(file_writer, sorted_curve, index)
 
             if path_to_save is not None:
-                self._save_intermediate_results(path_to_save, method, curves)
+                self._save_intermediate_results(path_to_save, method, curve_list)
 
-        curves, mean_curve, roc = self.__build(curves)
+        curves_array, mean_curve, roc = self.__build(curve_list)
 
         if use_tensorboard:
             assert path_to_save is not None
             self._log_summary_metrics(path_to_save, method, roc, mean_curve)
 
-        return curves, mean_curve, roc
+        return curves_array, mean_curve, roc
 
     def _resolve_logging_options(
         self,
@@ -333,7 +333,7 @@ class MislabelingDetectorEvaluator:
 
         self.set_seed(seed + index, self.backend)
         noisy_training_dataset, noisy_label_indexes = self.build_noisy_training_dataset()
-        noisy_label_indexes = noisy_label_indexes[0]
+        noisy_label_index_array = noisy_label_indexes[0]
 
         log_path = None if path_to_save is None else os.path.join(path_to_save, method, "seed" + str(index))
         acc_train, acc_test, model, data_train = self.training_procedure.train(
@@ -351,7 +351,7 @@ class MislabelingDetectorEvaluator:
         influences_values = influence_calculator._compute_influence_values(scoring_dataset)  # pylint: disable=W0212
 
         sorted_influences_indexes = np.argsort(-np.squeeze(self.backend.to_numpy(influences_values)))
-        sorted_curve = self.__compute_curve(sorted_influences_indexes, noisy_label_indexes)
+        sorted_curve = self.__compute_curve(sorted_influences_indexes, noisy_label_index_array)
         roc = self._compute_roc(sorted_curve)
 
         if verbose:
@@ -415,11 +415,11 @@ class MislabelingDetectorEvaluator:
         curves, mean_curve, roc
             A tuple with: (curves in numpy array format, the mean curve, the roc value)
         """
-        curves = np.asarray(curves)
-        mean_curve = np.mean(curves, axis=0)
+        curves_array = np.asarray(curves)
+        mean_curve = np.mean(curves_array, axis=0)
         roc = self._compute_roc(mean_curve)
 
-        return curves, mean_curve, roc
+        return curves_array, mean_curve, roc
 
     @staticmethod
     def _compute_roc(curve: np.ndarray) -> float:

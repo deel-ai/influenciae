@@ -31,7 +31,7 @@ class InverseHessianVectorProduct(ABC):
        A batched dataset containing the training dataset's point we wish to employ for the estimation of
        the hessian matrix.
     """
-    def __init__(self, model: InfluenceModel, train_dataset: Optional[Any]):
+    def __init__(self, model: BaseInfluenceModel, train_dataset: Optional[Any]):
         self.model = model
         self.train_set = train_dataset
         self.backend: BaseBackend = model.backend
@@ -528,15 +528,16 @@ class IterativeIHVP(InverseHessianVectorProduct):
             hvp_batch_size: Optional[int] = None,
     ):
         super().__init__(model, train_dataset)
-        self.n_opt_iters = n_opt_iters
+        self.n_opt_iters = 100 if n_opt_iters is None else int(n_opt_iters)
         self._batch_shape_tensor: Optional[Tuple[int, ...]] = None
         self.extractor_layer = extractor_layer
+        extractor_layer_idx = self._resolve_extractor_layer_idx(model.model, extractor_layer)
 
         if feature_extractor is None:
             assert self.backend.is_sequential_model(model.model), \
                 "Model must be Sequential if feature_extractor is not provided"
             layers = self.backend.get_layers(model.model)
-            self.feature_extractor = self.backend.create_sequential_from_layers(layers[:self.extractor_layer])
+            self.feature_extractor = self.backend.create_sequential_from_layers(layers[:extractor_layer_idx])
         else:
             self.feature_extractor = feature_extractor
 
@@ -545,7 +546,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         # Create model that predicts based on the extracted feature maps
         layers = self.backend.get_layers(model.model)
         self.model = BaseInfluenceModel(
-            self.backend.create_sequential_from_layers(layers[extractor_layer:]),
+            self.backend.create_sequential_from_layers(layers[extractor_layer_idx:]),
             weights_to_watch=model.weights,
             loss_function=model.loss_function,
             weights_processed=True
@@ -560,6 +561,13 @@ class IterativeIHVP(InverseHessianVectorProduct):
             hvp_batch_size=hvp_batch_size,
         )
         self.iterative_function = iterative_function
+
+    def _resolve_extractor_layer_idx(self, full_model: Any, extractor_layer: Union[int, str]) -> int:
+        """Resolve a layer name/index to a concrete integer index."""
+        if isinstance(extractor_layer, str):
+            layer_idx, _ = self.backend.find_layer_by_name(full_model, extractor_layer)
+            return layer_idx
+        return extractor_layer
 
     def batch_shape_tensor(self):
         """
