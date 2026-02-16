@@ -963,7 +963,9 @@ def test_compute_influence_values_group():
                                                     shuffle_buffer_size=25)
     influence = influence_calculator.estimate_influence_values_group(train_set.batch(25), test_set.batch(25))
     assert influence.shape == (1, 1)
-    assert tf.reduce_max(tf.abs(influence - tf.transpose(ground_truth_influence_values_group))) < 1E-3
+    ground_truth = tf.transpose(ground_truth_influence_values_group)
+    relative_error = tf.reduce_max(tf.abs((influence - ground_truth) / (tf.abs(ground_truth) + 1E-12)))
+    assert relative_error < 1E-5
 
 
 @pytest.mark.parametrize(
