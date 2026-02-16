@@ -243,3 +243,111 @@ class TestZipBatchUnbatchTakeAndShuffle:
         """BufferedShuffleDataset should reject invalid buffers."""
         with pytest.raises(ValueError):
             lazy_module.BufferedShuffleDataset([1, 2, 3], buffer_size=0)
+
+
+class TestLazyDatasetFluentApi:
+    """Tests for fluent LazyDataset transformations."""
+
+    def test_to_lazy_dataset_wraps_iterables(self, lazy_module):
+        """to_lazy_dataset should expose fluent API for plain iterables."""
+        dataset = lazy_module.to_lazy_dataset([1, 2, 3])
+
+        assert isinstance(dataset, lazy_module.LazyDataset)
+        assert list(dataset) == [1, 2, 3]
+
+    def test_fluent_pipeline_map_batch_unbatch_take_cache(self, lazy_module):
+        """Fluent pipeline should preserve lazy + cache semantics."""
+        samples = [
+            (torch.tensor([1.0]), torch.tensor([10.0])),
+            (torch.tensor([2.0]), torch.tensor([20.0])),
+            (torch.tensor([3.0]), torch.tensor([30.0])),
+            (torch.tensor([4.0]), torch.tensor([40.0])),
+            (torch.tensor([5.0]), torch.tensor([50.0])),
+        ]
+        call_count = {"value": 0}
+
+        def map_fn(sample):
+            call_count["value"] += 1
+            x, y = sample
+            return x + 1.0, y * 2.0
+
+        cached = (
+            lazy_module.to_lazy_dataset(samples)
+            .map(map_fn)
+            .batch(2)
+            .unbatch()
+            .take(3)
+            .cache()
+        )
+        calls_after_cache = call_count["value"]
+
+        assert calls_after_cache >= 3
+        assert len(cached) == 3
+
+        first_pass = list(cached)
+        second_pass = list(cached)
+
+        assert call_count["value"] == calls_after_cache
+
+        for item in [first_pass, second_pass]:
+            assert len(item) == 3
+            assert torch.equal(item[0][0], torch.tensor([2.0]))
+            assert torch.equal(item[0][1], torch.tensor([20.0]))
+            assert torch.equal(item[1][0], torch.tensor([3.0]))
+            assert torch.equal(item[1][1], torch.tensor([40.0]))
+            assert torch.equal(item[2][0], torch.tensor([4.0]))
+            assert torch.equal(item[2][1], torch.tensor([60.0]))
+
+    def test_fluent_map_materializes_one_pass_iterator(self, lazy_module):
+        """Fluent map should warn and materialize one-pass inputs."""
+
+        def dataset_iter():
+            for idx in range(2):
+                yield idx
+
+        with pytest.warns(RuntimeWarning, match="one-pass iterator"):
+            mapped = lazy_module.to_lazy_dataset(dataset_iter()).map(lambda value: value + 1)
+
+        assert list(mapped) == [1, 2]
+        assert list(mapped) == [1, 2]
+
+    def test_adapter_len_does_not_consume_one_pass_iterator(self, lazy_module):
+        """Asking len on one-pass adapter should not consume the source."""
+        consumed = {"value": 0}
+
+        def dataset_iter():
+            for idx in range(4):
+                consumed["value"] += 1
+                yield idx
+
+        dataset = lazy_module.to_lazy_dataset(dataset_iter())
+
+        with pytest.raises(TypeError):
+            len(dataset)
+
+        assert consumed["value"] == 0
+        assert list(dataset) == [0, 1, 2, 3]
+
+    def test_fluent_take_short_circuits_one_pass_iterator(self, lazy_module):
+        """Fluent take should preserve short-circuit behavior on iterators."""
+        consumed = {"value": 0}
+
+        def dataset_iter():
+            for idx in range(10):
+                consumed["value"] += 1
+                yield idx
+
+        taken = lazy_module.to_lazy_dataset(dataset_iter()).take(3)
+        assert consumed["value"] == 0
+
+        assert list(taken) == [0, 1, 2]
+        assert consumed["value"] == 3
+
+        assert list(taken) == [0, 1, 2]
+        assert consumed["value"] == 3
+
+    def test_batch_is_noop_when_already_batched(self, lazy_module):
+        """Calling batch on an already batched dataset should be a no-op."""
+        batched = lazy_module.BatchedDataset([1, 2, 3], batch_size=2)
+
+        assert batched.batch(5) is batched

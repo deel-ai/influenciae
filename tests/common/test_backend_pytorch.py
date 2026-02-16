@@ -431,6 +431,22 @@ class TestPyTorchBackendDatasetOperations:
         assert call_count["value"] == 4
         assert torch.equal(first_pass[0], second_pass[0])
 
+    def test_map_dataset_output_supports_fluent_transforms(self, backend):
+        """Test backend map output can be chained with fluent dataset ops."""
+        dataset = [
+            torch.tensor([1.0]),
+            torch.tensor([2.0]),
+            torch.tensor([3.0]),
+        ]
+
+        mapped = backend.map_dataset(dataset, lambda x: x + 1.0)
+        cached = mapped.batch(2).unbatch().take(2).cache()
+        values = list(cached)
+
+        assert len(values) == 2
+        assert torch.equal(values[0], torch.tensor([2.0]))
+        assert torch.equal(values[1], torch.tensor([3.0]))
+
     def test_map_dataset_one_pass_iterator_materializes(self, backend):
         """Test one-pass iterators are materialized for safe re-iteration."""
 
