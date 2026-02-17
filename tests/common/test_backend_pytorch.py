@@ -148,6 +148,26 @@ def test_compute_jacobian(backend, simple_model):
     assert jacobian.shape == (batch_size, num_params)
 
 
+def test_compute_jacobian_fallback_preserves_dtype(backend, monkeypatch):
+    """Fallback Jacobian path should preserve tensor dtype."""
+    model = nn.Sequential(
+        nn.Linear(5, 3, dtype=torch.float64),
+        nn.ReLU(),
+        nn.Linear(3, 2, dtype=torch.float64),
+    )
+    inputs = torch.randn(3, 5, dtype=torch.float64)
+    targets = torch.randn(3, 2, dtype=torch.float64)
+    weights = backend.get_model_weights(model)
+
+    def loss_fn(pred, target):
+        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+    monkeypatch.setattr(torch, "func", None, raising=False)
+    jacobian = backend.compute_jacobian(model, weights, loss_fn, inputs, targets)
+
+    assert jacobian.dtype == torch.float64
+
+
 def test_concat(backend):
     """Test tensor concatenation."""
     a = torch.tensor([[1, 2], [3, 4]])
@@ -194,6 +214,32 @@ def test_to_numpy(backend):
 
     result = backend.to_numpy(a)
 
+    assert isinstance(result, np.ndarray)
+    assert np.array_equal(result, np.array([1.0, 2.0, 3.0]))
+
+
+def test_to_numpy_fallback_without_torch_numpy_bridge(backend):
+    """to_numpy should fallback via tolist when torch numpy bridge is unavailable."""
+
+    class FakeTensor:
+        """Minimal tensor-like object to trigger the fallback path."""
+
+        def __init__(self, values):
+            self._values = values
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            raise RuntimeError("Numpy is not available")
+
+        def tolist(self):
+            return self._values
+
+    result = backend.to_numpy(FakeTensor([1.0, 2.0, 3.0]))
     assert isinstance(result, np.ndarray)
     assert np.array_equal(result, np.array([1.0, 2.0, 3.0]))
 
