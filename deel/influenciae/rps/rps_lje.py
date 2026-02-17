@@ -96,7 +96,8 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             dataset_to_estimate_hessian = dataset
         else:
             n_batches_for_hessian = max(n_samples_for_hessian // batch_size, 1)
-            dataset_to_estimate_hessian = dataset.shuffle(shuffle_buffer_size).take(n_batches_for_hessian)
+            shuffled_dataset = self.backend.shuffle_dataset(dataset, shuffle_buffer_size)
+            dataset_to_estimate_hessian = self.backend.take_dataset(shuffled_dataset, n_batches_for_hessian)
         f_array, y_array = None, None
         for x, y in dataset_to_estimate_hessian:
             f = self.feature_extractor(x)

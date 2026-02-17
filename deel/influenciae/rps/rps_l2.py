@@ -411,10 +411,10 @@ class RepresenterPointL2(BaseRepresenterPoint):
         tf = import_optional_module("tensorflow", extra="tensorflow")
 
         influence_vectors = self.compute_influence_vector(self.train_set)
-        _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
-        dataset_influence: tf.data.Dataset
-        dataset_influence = dataset_influence.map(lambda x, v: v)
-        dataset_iterator = iter(dataset_influence)
+        _, influence_dataset = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
+        influence_values_dataset = self.backend.map_dataset(influence_dataset, lambda x, v: v)
+        dataset_iterator = iter(influence_values_dataset)
+        dataset_cardinality = self.backend.get_dataset_cardinality(influence_values_dataset)
 
         def body_fun(i, value):
             v = next(dataset_iterator)
@@ -423,7 +423,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
             return i, value
 
         _, predictions = tf.while_loop(
-            lambda i, value: i < dataset_influence.cardinality(),
+            lambda i, value: i < dataset_cardinality,
             body_fun,
             [tf.constant(0, dtype=tf.int64),
              tf.zeros((tf.shape(samples_to_evaluate[-1])[0],), dtype=tf.float32)]

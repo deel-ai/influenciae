@@ -5,11 +5,14 @@
 """
 Shared utilities for boundary-based influence calculators.
 """
+from ..common import BaseBackend
 from ..types import Tuple, Any
 
 
 class _BaseBoundaryCalculatorMixin:
     """Internal helper mixin for common DeepFool boundary computations."""
+
+    backend: BaseBackend
 
     def _delta_to_index(self, indexes_1: Any, indexes_2: Any, x: Any) -> Any:
         """
