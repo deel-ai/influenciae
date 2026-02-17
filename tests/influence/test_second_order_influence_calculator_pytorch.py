@@ -4,24 +4,31 @@
 # =====================================================================================
 """Tests for SecondOrderInfluenceCalculator with PyTorch backend."""
 
+from functools import partial
+
 import pytest
 
 try:
     import torch
     import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
 
     HAS_PYTORCH = True
 except (ImportError, OSError):
     HAS_PYTORCH = False
     torch = None
     nn = None
-    DataLoader = None
-    TensorDataset = None
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
 from deel.influenciae.influence.second_order_influence_calculator import SecondOrderInfluenceCalculator
+from ..utils_test import (
+    assert_close,
+    build_loader_torch,
+    build_regression_tensors_torch,
+    ground_truth_grads_hessian_last_layer_torch,
+    make_linear_model_torch,
+    set_seed_torch,
+)
 
 
 pytestmark = [
@@ -30,66 +37,14 @@ pytestmark = [
 ]
 
 
-def set_seed(seed=0):
-    """Set deterministic seed for reproducibility."""
-    torch.manual_seed(seed)
-
-
-def assert_close(a, b, epsilon=1e-6):
-    """Assert two tensors are close using max absolute error."""
-    a64 = a.detach().to(torch.float64)
-    b64 = b.detach().to(torch.float64)
-    diff = torch.max(torch.abs(a64 - b64)).item()
-    assert diff < epsilon, f"Max difference {diff} >= {epsilon}"
-
-
-def make_linear_model(dtype=None):
-    """Small linear model used for analytical checks."""
-    if dtype is None:
-        dtype = torch.float64
-    return nn.Sequential(
-        nn.Linear(3, 2, bias=False, dtype=dtype),
-        nn.Linear(2, 1, bias=False, dtype=dtype),
-    )
-
-
-def build_regression_tensors(n_samples, seed, dtype=None):
-    """Build synthetic tensors matching the TF test shapes."""
-    if dtype is None:
-        dtype = torch.float64
-    generator = torch.Generator().manual_seed(seed)
-    x = torch.randn((n_samples, 1, 3), generator=generator, dtype=dtype)
-    y = torch.randn((n_samples, 1, 1), generator=generator, dtype=dtype)
-    return x, y
-
-
-def build_loader(inputs, targets, batch_size):
-    """Create deterministic DataLoader."""
-    dataset = TensorDataset(inputs, targets)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-
-def grads_hessians_last_layer(model, inputs, targets):
-    """Analytical per-sample grads and Hessians wrt last layer (2 params)."""
-    w1 = model[0].weight.detach()
-    w2 = model[1].weight.detach().squeeze(0)
-
-    grads = []
-    hessians = []
-    for inp, tgt in zip(inputs, targets):
-        x = inp.squeeze(0)
-        y = tgt.reshape(-1)[0]
-
-        z = w1 @ x
-        pred = w2 @ z
-        err = pred - y
-
-        grads.append(2.0 * err * z)
-        hessians.append(2.0 * torch.outer(z, z))
-
-    grads_mat = torch.stack(grads, dim=0).T
-    hessian_stack = torch.stack(hessians, dim=0)
-    return grads_mat, hessian_stack
+set_seed = set_seed_torch
+make_linear_model = make_linear_model_torch
+build_regression_tensors = build_regression_tensors_torch
+build_loader = build_loader_torch
+grads_hessians_last_layer = partial(
+    ground_truth_grads_hessian_last_layer_torch,
+    return_hessian_stack=True,
+)
 
 
 def second_order_ground_truth(inv_hessian, grads_group, hessians_group, train_size):

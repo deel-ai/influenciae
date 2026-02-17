@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ExactIHVPFactory
 from deel.influenciae.rps import RepresenterPointLJE
+from ..utils_test import assert_allclose, assert_relative_almost_equal
 
 
 
@@ -33,25 +34,8 @@ def _device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _assert_allclose(a: torch.Tensor, b: torch.Tensor, rtol=1e-5, atol=1e-6):
-    a = a.detach().cpu()
-    b = b.detach().cpu()
-    if not torch.allclose(a, b, rtol=rtol, atol=atol):
-        abs_err = (a - b).abs().max().item()
-        rel_err = ((a - b).abs() / (b.abs() + 1e-12)).max().item()
-        raise AssertionError(
-            f"Not close: max_abs={abs_err:.3e}, max_rel={rel_err:.3e}, rtol={rtol}, atol={atol}"
-        )
-
-
-def _assert_relative_almost_equal(a: torch.Tensor, b: torch.Tensor, percent: float = 0.1):
-    a = a.detach().cpu()
-    b = b.detach().cpu()
-    denom = torch.clamp(b.abs(), min=1e-12)
-    rel = (a - b).abs() / denom
-    max_rel = rel.max().item()
-    if max_rel >= percent:
-        raise AssertionError(f"Relative error too large: max_rel={max_rel:.3e} >= {percent:.3e}")
+_assert_allclose = assert_allclose
+_assert_relative_almost_equal = assert_relative_almost_equal
 
 
 def _make_model(out_features: int, dtype=torch.float64) -> nn.Module:

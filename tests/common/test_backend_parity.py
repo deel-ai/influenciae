@@ -8,6 +8,7 @@ These tests ensure framework-agnostic behavior of the influence function computa
 """
 import pytest
 import numpy as np
+from ..utils_test import allclose
 
 # Check which frameworks are available
 try:
@@ -36,9 +37,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def almost_equal(a, b, epsilon=1e-4):
-    """Check if two arrays are almost equal."""
-    return np.allclose(a, b, atol=epsilon, rtol=epsilon)
+almost_equal = allclose
 
 
 class SimpleLinearModelTF:
@@ -1553,4 +1552,3 @@ class TestBackendUtilitiesParity:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

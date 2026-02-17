@@ -8,6 +8,7 @@ These tests verify the PyTorch-specific functionality works correctly.
 """
 import pytest
 import numpy as np
+from ..utils_test import allclose
 
 # Check if PyTorch is available
 try:
@@ -28,13 +29,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def almost_equal(a, b, epsilon=1e-4):
-    """Check if two arrays are almost equal."""
-    if isinstance(a, torch.Tensor):
-        a = a.detach().numpy()
-    if isinstance(b, torch.Tensor):
-        b = b.detach().numpy()
-    return np.allclose(a, b, atol=epsilon, rtol=epsilon)
+almost_equal = allclose
 
 
 @pytest.fixture

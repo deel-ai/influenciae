@@ -2,6 +2,8 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+from functools import partial
+
 import pytest
 
 try:
@@ -16,12 +18,10 @@ except ImportError:
 pytestmark = pytest.mark.skipif(not HAS_PYTORCH, reason="PyTorch is required for these tests")
 
 from deel.influenciae.rps.rps_l2 import RepresenterPointL2
+from ..utils_test import set_seed_torch
 
 
-def _seed_all(seed: int = 0):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+_seed_all = partial(set_seed_torch, include_cuda=True)
 
 
 def _make_multiclass_problem(n=100, num_classes=4, batch_train=32, batch_eval=20):

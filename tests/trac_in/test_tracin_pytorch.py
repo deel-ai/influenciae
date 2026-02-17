@@ -5,8 +5,11 @@
 """
 Tests for the TracIn method with PyTorch backend.
 """
+from functools import partial
+
 import pytest
 import numpy as np
+from ..utils_test import mse_loss_no_reduction, relative_almost_equal, set_seed_torch_numpy
 
 # Check if PyTorch is available
 try:
@@ -25,21 +28,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _seed_all(seed: int = 42):
-    """Set seeds for reproducibility."""
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-
-
-def relative_almost_equal(arr1, arr2, percent=0.01):
-    """Ensure two arrays are almost equal at a percent."""
-    if isinstance(arr1, torch.Tensor):
-        arr1 = arr1.detach().numpy()
-    if isinstance(arr2, torch.Tensor):
-        arr2 = arr2.detach().numpy()
-    return np.sum(np.abs(arr1 - arr2)) / (np.sum(np.abs(arr1)) + 1e-10) < percent
+_seed_all = partial(set_seed_torch_numpy, include_cuda=True)
 
 
 class FeatureModel(nn.Module):
@@ -75,11 +64,6 @@ class FullModel(nn.Module):
         x = self.features(x)
         x = self.linear(x)
         return x
-
-
-def mse_loss_no_reduction(pred, target):
-    """MSE loss without reduction, returns per-sample loss."""
-    return ((pred - target) ** 2).mean(dim=-1)
 
 
 def test_compute_influence_vector():

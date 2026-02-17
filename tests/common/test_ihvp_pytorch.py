@@ -3,38 +3,26 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+from functools import partial
+
 import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from ..utils_test import (
+    build_regression_tensors_torch,
+    ground_truth_grads_hessian_last_layer_torch,
+    make_linear_model_torch,
+    max_abs_almost_equal as almost_equal,
+)
+
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 
 
-# -------------------------
-# Helpers
-# -------------------------
-def almost_equal(a: torch.Tensor, b: torch.Tensor, epsilon: float = 1e-6) -> bool:
-    """Match the TF test style: max absolute error <= epsilon."""
-    a = a.detach()
-    b = b.detach()
-    return torch.max(torch.abs(a - b)).item() <= epsilon
-
-
-def make_linear_model() -> nn.Module:
-    # Accepts inputs shaped (B, 1, 3) (extra dims are fine for nn.Linear: it acts on last dim).
-    return nn.Sequential(
-        nn.Linear(3, 2, bias=False),
-        nn.Linear(2, 1, bias=False),
-    )
-
-
-def make_dataset(n: int, seed: int = 42):
-    g = torch.Generator().manual_seed(seed)
-    x = torch.randn(n, 1, 3, generator=g)
-    y = torch.randn(n, 1, 1, generator=g)
-    return x, y
+make_linear_model = partial(make_linear_model_torch, dtype=torch.float32)
+make_dataset = partial(build_regression_tensors_torch, dtype=torch.float32)
 
 
 def _per_sample_pred_scalar(W1: torch.Tensor, W2: torch.Tensor, x3: torch.Tensor) -> torch.Tensor:
@@ -47,39 +35,7 @@ def _per_sample_pred_scalar(W1: torch.Tensor, W2: torch.Tensor, x3: torch.Tensor
     return pred
 
 
-def ground_truth_grads_hessian_last_layer(
-    model: nn.Module, inputs: torch.Tensor, targets: torch.Tensor
-):
-    """
-    Ground-truth for start_layer=-1: derivatives wrt last layer weights W2 only (2 params).
-
-    loss = (pred - y)^2
-    grad_W2 = 2 (pred - y) z
-    Hess_W2 = 2 z z^T
-    """
-    W1 = model[0].weight.detach()  # (2,3)
-    W2 = model[1].weight.detach()  # (1,2)
-
-    grads = []
-    hess = []
-    n = inputs.shape[0]
-
-    for i in range(n):
-        x3 = inputs[i].squeeze(0)         # (3,)
-        y = targets[i].reshape(-1)[0]     # scalar
-        z = W1 @ x3                        # (2,)
-        pred = (W2.squeeze(0) @ z)         # scalar
-        err = pred - y
-
-        g = 2.0 * err * z                  # (2,)
-        H = 2.0 * torch.outer(z, z)        # (2,2)
-
-        grads.append(g)
-        hess.append(H)
-
-    grads_mat = torch.stack(grads, dim=0).T          # (2, N)
-    hess_mean = torch.stack(hess, dim=0).mean(dim=0) # (2,2)
-    return grads_mat, hess_mean
+ground_truth_grads_hessian_last_layer = ground_truth_grads_hessian_last_layer_torch
 
 
 def ground_truth_grads_hessian_first_layer(

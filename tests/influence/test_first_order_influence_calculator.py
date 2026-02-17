@@ -18,7 +18,7 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, CACHE
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
-from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth, set_seed_tf
 
 
 CGD_N_OPT_ITERS = 60
@@ -40,8 +40,7 @@ def build_ihvp_objects(influence_model, train_set, extractor_layer=-1, include_c
         return [exact, cgd]
     return [exact]
 
-def set_seed():
-    tf.random.set_seed(0)
+set_seed = set_seed_tf
 
 def test_compute_influence_vector():
     """

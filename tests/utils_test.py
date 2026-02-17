@@ -4,6 +4,27 @@
 # =====================================================================================
 import numpy as np
 
+
+def _to_numpy(value):
+    """Convert TensorFlow/PyTorch tensors or sequences to numpy arrays."""
+    if isinstance(value, np.ndarray):
+        return value
+
+    try:
+        import torch
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().numpy()
+    except ImportError:
+        pass
+
+    if hasattr(value, "numpy"):
+        return value.numpy()
+
+    if isinstance(value, (list, tuple)):
+        return np.array(value)
+
+    return np.array(value)
+
 # Lazy imports for framework-agnostic testing
 # TensorFlow imports are deferred to avoid import errors when TF is not installed
 tf = None
@@ -36,50 +57,94 @@ from deel.influenciae.common.base_influence import BaseInfluenceCalculator
 
 def almost_equal(arr1, arr2, epsilon=1e-6):
     """Ensure two array are almost equal at an epsilon"""
-    # Handle PyTorch tensors
-    try:
-        import torch
-        if isinstance(arr1, torch.Tensor):
-            arr1 = arr1.detach().cpu().numpy()
-        if isinstance(arr2, torch.Tensor):
-            arr2 = arr2.detach().cpu().numpy()
-    except ImportError:
-        pass
-    # Handle TensorFlow tensors
-    if hasattr(arr1, 'numpy'):
-        arr1 = arr1.numpy()
-    if hasattr(arr2, 'numpy'):
-        arr2 = arr2.numpy()
-    # Handle lists/tuples
-    if isinstance(arr1, (list, tuple)):
-        arr1 = np.array(arr1)
-    if isinstance(arr2, (list, tuple)):
-        arr2 = np.array(arr2)
+    arr1 = _to_numpy(arr1)
+    arr2 = _to_numpy(arr2)
     return np.sum(np.abs(arr1 - arr2)) < epsilon
+
+
+def allclose(arr1, arr2, epsilon=1e-4, rtol=None):
+    """Check if two tensors/arrays are close using numpy allclose semantics."""
+    arr1 = _to_numpy(arr1)
+    arr2 = _to_numpy(arr2)
+    if rtol is None:
+        rtol = epsilon
+    return np.allclose(arr1, arr2, atol=epsilon, rtol=rtol)
+
+
+def max_abs_almost_equal(arr1, arr2, epsilon=1e-6):
+    """Check if two tensors/arrays are close using max-absolute error."""
+    arr1 = _to_numpy(arr1).astype(np.float64)
+    arr2 = _to_numpy(arr2).astype(np.float64)
+    return np.max(np.abs(arr1 - arr2)) <= epsilon
 
 
 def relative_almost_equal(arr1, arr2, percent=0.01):
     """Ensure two array are almost equal at a percent"""
-    return np.sum(np.abs(arr1 - arr2)) / np.sum(np.abs(arr1)) < percent
+    arr1 = _to_numpy(arr1)
+    arr2 = _to_numpy(arr2)
+    return np.sum(np.abs(arr1 - arr2)) / (np.sum(np.abs(arr1)) + 1e-10) < percent
 
 
 def assert_tensor_equal(tensor1, tensor2):
     """Assert two tensors are equal. Works with both TensorFlow and PyTorch tensors."""
-    # Handle PyTorch tensors
-    try:
-        import torch
-        if isinstance(tensor1, torch.Tensor) or isinstance(tensor2, torch.Tensor):
-            if isinstance(tensor1, torch.Tensor):
-                tensor1 = tensor1.detach().cpu().numpy()
-            if isinstance(tensor2, torch.Tensor):
-                tensor2 = tensor2.detach().cpu().numpy()
-            np.testing.assert_array_equal(tensor1, tensor2)
-            return
-    except ImportError:
-        pass
-    # TensorFlow tensors
+    tensor1_np = _to_numpy(tensor1)
+    tensor2_np = _to_numpy(tensor2)
+    np.testing.assert_array_equal(tensor1_np, tensor2_np)
+
+
+def assert_close(arr1, arr2, epsilon=1e-6):
+    """Assert two tensors/arrays are close with max-absolute tolerance."""
+    arr1 = _to_numpy(arr1).astype(np.float64)
+    arr2 = _to_numpy(arr2).astype(np.float64)
+    max_diff = np.max(np.abs(arr1 - arr2))
+    assert max_diff < epsilon, f"Max difference {max_diff} >= {epsilon}"
+
+
+def assert_allclose(arr1, arr2, rtol=1e-5, atol=1e-6):
+    """Assert two tensors/arrays are close with allclose semantics."""
+    arr1 = _to_numpy(arr1).astype(np.float64)
+    arr2 = _to_numpy(arr2).astype(np.float64)
+    if not np.allclose(arr1, arr2, rtol=rtol, atol=atol):
+        abs_err = np.max(np.abs(arr1 - arr2))
+        rel_err = np.max(np.abs(arr1 - arr2) / (np.abs(arr2) + 1e-12))
+        raise AssertionError(
+            f"Not close: max_abs={abs_err:.3e}, max_rel={rel_err:.3e}, rtol={rtol}, atol={atol}"
+        )
+
+
+def assert_relative_almost_equal(arr1, arr2, percent=0.1):
+    """Assert closeness with a max-relative-error criterion."""
+    arr1 = _to_numpy(arr1).astype(np.float64)
+    arr2 = _to_numpy(arr2).astype(np.float64)
+    relative_error = np.abs(arr1 - arr2) / (np.abs(arr2) + 1e-12)
+    max_rel = np.max(relative_error)
+    if max_rel >= percent:
+        raise AssertionError(f"Relative error too large: max_rel={max_rel:.3e} >= {percent:.3e}")
+
+
+def set_seed_tf(seed=0):
+    """Set TensorFlow random seed."""
     _ensure_tensorflow()
-    return tf.debugging.assert_equal(tensor1, tensor2)
+    tf.random.set_seed(seed)
+
+
+def set_seed_torch(seed=0, include_cuda=False):
+    """Set PyTorch random seed."""
+    import torch
+
+    torch.manual_seed(seed)
+    if include_cuda and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def set_seed_torch_numpy(seed=0, include_cuda=False):
+    """Set random seeds for PyTorch and NumPy."""
+    import torch
+
+    torch.manual_seed(seed)
+    if include_cuda and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
 
 
 def generate_data(x_shape=(32, 32, 3), num_labels=10, samples=100):
@@ -102,6 +167,75 @@ def generate_model(input_shape=(32, 32, 3), output_shape=10):
     model.compile(loss='categorical_crossentropy', optimizer='sgd')
 
     return model
+
+
+def make_linear_model_torch(dtype=None):
+    """Build the small 2-layer linear PyTorch model used in analytical tests."""
+    import torch
+    import torch.nn as nn
+
+    if dtype is None:
+        dtype = torch.float64
+
+    return nn.Sequential(
+        nn.Linear(3, 2, bias=False, dtype=dtype),
+        nn.Linear(2, 1, bias=False, dtype=dtype),
+    )
+
+
+def build_regression_tensors_torch(n_samples, seed, dtype=None):
+    """Build synthetic regression tensors matching TF/PyTorch influence tests."""
+    import torch
+
+    if dtype is None:
+        dtype = torch.float64
+
+    generator = torch.Generator().manual_seed(seed)
+    inputs = torch.randn((n_samples, 1, 3), generator=generator, dtype=dtype)
+    targets = torch.randn((n_samples, 1, 1), generator=generator, dtype=dtype)
+    return inputs, targets
+
+
+def build_loader_torch(inputs, targets, batch_size=5, shuffle=False):
+    """Create a deterministic DataLoader from input/target tensors."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    return DataLoader(TensorDataset(inputs, targets), batch_size=batch_size, shuffle=shuffle)
+
+
+def ground_truth_grads_hessian_last_layer_torch(model, inputs, targets, return_hessian_stack=False):
+    """Compute analytical gradients/Hessians wrt last layer weights for MSE loss."""
+    import torch
+
+    w1 = model[0].weight.detach()
+    w2 = model[1].weight.detach().squeeze(0)
+
+    grads = []
+    hessians = []
+
+    for inp, target in zip(inputs, targets):
+        x = inp.squeeze(0)
+        y = target.reshape(-1)[0]
+
+        z = w1 @ x
+        pred = w2 @ z
+        err = pred - y
+
+        grads.append(2.0 * err * z)
+        hessians.append(2.0 * torch.outer(z, z))
+
+    grads_mat = torch.stack(grads, dim=0).T
+    hessian_stack = torch.stack(hessians, dim=0)
+    if return_hessian_stack:
+        return grads_mat, hessian_stack
+
+    hessian_mean = hessian_stack.mean(dim=0)
+    return grads_mat, hessian_mean
+
+
+def mse_loss_no_reduction(predictions, targets):
+    """MSE loss without reduction, returning one scalar per sample."""
+    return ((predictions - targets) ** 2).mean(dim=-1)
 
 
 def jacobian_ground_truth(input_vector, kernel_matrix, target):

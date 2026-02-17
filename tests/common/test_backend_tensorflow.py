@@ -8,6 +8,7 @@ These tests verify the TensorFlow-specific functionality works correctly.
 """
 import pytest
 import numpy as np
+from ..utils_test import allclose
 
 # Check if TensorFlow is available
 try:
@@ -26,13 +27,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def almost_equal(a, b, epsilon=1e-4):
-    """Check if two arrays are almost equal."""
-    if isinstance(a, tf.Tensor):
-        a = a.numpy()
-    if isinstance(b, tf.Tensor):
-        b = b.numpy()
-    return np.allclose(a, b, atol=epsilon, rtol=epsilon)
+almost_equal = allclose
 
 
 @pytest.fixture

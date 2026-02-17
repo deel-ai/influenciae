@@ -13,19 +13,24 @@ import pytest
 try:
     import torch
     import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
     HAS_PYTORCH = True
 except (ImportError, OSError):
     HAS_PYTORCH = False
     torch = None
     nn = None
-    DataLoader = None
-    TensorDataset = None
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
+from ..utils_test import (
+    assert_close,
+    build_loader_torch,
+    build_regression_tensors_torch,
+    ground_truth_grads_hessian_last_layer_torch,
+    make_linear_model_torch,
+    set_seed_torch,
+)
 
 
 pytestmark = [
@@ -34,66 +39,11 @@ pytestmark = [
 ]
 
 
-def set_seed(seed: int = 0):
-    """Set deterministic seed for reproducible tests."""
-    torch.manual_seed(seed)
-
-
-def assert_close(a, b, epsilon=1e-6):
-    """Assert two tensors are close with max-abs tolerance."""
-    diff = torch.max(torch.abs(a.detach().to(torch.float64) - b.detach().to(torch.float64))).item()
-    assert diff < epsilon, f"Max difference {diff} >= {epsilon}"
-
-
-def make_linear_model(dtype=None):
-    """Build the small 2-layer linear model used in analytical checks."""
-    if dtype is None:
-        dtype = torch.float64
-    return nn.Sequential(
-        nn.Linear(3, 2, bias=False, dtype=dtype),
-        nn.Linear(2, 1, bias=False, dtype=dtype),
-    )
-
-
-def build_loader(inputs, targets, batch_size=5):
-    """Create a deterministic DataLoader from tensors."""
-    return DataLoader(TensorDataset(inputs, targets), batch_size=batch_size, shuffle=False)
-
-
-def build_regression_tensors(n_samples, seed, dtype=None):
-    """Create synthetic regression data matching the TF test shapes."""
-    if dtype is None:
-        dtype = torch.float64
-    generator = torch.Generator().manual_seed(seed)
-    inputs = torch.randn((n_samples, 1, 3), generator=generator, dtype=dtype)
-    targets = torch.randn((n_samples, 1, 1), generator=generator, dtype=dtype)
-    return inputs, targets
-
-
-def ground_truth_grads_hessian_last_layer(model, inputs, targets):
-    """
-    Analytical gradients/Hessian wrt last layer weights (2 params) for MSE loss.
-    """
-    w1 = model[0].weight.detach()  # (2, 3)
-    w2 = model[1].weight.detach().squeeze(0)  # (2,)
-
-    grads = []
-    hessians = []
-
-    for inp, target in zip(inputs, targets):
-        x = inp.squeeze(0)  # (3,)
-        y = target.reshape(-1)[0]
-
-        z = w1 @ x
-        pred = w2 @ z
-        error = pred - y
-
-        grads.append(2.0 * error * z)
-        hessians.append(2.0 * torch.outer(z, z))
-
-    grads_mat = torch.stack(grads, dim=0).T  # (2, n)
-    hessian_mean = torch.stack(hessians, dim=0).mean(dim=0)  # (2, 2)
-    return grads_mat, hessian_mean
+set_seed = set_seed_torch
+make_linear_model = make_linear_model_torch
+build_loader = build_loader_torch
+build_regression_tensors = build_regression_tensors_torch
+ground_truth_grads_hessian_last_layer = ground_truth_grads_hessian_last_layer_torch
 
 
 def normalize_columns(v):

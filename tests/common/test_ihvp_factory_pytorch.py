@@ -7,6 +7,7 @@ Tests for the IHVP factory with PyTorch backend.
 These tests verify the PyTorch-specific factory functionality works correctly.
 """
 import pytest
+from ..utils_test import max_abs_almost_equal as almost_equal
 
 # Check if PyTorch is available
 try:
@@ -32,16 +33,6 @@ from deel.influenciae.common import (
     CGDIHVPFactory,
     LissaIHVPFactory
 )
-
-
-# -------------------------
-# Helpers
-# -------------------------
-def almost_equal(a: torch.Tensor, b: torch.Tensor, epsilon: float = 1e-6) -> bool:
-    """Match the TF test style: max absolute error <= epsilon."""
-    a = a.detach()
-    b = b.detach()
-    return torch.max(torch.abs(a - b)).item() <= epsilon
 
 
 def test_exact_factory():

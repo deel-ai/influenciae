@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.influence import ArnoldiInfluenceCalculator, FirstOrderInfluenceCalculator
 from deel.influenciae.common import InfluenceModel
+from ..utils_test import mse_loss_no_reduction
 
 
 class SimpleLinearModel(nn.Module):
@@ -38,11 +39,6 @@ class SimpleCNNModel(nn.Module):
         x = self.relu(x)
         x = self.flatten(x)
         return self.fc(x)
-
-
-def mse_loss_no_reduction(predictions, targets):
-    """MSE loss without reduction for per-sample loss."""
-    return ((predictions - targets) ** 2).squeeze()
 
 
 def test_inverse_exact_hessian_pytorch():
