@@ -15,6 +15,9 @@ from deel.influenciae.common import BaseInfluenceModel, InfluenceModel
 from ..utils_test import generate_model, assert_tensor_equal, almost_equal
 
 
+pytestmark = pytest.mark.tensorflow
+
+
 def test_loss_reduction():
     # Ensure we raise a proper error when a loss with reduction is passed
     # and we can instantiate with proper loss

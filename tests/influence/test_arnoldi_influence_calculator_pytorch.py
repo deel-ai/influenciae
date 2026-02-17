@@ -15,6 +15,9 @@ from deel.influenciae.common import InfluenceModel
 from ..utils_test import mse_loss_no_reduction
 
 
+pytestmark = pytest.mark.pytorch
+
+
 class SimpleLinearModel(nn.Module):
     """Simple linear model for testing."""
     def __init__(self, input_dim, output_dim, dtype=torch.float64):
@@ -236,7 +239,3 @@ def test_preprocess_samples_pytorch():
         assert preprocessed.shape[0] == batch[0].shape[0]
         assert preprocessed.shape[1] == k_largest_eig_vals
         break
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

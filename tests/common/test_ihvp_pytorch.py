@@ -21,6 +21,9 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 
 
+pytestmark = pytest.mark.pytorch
+
+
 make_linear_model = partial(make_linear_model_torch, dtype=torch.float32)
 make_dataset = partial(build_regression_tensors_torch, dtype=torch.float32)
 

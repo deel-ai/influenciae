@@ -14,6 +14,9 @@ from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, Lis
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
 
+pytestmark = pytest.mark.tensorflow
+
+
 def _build_exact_ihvp(influence_model, train_dataset):
     return ExactIHVP(influence_model, train_dataset)
 

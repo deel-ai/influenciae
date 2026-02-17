@@ -223,6 +223,7 @@ def pytest_collection_modifyitems(config, items):
     skip_pt_not_installed = pytest.mark.skip(reason="PyTorch is not installed")
     skip_pt_not_selected = pytest.mark.skip(reason="PyTorch backend not selected (--backend)")
     skip_both_required = pytest.mark.skip(reason="Both TensorFlow and PyTorch required for this test")
+    skip_both_not_selected = pytest.mark.skip(reason="Both backends must be selected (--backend=all)")
 
     for item in items:
         # Check for tensorflow marker
@@ -243,6 +244,8 @@ def pytest_collection_modifyitems(config, items):
         if "requires_both_backends" in item.keywords:
             if not (HAS_TENSORFLOW and HAS_PYTORCH):
                 item.add_marker(skip_both_required)
+            elif not (run_tensorflow and run_pytorch):
+                item.add_marker(skip_both_not_selected)
 
         # Auto-detect backend from test file name if no explicit marker
         # This handles existing tests that use pytestmark but aren't explicitly marked

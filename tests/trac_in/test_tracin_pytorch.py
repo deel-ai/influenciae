@@ -7,25 +7,16 @@ Tests for the TracIn method with PyTorch backend.
 """
 from functools import partial
 
-import pytest
 import numpy as np
+import pytest
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
 from ..utils_test import mse_loss_no_reduction, relative_almost_equal, set_seed_torch_numpy
 
-# Check if PyTorch is available
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
-    nn = None
 
-pytestmark = pytest.mark.skipif(
-    not HAS_PYTORCH,
-    reason="PyTorch is required for these tests"
-)
+pytestmark = pytest.mark.pytorch
 
 
 _seed_all = partial(set_seed_torch_numpy, include_cuda=True)

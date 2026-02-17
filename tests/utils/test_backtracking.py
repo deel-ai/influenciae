@@ -2,6 +2,7 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense, Input
@@ -13,6 +14,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.utils.backtracking_line_search import BacktrackingLineSearch, BacktrackingLineSearchPyTorch
 from ..utils_test import almost_equal
+
+
+pytestmark = pytest.mark.requires_both_backends
 
 
 def test_backtracking_line_search():

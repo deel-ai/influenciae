@@ -7,23 +7,11 @@ Tests for the IHVP factory with PyTorch backend.
 These tests verify the PyTorch-specific factory functionality works correctly.
 """
 import pytest
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
 from ..utils_test import max_abs_almost_equal as almost_equal
-
-# Check if PyTorch is available
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
-    nn = None
-
-pytestmark = pytest.mark.skipif(
-    not HAS_PYTORCH,
-    reason="PyTorch is required for these tests"
-)
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
@@ -33,6 +21,9 @@ from deel.influenciae.common import (
     CGDIHVPFactory,
     LissaIHVPFactory
 )
+
+
+pytestmark = pytest.mark.pytorch
 
 
 def test_exact_factory():

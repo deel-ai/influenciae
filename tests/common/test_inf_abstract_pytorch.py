@@ -7,26 +7,16 @@ Tests for the influence calculator abstraction with PyTorch backend.
 These tests verify the PyTorch-specific instantiation works correctly.
 """
 import pytest
-
-# Check if PyTorch is available
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
-    nn = None
-
-pytestmark = pytest.mark.skipif(
-    not HAS_PYTORCH,
-    reason="PyTorch is required for these tests"
-)
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
+
+
+pytestmark = pytest.mark.pytorch
 
 
 def test_instantiation():

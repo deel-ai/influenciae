@@ -1,11 +1,15 @@
 import os
 import shutil
 
-import tensorflow as tf
 import numpy as np
+import pytest
+import tensorflow as tf
 
 from deel.influenciae.types import Optional, Tuple, Any
 from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 class MockTrainingProcedure(BaseTrainingProcedure):

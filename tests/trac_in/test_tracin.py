@@ -2,6 +2,7 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
@@ -11,6 +12,9 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.trac_in.tracin import TracIn
 
 from ..utils_test import relative_almost_equal, assert_inheritance
+
+
+pytestmark = pytest.mark.tensorflow
 
 def test_compute_influence_vector():
     model_feature = Sequential()

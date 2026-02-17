@@ -6,6 +6,7 @@
 Test CIFAR-10 Benchmark module
 """
 import numpy as np
+import pytest
 from tensorflow.keras.losses import Reduction, CategoricalCrossentropy
 
 from deel.influenciae.benchmark.influence_factory import (
@@ -18,6 +19,9 @@ from deel.influenciae.benchmark.influence_factory import (
     ArnoldiCalculatorFactory
 )
 from deel.influenciae.benchmark import Cifar10MislabelingDetectorEvaluator
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 def test_first_order_exact():

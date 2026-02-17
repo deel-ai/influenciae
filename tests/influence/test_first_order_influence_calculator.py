@@ -21,6 +21,9 @@ from deel.influenciae.utils.sorted_dict import ORDER
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth, set_seed_tf
 
 
+pytestmark = pytest.mark.tensorflow
+
+
 CGD_N_OPT_ITERS = 60
 
 

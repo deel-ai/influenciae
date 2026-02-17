@@ -9,26 +9,16 @@ These tests mirror the TensorFlow tests in test_model_wrapper.py.
 import itertools
 
 import pytest
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.common import BaseInfluenceModel
 from deel.influenciae.common import InfluenceModel
 from ..utils_test import almost_equal, assert_tensor_equal
 
-# Check if PyTorch is available
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
-    nn = None
 
-pytestmark = pytest.mark.skipif(
-    not HAS_PYTORCH,
-    reason="PyTorch is required for these tests"
-)
+pytestmark = pytest.mark.pytorch
 
 def test_loss_reduction():
     """Ensure we can instantiate with proper loss for PyTorch.

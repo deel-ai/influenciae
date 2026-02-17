@@ -6,19 +6,10 @@
 Tests for LinearNearestNeighbors with PyTorch backend.
 """
 import pytest
+import torch
 
-# Check if PyTorch is available
-try:
-    import torch
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
 
-pytestmark = pytest.mark.skipif(
-    not HAS_PYTORCH,
-    reason="PyTorch is required for these tests"
-)
+pytestmark = pytest.mark.pytorch
 
 
 @pytest.fixture

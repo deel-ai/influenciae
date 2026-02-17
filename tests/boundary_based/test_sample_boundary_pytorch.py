@@ -6,18 +6,14 @@
 PyTorch-specific tests for SampleBoundaryCalculator.
 """
 import pytest
-
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-
-pytestmark = pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not available")
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.boundary_based import SampleBoundaryCalculator
+
+
+pytestmark = pytest.mark.pytorch
 
 
 def test_compute_influence_shape_pytorch():

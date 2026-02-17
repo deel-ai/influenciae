@@ -9,15 +9,8 @@ import os
 import tempfile
 
 import pytest
-
-try:
-    import torch
-    import torch.nn as nn
-    HAS_PYTORCH = True
-except (ImportError, OSError):
-    HAS_PYTORCH = False
-    torch = None
-    nn = None
+import torch
+import torch.nn as nn
 
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
@@ -33,10 +26,7 @@ from ..utils_test import (
 )
 
 
-pytestmark = [
-    pytest.mark.pytorch,
-    pytest.mark.skipif(not HAS_PYTORCH, reason="PyTorch is required for these tests"),
-]
+pytestmark = pytest.mark.pytorch
 
 
 set_seed = set_seed_torch

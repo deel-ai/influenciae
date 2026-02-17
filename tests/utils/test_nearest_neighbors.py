@@ -3,8 +3,13 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 
+import pytest
+
 from deel.influenciae.utils.nearest_neighbors import LinearNearestNeighbors, ORDER
 import tensorflow as tf
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 def test_linear_nearest():

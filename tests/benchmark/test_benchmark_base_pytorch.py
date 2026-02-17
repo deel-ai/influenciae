@@ -1,11 +1,14 @@
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
 from torch.utils.data import TensorDataset
 
 from deel.influenciae.types import Optional, Tuple, Any
 from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
+
+
+pytestmark = pytest.mark.pytorch
 
 
 class MockTrainingProcedure(BaseTrainingProcedure):
@@ -20,7 +23,6 @@ class MockTrainingProcedure(BaseTrainingProcedure):
         raise NotImplementedError
 
 
-@pytest.mark.pytorch
 def test_noise_pytorch(tmp_path):
     np.random.seed(0)
     torch.manual_seed(0)

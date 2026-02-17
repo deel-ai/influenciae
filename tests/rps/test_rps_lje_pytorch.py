@@ -15,6 +15,7 @@ Save as something like:
 """
 import copy
 
+import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +25,9 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ExactIHVPFactory
 from deel.influenciae.rps import RepresenterPointLJE
 from ..utils_test import assert_allclose, assert_relative_almost_equal
+
+
+pytestmark = pytest.mark.pytorch
 
 
 

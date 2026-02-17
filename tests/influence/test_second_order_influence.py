@@ -11,6 +11,10 @@ from deel.influenciae.influence.second_order_influence_calculator import SecondO
 
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
+
+pytestmark = pytest.mark.tensorflow
+
+
 def test__compute_additive_term():
     """ 
     Test the _compute_additive_term method

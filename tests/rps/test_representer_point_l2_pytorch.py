@@ -5,20 +5,16 @@
 from functools import partial
 
 import pytest
-
-try:
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    from torch.utils.data import DataLoader, TensorDataset
-    HAS_PYTORCH = True
-except ImportError:
-    HAS_PYTORCH = False
-
-pytestmark = pytest.mark.skipif(not HAS_PYTORCH, reason="PyTorch is required for these tests")
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.rps.rps_l2 import RepresenterPointL2
 from ..utils_test import set_seed_torch
+
+
+pytestmark = pytest.mark.pytorch
 
 
 _seed_all = partial(set_seed_torch, include_cuda=True)

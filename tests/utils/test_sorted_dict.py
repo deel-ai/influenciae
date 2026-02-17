@@ -2,9 +2,13 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 
 from deel.influenciae.utils.sorted_dict import BatchSort, ORDER
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 def test_batched_sorted_dict_1():
