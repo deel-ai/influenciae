@@ -9,8 +9,6 @@ https://arxiv.org/abs/1811.09720
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-from typing import cast
-
 from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import Framework

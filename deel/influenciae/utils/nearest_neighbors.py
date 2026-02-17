@@ -151,6 +151,54 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
                 self._backend = get_backend(self._backend_param)
         return self._backend
 
+    @staticmethod
+    def _get_first_element(value: Any) -> Any:
+        """Return the first element for tuple/list containers."""
+        if isinstance(value, (list, tuple)):
+            return value[0]
+        return value
+
+    def _infer_batch_shape_from_spec(self, element_spec: Any) -> Tuple[int, ...]:
+        """Infer batch sample shape from a dataset element specification."""
+        first_spec = self._get_first_element(element_spec)
+        first_spec = self._get_first_element(first_spec)
+
+        if hasattr(first_spec, "shape"):
+            return tuple(first_spec.shape[1:])
+        if isinstance(first_spec, dict) and "shape" in first_spec:
+            return tuple(first_spec["shape"][1:])
+        return ()
+
+    def _infer_batch_shape_from_dataset(self, dataset: Any) -> Tuple[int, ...]:
+        """Infer batch sample shape by peeking at the first dataset element."""
+        for item in dataset:
+            first_tensor = self._get_first_element(item)
+            first_tensor = self._get_first_element(first_tensor)
+            return tuple(self.backend.tensor_shape(first_tensor)[1:])
+        return ()
+
+    def _extract_batch_samples_and_ihvp(self, batch_data: Any) -> Tuple[Any, Any]:
+        """Extract sample tensors and IHVP values from a dataset batch entry."""
+        if isinstance(batch_data, tuple):
+            batch_seq = list(batch_data)
+        elif isinstance(batch_data, list):
+            batch_seq = batch_data
+        else:
+            batch_seq = None
+
+        if batch_seq is not None:
+            if len(batch_seq) >= 2:
+                batch, ihvp = batch_seq[0], batch_seq[-1]
+            elif len(batch_seq) == 1:
+                batch, ihvp = batch_seq[0], batch_seq[0]
+            else:
+                raise ValueError("Encountered empty batch data while querying nearest neighbors.")
+        else:
+            batch, ihvp = batch_data, batch_data
+
+        batch_samples = self._get_first_element(batch)
+        return batch_samples, ihvp
+
     def build(
         self,
         dataset: Any,
@@ -183,43 +231,13 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         self.dataset = _ensure_reiterable_dataset(dataset, context="nearest-neighbor dataset")
         self.dot_product_fun = dot_product_fun
 
-        # Get batch shape from dataset element spec
-        elt_spec = self.backend.get_dataset_element_spec(self.dataset)
-        batch_shape: Tuple[int, ...] = ()
+        element_spec = self.backend.get_dataset_element_spec(self.dataset)
+        batch_shape = self._infer_batch_shape_from_spec(element_spec)
 
-        # Handle nested specs: we expect ((batch_samples, ...), ihvp) structure
-        # and we need shape from the batch_samples
-        if isinstance(elt_spec, (list, tuple)):
-            first_spec = elt_spec[0]
-            if isinstance(first_spec, (list, tuple)):
-                # ((x, y), ihvp) structure
-                first_spec = first_spec[0]
-        else:
-            first_spec = elt_spec
-
-        # Extract shape from spec
-        if hasattr(first_spec, 'shape'):
-            batch_shape = tuple(first_spec.shape[1:])  # Remove batch dimension
-        elif isinstance(first_spec, dict) and 'shape' in first_spec:
-            batch_shape = tuple(first_spec['shape'][1:])
-
-        # Fallback: iterate to get shape from first batch if not available from spec
         if not batch_shape:
-            dataset_for_shape = self.dataset
-            if dataset_for_shape is None:
+            if self.dataset is None:
                 raise ValueError("Nearest neighbors dataset is not initialized.")
-
-            for item in dataset_for_shape:
-                if isinstance(item, (list, tuple)):
-                    first_item = item[0]
-                    if isinstance(first_item, (list, tuple)):
-                        first_tensor = first_item[0]
-                    else:
-                        first_tensor = first_item
-                else:
-                    first_tensor = item
-                batch_shape = tuple(self.backend.tensor_shape(first_tensor)[1:])
-                break
+            batch_shape = self._infer_batch_shape_from_dataset(self.dataset)
 
         # Use backend default dtype if not provided
         if d_type is None:
@@ -285,18 +303,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         def reduce_func(state, batch_data):
             best_values, best_samples = state
-
-            # Expected structure: (batch, ihvp) where batch is (samples, labels, ...)
-            if isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
-                batch = batch_data[0]
-                ihvp = batch_data[-1]
-                if isinstance(batch, (list, tuple)):
-                    batch_samples = batch[0]
-                else:
-                    batch_samples = batch
-            else:
-                batch_samples = batch_data[0] if isinstance(batch_data, (list, tuple)) else batch_data
-                ihvp = batch_data[-1] if isinstance(batch_data, (list, tuple)) else batch_data
+            batch_samples, ihvp = self._extract_batch_samples_and_ihvp(batch_data)
 
             # Compute influence values
             influence_values = dot_product_fun(vector_to_find, ihvp)
@@ -346,19 +353,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         # Iterate through the dataset
         for batch_data in dataset:
-            # Expected structure: (batch, ihvp) where batch is (samples, labels, ...)
-            if isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
-                batch, ihvp = batch_data[0], batch_data[-1]
-
-                # Handle nested batch structure (samples may be first element of batch)
-                if isinstance(batch, (list, tuple)):
-                    batch_samples = batch[0]
-                else:
-                    batch_samples = batch
-            else:
-                # Fallback for simpler dataset structure
-                batch_samples = batch_data[0] if isinstance(batch_data, (list, tuple)) else batch_data
-                ihvp = batch_data[-1] if isinstance(batch_data, (list, tuple)) else batch_data
+            batch_samples, ihvp = self._extract_batch_samples_and_ihvp(batch_data)
 
             # Compute influence values using the dot product function
             influence_values = dot_product_fun(vector_to_find, ihvp)

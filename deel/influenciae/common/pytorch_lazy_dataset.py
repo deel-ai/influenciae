@@ -256,23 +256,23 @@ class BatchedDataset(LazyDataset):
 
 def _infer_batch_len(batch: Any) -> Optional[int]:
     """Infer the number of samples contained in a batch."""
-    if isinstance(batch, torch.Tensor):
-        if batch.dim() == 0:
-            return None
-        return int(batch.shape[0])
+    batch_len: Optional[int] = None
 
-    if isinstance(batch, (list, tuple)) and len(batch) > 0:
+    if isinstance(batch, torch.Tensor):
+        if batch.dim() > 0:
+            batch_len = int(batch.shape[0])
+    elif isinstance(batch, (list, tuple)) and len(batch) > 0:
         first = batch[0]
         if isinstance(first, torch.Tensor):
-            if first.dim() == 0:
-                return None
-            return int(first.shape[0])
-        try:
-            return len(first)
-        except TypeError:
-            return None
+            if first.dim() > 0:
+                batch_len = int(first.shape[0])
+        else:
+            try:
+                batch_len = len(first)
+            except TypeError:
+                batch_len = None
 
-    return None
+    return batch_len
 
 
 class UnbatchedDataset(LazyDataset):
@@ -370,8 +370,7 @@ class BufferedShuffleDataset(LazyDataset):
             buffer[swap_idx] = item
 
         random.shuffle(buffer)
-        for item in buffer:
-            yield item
+        yield from buffer
 
     def __len__(self) -> int:
         source_len = _safe_len(self.source)
