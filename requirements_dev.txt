@@ -3,8 +3,8 @@
 # Install with: pip install -r requirements_dev.txt
 #
 # For backend-specific testing, also install:
-#   pip install tensorflow>=2.7.0,<2.16.0  # For TensorFlow tests
-#   pip install torch>=1.9.0               # For PyTorch tests
+#   pip install tensorflow>=2.11.0,<2.21.0  # For TensorFlow tests
+#   pip install torch>=1.13.0,<2.11.0       # For PyTorch tests
 
 # Documentation
 docutils>=0.18.0

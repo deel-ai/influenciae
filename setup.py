@@ -24,11 +24,11 @@ setup(
     ],
     extras_require={
         # Backend-specific dependencies (user chooses one or both)
-        "tensorflow": ["tensorflow>=2.7.0,<2.16.0"],
-        "pytorch": ["torch>=1.9.0"],
+        "tensorflow": ["tensorflow>=2.11.0,<2.21.0"],
+        "pytorch": ["torch>=1.13.0,<2.11.0"],
         "all": [
-            "tensorflow>=2.7.0,<2.16.0",
-            "torch>=1.9.0",
+            "tensorflow>=2.11.0,<2.21.0",
+            "torch>=1.13.0,<2.11.0",
         ],
         # Development dependencies
         "tests": [
@@ -55,16 +55,15 @@ setup(
         ],
     },
     packages=setuptools.find_namespace_packages(include=["deel.*"]),
-    python_requires=">=3.8",
+    python_requires=">=3.11",
     classifiers=[
         "Development Status :: 4 - Beta",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Operating System :: OS Independent",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
