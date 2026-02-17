@@ -31,28 +31,28 @@ class PyTorchFluentDatasetLike(PyTorchDatasetLike, Protocol):
 
     def map(self, map_fn: Callable[[Any], Any]) -> "PyTorchFluentDatasetLike":
         """Return a dataset transformed by ``map_fn``."""
-        ...
+        raise NotImplementedError
 
     def cache(self) -> "PyTorchFluentDatasetLike":
         """Return a cached/materialized dataset wrapper."""
-        ...
+        raise NotImplementedError
 
     def zip(self, other: DatasetLike) -> "PyTorchFluentDatasetLike":
         """Return a dataset zipped with ``other``."""
-        ...
+        raise NotImplementedError
 
     def batch(self, batch_size: int) -> "PyTorchFluentDatasetLike":
         """Return a dataset grouped into batches of ``batch_size``."""
-        ...
+        raise NotImplementedError
 
     def unbatch(self) -> "PyTorchFluentDatasetLike":
         """Return a dataset where batched elements are flattened."""
-        ...
+        raise NotImplementedError
 
     def shuffle(self, buffer_size: int) -> "PyTorchFluentDatasetLike":
         """Return a dataset shuffled with a finite ``buffer_size``."""
-        ...
+        raise NotImplementedError
 
     def take(self, count: int) -> "PyTorchFluentDatasetLike":
         """Return a dataset restricted to the first ``count`` elements."""
-        ...
+        raise NotImplementedError
