@@ -13,12 +13,28 @@ def _to_numpy(value):
     try:
         import torch
         if isinstance(value, torch.Tensor):
-            return value.detach().cpu().numpy()
+            value_cpu = value.detach().cpu()
+            try:
+                return value_cpu.numpy()
+            except RuntimeError as exc:
+                if "Numpy is not available" not in str(exc):
+                    raise
+                return np.asarray(value_cpu.tolist())
     except ImportError:
         pass
 
     if hasattr(value, "numpy"):
-        return value.numpy()
+        try:
+            return value.numpy()
+        except RuntimeError as exc:
+            if "Numpy is not available" not in str(exc):
+                raise
+            if hasattr(value, "tolist"):
+                return np.asarray(value.tolist())
+            raise
+
+    if hasattr(value, "tolist"):
+        return np.asarray(value.tolist())
 
     if isinstance(value, (list, tuple)):
         return np.array(value)
