@@ -40,9 +40,20 @@ def _check_pytorch_available():
         return False
 
 
+def _check_pytorch_numpy_bridge_available():
+    """Check whether torch tensor -> numpy conversion is functional."""
+    try:
+        import torch
+        _ = torch.tensor([1.0]).detach().cpu().numpy()
+        return True
+    except (ImportError, OSError, Exception):
+        return False
+
+
 # Global availability flags (computed once at import time)
 HAS_TENSORFLOW = _check_tensorflow_available()
 HAS_PYTORCH = _check_pytorch_available()
+HAS_PYTORCH_NUMPY_BRIDGE = _check_pytorch_numpy_bridge_available() if HAS_PYTORCH else False
 
 # ============================================================================
 # Collection ignore patterns based on backend availability
@@ -314,8 +325,11 @@ def pytest_report_header(config):
         "Influenciae Backend Status:",
         f"  TensorFlow: {'available' if HAS_TENSORFLOW else 'NOT available'}",
         f"  PyTorch: {'available' if HAS_PYTORCH else 'NOT available'}",
+        f"  PyTorch NumPy bridge: {'available' if HAS_PYTORCH_NUMPY_BRIDGE else 'NOT available'}",
         f"  Ignored patterns: {len(collect_ignore_glob)} pattern(s)",
     ]
+    if HAS_PYTORCH and not HAS_PYTORCH_NUMPY_BRIDGE:
+        lines.append("  Hint: this torch build needs numpy<2 for tensor.numpy() support")
     backend_option = config.getoption("--backend", default=None)
     if backend_option:
         lines.append(f"  Selected backend: {backend_option}")
