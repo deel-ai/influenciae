@@ -8,112 +8,204 @@ on:
 
 jobs:
   # ============================================================================
-  # Minimal tests - no backend required (fastest, catches interface issues)
+  # Minimal tests - backend-agnostic
   # ============================================================================
   minimal-tests:
     name: Minimal (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install tox tox-gh-actions
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
 
-    - name: Run minimal tests
-      run: tox -e py$(echo ${{ matrix.python-version }} | tr -d .)-minimal
+      - name: Run minimal tests
+        run: tox -e py$(echo ${{ matrix.python-version }} | tr -d .)-minimal
 
   # ============================================================================
-  # Backend-specific tests - run in parallel
+  # Single-backend tests - full min/max compatibility on every PR
   # ============================================================================
   backend-tests:
-    name: ${{ matrix.backend }} (Python ${{ matrix.python-version }})
+    name: ${{ matrix.backend }} ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
-        backend: [tensorflow, pytorch]
-        exclude:
-          # TensorFlow 2.x has limited support for Python 3.11
+        include:
+          # TensorFlow bounds per supported Python version
           - python-version: "3.11"
             backend: tensorflow
+            profile: min
+            framework-version: "2.12.0"
+            tox-env: py311-tensorflow-min
+          - python-version: "3.11"
+            backend: tensorflow
+            profile: max
+            framework-version: "2.20.0"
+            tox-env: py311-tensorflow-max
+          - python-version: "3.12"
+            backend: tensorflow
+            profile: min
+            framework-version: "2.16.1"
+            tox-env: py312-tensorflow-min
+          - python-version: "3.12"
+            backend: tensorflow
+            profile: max
+            framework-version: "2.20.0"
+            tox-env: py312-tensorflow-max
+          - python-version: "3.13"
+            backend: tensorflow
+            profile: min
+            framework-version: "2.20.0"
+            tox-env: py313-tensorflow-min
+          - python-version: "3.13"
+            backend: tensorflow
+            profile: max
+            framework-version: "2.20.0"
+            tox-env: py313-tensorflow-max
+
+          # PyTorch bounds per supported Python version
+          - python-version: "3.11"
+            backend: pytorch
+            profile: min
+            framework-version: "1.13.0"
+            tox-env: py311-pytorch-min
+          - python-version: "3.11"
+            backend: pytorch
+            profile: max
+            framework-version: "2.10.0"
+            tox-env: py311-pytorch-max
+          - python-version: "3.12"
+            backend: pytorch
+            profile: min
+            framework-version: "2.2.0"
+            tox-env: py312-pytorch-min
+          - python-version: "3.12"
+            backend: pytorch
+            profile: max
+            framework-version: "2.10.0"
+            tox-env: py312-pytorch-max
+          - python-version: "3.13"
+            backend: pytorch
+            profile: min
+            framework-version: "2.5.0"
+            tox-env: py313-pytorch-min
+          - python-version: "3.13"
+            backend: pytorch
+            profile: max
+            framework-version: "2.10.0"
+            tox-env: py313-pytorch-max
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install tox tox-gh-actions
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
 
-    - name: Run ${{ matrix.backend }} tests
-      run: tox -e py$(echo ${{ matrix.python-version }} | tr -d .)-${{ matrix.backend }}
-      env:
-        CUDA_VISIBLE_DEVICES: ""
+      - name: Run ${{ matrix.backend }} tests (${{ matrix.framework-version }})
+        run: tox -e ${{ matrix.tox-env }}
+        env:
+          CUDA_VISIBLE_DEVICES: ""
 
   # ============================================================================
-  # Full integration tests - both backends (runs on main/release only)
+  # Dual-backend tests - validates requires_both_backends markers
   # ============================================================================
-  integration-tests:
-    name: Integration (Both backends)
+  dual-backend-tests:
+    name: Both backends ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    # Only run full integration on main branch or releases
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10"]
+        include:
+          - python-version: "3.11"
+            profile: min
+            tensorflow-version: "2.12.0"
+            pytorch-version: "1.13.0"
+            tox-env: py311-all-min
+          - python-version: "3.11"
+            profile: max
+            tensorflow-version: "2.20.0"
+            pytorch-version: "2.10.0"
+            tox-env: py311-all-max
+          - python-version: "3.12"
+            profile: min
+            tensorflow-version: "2.16.1"
+            pytorch-version: "2.2.0"
+            tox-env: py312-all-min
+          - python-version: "3.12"
+            profile: max
+            tensorflow-version: "2.20.0"
+            pytorch-version: "2.10.0"
+            tox-env: py312-all-max
+          - python-version: "3.13"
+            profile: min
+            tensorflow-version: "2.20.0"
+            pytorch-version: "2.5.0"
+            tox-env: py313-all-min
+          - python-version: "3.13"
+            profile: max
+            tensorflow-version: "2.20.0"
+            pytorch-version: "2.10.0"
+            tox-env: py313-all-max
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install tox tox-gh-actions
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
 
-    - name: Run integration tests with both backends
-      run: tox -e py$(echo ${{ matrix.python-version }} | tr -d .)-all
-      env:
-        CUDA_VISIBLE_DEVICES: ""
+      - name: Run dual-backend tests (TF ${{ matrix.tensorflow-version }}, Torch ${{ matrix.pytorch-version }})
+        run: tox -e ${{ matrix.tox-env }}
+        env:
+          CUDA_VISIBLE_DEVICES: ""
 
   # ============================================================================
   # Test summary gate
   # ============================================================================
   tests-complete:
     name: All Tests Complete
-    needs: [minimal-tests, backend-tests]
+    needs: [minimal-tests, backend-tests, dual-backend-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check test results
+      - name: Check matrix results
         run: |
-          if [[ "${{ needs.minimal-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.backend-tests.result }}" == "failure" ]]; then
-            echo "Some tests failed!"
+          if [[ "${{ needs.minimal-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.backend-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.dual-backend-tests.result }}" != "success" ]]; then
+            echo "Some compatibility jobs failed or were cancelled."
             exit 1
           fi
-          echo "All tests passed!"
-
+          echo "All compatibility jobs passed."
