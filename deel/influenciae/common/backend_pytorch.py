@@ -123,7 +123,8 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         except AttributeError:
             # Fallback for older PyTorch versions
-            jacobian = torch.zeros(batch_size, num_params, device=inputs.device)
+            dtype = weights[0].dtype if weights else inputs.dtype
+            jacobian = torch.zeros(batch_size, num_params, device=inputs.device, dtype=dtype)
 
             for i in range(batch_size):
                 model.zero_grad()
@@ -144,7 +145,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                     if w.grad is not None:
                         grads.append(w.grad.flatten().clone())
                     else:
-                        grads.append(torch.zeros(w.numel(), device=inputs.device))
+                        grads.append(torch.zeros(w.numel(), device=w.device, dtype=w.dtype))
 
                 jacobian[i] = torch.cat(grads)
 
@@ -176,7 +177,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             if w.grad is not None:
                 gradients.append(w.grad.flatten())
             else:
-                gradients.append(torch.zeros(w.numel(), device=inputs.device))
+                gradients.append(torch.zeros(w.numel(), device=w.device, dtype=w.dtype))
 
         return torch.cat(gradients)
 
@@ -194,7 +195,13 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def to_numpy(self, tensor: torch.Tensor) -> np.ndarray:
         """Convert a tensor to numpy array."""
-        return tensor.detach().cpu().numpy()
+        tensor_cpu = tensor.detach().cpu()
+        try:
+            return tensor_cpu.numpy()
+        except RuntimeError as exc:
+            if "Numpy is not available" not in str(exc):
+                raise
+            return np.asarray(tensor_cpu.tolist())
 
     def get_batch_size(self, tensor: torch.Tensor) -> int:
         """Get the batch size (first dimension) of a tensor."""
