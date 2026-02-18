@@ -119,3 +119,17 @@ def test_batched_sorted_dict_3():
 
     assert tf.reduce_max(tf.abs(key - key_expected)) < 1E-6
     assert tf.reduce_max(tf.abs(k - values_expected)) < 1E-6
+
+
+def test_batched_sorted_dict_accepts_mixed_input_dtypes():
+    bsd = BatchSort(batch_shape=(2,), k_shape=(1, 2), dtype=tf.float64, order=ORDER.DESCENDING)
+
+    # Values are float32 while keys and internal buffers are float64.
+    values = tf.convert_to_tensor([[1.0, 3.0, 2.0]], dtype=tf.float32)
+    keys = tf.convert_to_tensor([[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]], dtype=tf.float64)
+    bsd.add_all(keys, values)
+
+    best_keys, best_values = bsd.get()
+    assert best_keys.dtype == tf.float64
+    assert best_values.dtype == tf.float64
+    assert tf.reduce_max(tf.abs(best_values - tf.constant([[3.0, 2.0]], dtype=tf.float64))) < 1E-6
