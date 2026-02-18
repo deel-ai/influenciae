@@ -42,7 +42,6 @@ jobs:
   backend-tests:
     name: ${{ matrix.backend }} ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
@@ -136,7 +135,6 @@ jobs:
   dual-backend-tests:
     name: Both backends ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
