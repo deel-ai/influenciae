@@ -6,7 +6,6 @@
 Framework-agnostic model wrappers for influence functions.
 Supports both TensorFlow and PyTorch models.
 """
-import itertools
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
@@ -166,7 +165,17 @@ class BaseInfluenceModel:
         if self.weights_processed:
             return weights_to_watch
 
-        return list(itertools.chain(*weights_to_watch))
+        if not isinstance(weights_to_watch, (list, tuple)):
+            return [weights_to_watch]
+
+        processed_weights = []
+        for weights in weights_to_watch:
+            if isinstance(weights, (list, tuple)):
+                processed_weights.extend(weights)
+            else:
+                processed_weights.append(weights)
+
+        return processed_weights
 
     @property
     def layers(self) -> List[Any]:
