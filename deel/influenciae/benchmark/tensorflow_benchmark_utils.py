@@ -57,9 +57,9 @@ class ModelsSaver(tf.keras.callbacks.Callback):
             epoch_model.build(self.model.input_shape)
             epoch_model.set_weights(self.model.get_weights())
 
-            epoch_lr = self.optimizer.lr
+            epoch_lr = tf.keras.backend.get_value(self.optimizer.learning_rate)
             self.models.append(epoch_model)
-            self.learning_rates.append(epoch_lr.numpy())
+            self.learning_rates.append(float(np.asarray(epoch_lr)))
 
             if self.saving_path is not None:
                 tf.data.experimental.save(f"{self.saving_path}/model_ep_{epoch:.6d}")

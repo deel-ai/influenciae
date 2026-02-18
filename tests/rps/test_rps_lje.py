@@ -19,6 +19,25 @@ from ..utils_test import assert_inheritance, almost_equal, relative_almost_equal
 pytestmark = pytest.mark.tensorflow
 
 
+def _normalize_weights_to_watch(weights):
+    """Convert Keras 3 weight containers to tape-watchable tensors/variables."""
+    normalized_weights = []
+    for weight in weights:
+        if isinstance(weight, tf.Variable) or tf.is_tensor(weight):
+            normalized_weights.append(weight)
+            continue
+
+        for attr_name in ('value', '_value', 'variable'):
+            attr_value = getattr(weight, attr_name, None)
+            if isinstance(attr_value, tf.Variable) or tf.is_tensor(attr_value):
+                normalized_weights.append(attr_value)
+                break
+        else:
+            raise TypeError(f"Unsupported weight type for GradientTape: {type(weight)}")
+
+    return normalized_weights
+
+
 def test_alpha():
     tf.random.set_seed(0)
 
@@ -51,22 +70,22 @@ def test_alpha():
     optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4)
     perturbed_model = Sequential(model.layers[target_layer:])
     perturbed_model.build(input_shape=feature_extractor.output_shape)
+    watched_weights = _normalize_weights_to_watch(perturbed_model.trainable_weights)
+
     with tf.GradientTape() as tape:
-        tape.watch(perturbed_model.weights)
         logits = perturbed_model(feature_maps)
         loss = tf.reduce_mean(-loss_function(targets_train, logits))
-    grads = tape.gradient(loss, perturbed_model.weights)
-    optimizer.apply_gradients(zip(grads, perturbed_model.weights))
+    grads = tape.gradient(loss, watched_weights)
+    optimizer.apply_gradients(zip(grads, watched_weights))
 
     # Now, we can compute alpha
     # Start with the second term
     dataset_for_hessian = tf.data.Dataset.from_tensor_slices((feature_maps, targets_train)).batch(5)
     ihvp = ExactIHVP(InfluenceModel(perturbed_model, start_layer=0, loss_function=loss_function), dataset_for_hessian)
     with tf.GradientTape() as tape:
-        tape.watch(perturbed_model.weights)
         logits = perturbed_model(feature_maps)
         loss = loss_function(targets_train, logits)
-    grads = tape.jacobian(loss, perturbed_model.weights)[0]
+    grads = tape.jacobian(loss, watched_weights)[0]
 
     # Divide grads by feature maps
     grads_div_feature_maps = []
@@ -90,7 +109,7 @@ def test_alpha():
 
     # Now, compute the first term
     # first term is weights divided by feature maps
-    weights = [w for w in perturbed_model.weights]
+    weights = [w for w in watched_weights]
     first_term = []
     for i in range(inputs_train.shape[0]):
         feature_map = tf.reshape(feature_maps[i], (-1, 1)) if len(feature_maps[i].shape) == 1 else feature_maps[i]

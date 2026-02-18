@@ -22,6 +22,13 @@ pytestmark = pytest.mark.tensorflow
 almost_equal = allclose
 
 
+class _WeightWrapper:
+    """Minimal wrapper emulating Keras 3 variable containers."""
+
+    def __init__(self, value):
+        self.value = value
+
+
 @pytest.fixture
 def simple_model():
     """Create a simple TensorFlow model for testing."""
@@ -152,6 +159,48 @@ def test_compute_jacobian(backend, simple_model):
     assert jacobian.shape == (batch_size, num_params)
 
 
+def test_compute_gradient_raises_on_disconnected_graph(backend, simple_model):
+    """Disconnected gradients should raise an explicit error."""
+    inputs = tf.random.normal((4, 5))
+    targets = tf.random.normal((4, 2))
+    rogue_weight = tf.Variable(tf.ones((2, 2), dtype=tf.float32))
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    with pytest.raises(ValueError, match="disconnected"):
+        backend.compute_gradient(simple_model, [rogue_weight], loss_fn, inputs, targets)
+
+
+def test_compute_jacobian_raises_on_disconnected_graph(backend, simple_model):
+    """Disconnected Jacobians should raise an explicit error."""
+    inputs = tf.random.normal((4, 5))
+    targets = tf.random.normal((4, 2))
+    rogue_weight = tf.Variable(tf.ones((2, 2), dtype=tf.float32))
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    with pytest.raises(ValueError, match="disconnected"):
+        backend.compute_jacobian(simple_model, [rogue_weight], loss_fn, inputs, targets)
+
+
+def test_weight_wrappers_are_supported_for_gradients_and_jacobians(backend, simple_model):
+    """Keras-style weight wrappers should be normalized before tape.watch."""
+    batch_size = 3
+    inputs = tf.random.normal((batch_size, 5))
+    targets = tf.random.normal((batch_size, 2))
+    weights = backend.get_model_weights(simple_model)
+    wrapped_weights = [_WeightWrapper(weight) for weight in weights]
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    gradient = backend.compute_gradient(simple_model, wrapped_weights, loss_fn, inputs, targets)
+    jacobian = backend.compute_jacobian(simple_model, wrapped_weights, loss_fn, inputs, targets)
+    outputs, jac_weights = backend.compute_output_jacobian_wrt_weights(simple_model, wrapped_weights, inputs)
+
+    num_params = backend.get_num_params(weights)
+    assert gradient.shape == (num_params,)
+    assert jacobian.shape == (batch_size, num_params)
+    assert outputs.shape == (batch_size, 2)
+    assert len(jac_weights) == len(weights)
+
+
 def test_concat(backend):
     """Test tensor concatenation."""
     a = tf.constant([[1, 2], [3, 4]])
@@ -270,6 +319,19 @@ def test_split_model(backend, simple_model):
     # Combined should equal original model output
     original_output = simple_model(inputs)
     assert almost_equal(head_output, original_output)
+
+
+def test_split_model_by_name(backend, simple_model):
+    """Splitting by layer name should keep a valid connected Functional graph."""
+    feature_extractor, head = backend.split_model(simple_model, 'output')
+
+    inputs = tf.random.normal((4, 5))
+    fe_output = feature_extractor(inputs)
+    head_output = head(fe_output)
+
+    assert fe_output.shape == (4, 3)
+    assert head_output.shape == (4, 2)
+    assert almost_equal(head_output, simple_model(inputs))
 
 
 def test_find_last_weight_layer(backend, simple_model):
@@ -441,7 +503,7 @@ def test_loss_with_reduction_raises_error(simple_model):
     from deel.influenciae.common import InfluenceModel
 
     loss_fn_sum = MeanSquaredError(reduction=Reduction.SUM)
-    loss_fn_mean = MeanSquaredError(reduction=Reduction.AUTO)
+    loss_fn_mean = MeanSquaredError(reduction=Reduction.SUM_OVER_BATCH_SIZE)
 
     with pytest.raises(ValueError):
         InfluenceModel(simple_model, loss_function=loss_fn_sum)
