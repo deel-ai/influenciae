@@ -17,8 +17,9 @@ pytestmark = pytest.mark.tensorflow
 
 def test_surrogate_model():
     x_train = tf.random.normal((100, 32, 32, 3), dtype=tf.float32)
-    y_train = tf.keras.utils.to_categorical(tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100))
-    train_set = tf.data.Dataset.from_tensor_slices((x_train, tf.cast(tf.squeeze(y_train), tf.float32)))
+    y_train = tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100)
+    y_train = tf.one_hot(tf.squeeze(y_train, axis=0), depth=4)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, tf.cast(y_train, tf.float32)))
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(32, 32, 3)),
         tf.keras.layers.Conv2D(16, 3, 4, "same", activation='swish'),
