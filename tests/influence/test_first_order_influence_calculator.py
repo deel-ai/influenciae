@@ -52,7 +52,6 @@ def test_compute_influence_vector():
     set_seed()
     # start with a simple model
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -110,7 +109,6 @@ def test_compute_influence_vector_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -179,7 +177,6 @@ def test_preprocess_sample_to_evaluate():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -207,7 +204,6 @@ def test_compute_influence_value_from_influence_vector():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -267,7 +263,6 @@ def test_compute_pairwise_influence_value():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -332,7 +327,6 @@ def test_compute_top_k_from_training_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -423,7 +417,6 @@ def test_compute_influence_values_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -478,7 +471,6 @@ def test_compute_influence_values():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -509,7 +501,6 @@ def test_compute_influence_values_from_tensor():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -575,7 +566,6 @@ def test_compute_inf_values_with_inf_vect_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -642,7 +632,6 @@ def test_compute_influence_values_for_dataset_to_evaluate():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -767,7 +756,6 @@ def test_top_k_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -893,7 +881,6 @@ def test_compute_influence_group():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -930,7 +917,6 @@ def test_compute_influence_values_group():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 

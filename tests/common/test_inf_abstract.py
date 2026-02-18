@@ -22,7 +22,6 @@ def test_instantiation():
     """
     # start with a simple model
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))

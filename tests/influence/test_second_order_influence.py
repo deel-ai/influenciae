@@ -20,7 +20,6 @@ def test__compute_additive_term():
     Test the _compute_additive_term method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -67,7 +66,6 @@ def test__compute_pairwise_interactions():
     Test the _compute_pairwise_interactions method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs_train = tf.random.normal((25, 1, 3))
@@ -112,7 +110,6 @@ def test_compute_influence_group():
     Test the compute_influence_group method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -162,7 +159,6 @@ def test_compute_influence_values_group():
     Test the compute_influence_values_group method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)

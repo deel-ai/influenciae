@@ -21,7 +21,6 @@ pytestmark = pytest.mark.tensorflow
 
 def test_exact_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))
@@ -40,7 +39,6 @@ def test_exact_factory():
 
 def test_cgd_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))
@@ -85,7 +83,6 @@ def test_cgd_factory():
 
 def test_lissa_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))

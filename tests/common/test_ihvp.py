@@ -62,7 +62,6 @@ def _build_lissa_hvp(influence_model, train_dataset):
 def test_compute_ihvp_single_batch(ihvp_builder, epsilon):
     tf.random.set_seed(42)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
@@ -91,7 +90,6 @@ def test_compute_ihvp_single_batch(ihvp_builder, epsilon):
 def test_stochastic_cgd_ihvp_close_to_full():
     tf.random.set_seed(123)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((8, 1, 3))
@@ -136,7 +134,6 @@ def test_stochastic_cgd_ihvp_close_to_full():
 def test_compute_hvp_single_batch(ihvp_builder, epsilon, set_hessian):
     tf.random.set_seed(42)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -169,7 +166,6 @@ def test_compute_hvp_single_batch(ihvp_builder, epsilon, set_hessian):
 def test_batched_rhs_hvp_matches_scalar():
     tf.random.set_seed(7)
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((6, 1, 3))
@@ -194,7 +190,6 @@ def test_batched_rhs_hvp_matches_scalar():
 def test_exact_hessian():
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=0, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((5, 1, 3))
@@ -223,7 +218,6 @@ def test_exact_hessian():
 def test_exact_ihvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
@@ -281,7 +275,6 @@ def test_exact_hvp():
     # Make sure that the shapes are right and that the exact hvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
@@ -338,7 +331,6 @@ def test_cgd_hvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
@@ -384,7 +376,6 @@ def test_cgd_ihvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs = tf.random.normal((25, 1, 3))
@@ -431,7 +422,6 @@ def test_lissa_ihvp():
     # Make sure that the shapes are right and that the exact ihvp calculation is correct
     # Make sure that the hessian matrix is being calculated right
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     inputs = tf.random.normal((25, 1, 3))
     target = tf.random.normal((25, 1))
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
