@@ -66,8 +66,14 @@ if _HAS_TENSORFLOW:
                 scaling_factor: float,
                 **kwargs
         ):
-            super().__init__(name="backtracking_line_search", **kwargs)
-            self.optimizer = SGD()
+            learning_rate = kwargs.pop("learning_rate", 1.0)
+            try:
+                super().__init__(learning_rate=learning_rate, name="backtracking_line_search", **kwargs)
+            except TypeError as exc:
+                if "learning_rate is not a valid argument" not in str(exc):
+                    raise
+                super().__init__(name="backtracking_line_search", **kwargs)
+            self.optimizer = SGD(learning_rate=learning_rate)
             self.scaling_factor = scaling_factor
             self.batches_per_epoch = int(batches_per_epoch)
             self.parameters = BTLSParameters(

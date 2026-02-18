@@ -40,11 +40,10 @@ def test_backtracking_line_search():
     loss_fn = MeanSquaredError()
     for e in range(epochs):
         for t_batch, y_batch in train_set.batch(10):
-            with tf.GradientTape(watch_accessed_variables=False) as tape:
-                tape.watch(model.trainable_weights)
+            with tf.GradientTape() as tape:
                 y_pred = model(t_batch)
                 loss = loss_fn(y_batch, y_pred)
-            grads = tape.gradient(loss, model.trainable_weights)
+            grads = tape.gradient(loss, model.trainable_variables)
             optimizer.step(model, loss, t_batch, y_batch, grads)
 
     # Get the estimated m and b
