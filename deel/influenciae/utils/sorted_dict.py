@@ -154,6 +154,9 @@ class BatchSort:
                 self._device = target_device
                 self._initialized = True
 
+        batch_key = self._backend.cast(batch_key, self._backend.get_dtype(self._best_batch))
+        batch_values = self._backend.cast(batch_values, self._backend.get_dtype(self._best_values))
+
         current_score = self._backend.concat([self._best_values, batch_values], axis=1)
         current_batch = self._backend.concat([self._best_batch, batch_key], axis=1)
 

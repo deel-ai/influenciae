@@ -259,12 +259,14 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
         alpha_shape = self.backend.tensor_shape(alpha)
         alpha_ndim = len(alpha_shape)
+        kernel_matrix = self.backend.matmul(feature_maps_train, self.backend.transpose(feature_maps_test))
+        kernel_dtype = self.backend.get_dtype(kernel_matrix)
 
         if alpha_ndim == 1 or (alpha_ndim == 2 and alpha_shape[1] == 1):
             # Binary classification case
             influence_values = self.backend.multiply(
-                alpha,
-                self.backend.matmul(feature_maps_train, self.backend.transpose(feature_maps_test))
+                self.backend.cast(alpha, kernel_dtype),
+                kernel_matrix
             )
         else:
             # Multiclass case - gather alpha values based on predictions
@@ -276,8 +278,8 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             # This ensures each row j of K is multiplied by gathered_alpha[j]
             gathered_alpha = self.backend.reshape(gathered_alpha, (-1, 1))
             influence_values = self.backend.multiply(
-                gathered_alpha,
-                self.backend.matmul(feature_maps_train, self.backend.transpose(feature_maps_test))
+                self.backend.cast(gathered_alpha, kernel_dtype),
+                kernel_matrix
             )
 
         influence_values = self.backend.transpose(influence_values)
