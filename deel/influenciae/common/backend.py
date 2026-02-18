@@ -225,6 +225,22 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
+    def normalize_weights_to_watch(self, weights: List[Any]) -> List[Any]:
+        """
+        Normalize weights to objects supported by backend autodiff watch APIs.
+
+        Parameters
+        ----------
+        weights
+            Candidate weight objects to be watched.
+
+        Returns
+        -------
+        normalized_weights
+            Framework-compatible watched objects.
+        """
+
+    @abstractmethod
     def compute_loss(
         self,
         model: Any,

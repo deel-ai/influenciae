@@ -64,6 +64,10 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Get the total number of parameters."""
         return sum(w.numel() for w in weights)
 
+    def normalize_weights_to_watch(self, weights: List[Any]) -> List[Any]:
+        """Return weights unchanged for PyTorch autodiff."""
+        return list(weights)
+
     def compute_loss(
         self,
         model: nn.Module,

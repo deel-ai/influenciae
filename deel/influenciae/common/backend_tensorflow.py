@@ -6,7 +6,7 @@
 TensorFlow backend implementation.
 """
 import os
-from typing import Any, List, Tuple, Callable, Optional
+from typing import Any, List, Tuple, Callable, Optional, Sequence
 from xml.dom import NotFoundErr
 
 import numpy as np
@@ -23,6 +23,63 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     @property
     def framework(self) -> Framework:
         return Framework.TENSORFLOW
+
+    @staticmethod
+    def _describe_weight(weight: Any, index: int) -> str:
+        """Return a readable identifier for a watched weight."""
+        weight_name = getattr(weight, 'name', None)
+        if weight_name is None:
+            return f"index {index}"
+        return f"index {index} ({weight_name})"
+
+    @staticmethod
+    def _extract_watch_tensor(weight: Any) -> Optional[Any]:
+        """Extract a watchable TensorFlow object from a weight container."""
+        if isinstance(weight, tf.Variable) or tf.is_tensor(weight):
+            return weight
+
+        for attr_name in ('value', '_value', 'variable'):
+            attr_value = getattr(weight, attr_name, None)
+            if isinstance(attr_value, tf.Variable) or tf.is_tensor(attr_value):
+                return attr_value
+
+        return None
+
+    def normalize_weights_to_watch(self, weights: List[Any]) -> List[Any]:
+        """Normalize watched weights to objects accepted by GradientTape."""
+        normalized_weights: List[Any] = []
+        for idx, weight in enumerate(tf.nest.flatten(weights)):
+            watch_tensor = self._extract_watch_tensor(weight)
+            if watch_tensor is None:
+                raise TypeError(
+                    "Could not watch weight "
+                    f"{self._describe_weight(weight, idx)} of type {type(weight)}. "
+                    "Expected tf.Variable/tf.Tensor or an object exposing one through "
+                    "`value`, `_value`, or `variable`."
+                )
+            normalized_weights.append(watch_tensor)
+
+        return normalized_weights
+
+    def _raise_if_disconnected(
+        self,
+        operation_name: str,
+        tensors: Sequence[Any],
+        watched_weights: List[Any],
+    ) -> None:
+        """Raise an explicit error if any gradient/Jacobian component is missing."""
+        missing_indices = [idx for idx, tensor in enumerate(tensors) if tensor is None]
+        if not missing_indices:
+            return
+
+        missing_weights = ", ".join(
+            self._describe_weight(watched_weights[idx], idx)
+            for idx in missing_indices
+        )
+        raise ValueError(
+            f"{operation_name} returned None for watched weight(s): {missing_weights}. "
+            "This indicates a disconnected computation graph between the loss/output and these weights."
+        )
 
     def get_model_weights(
         self,
@@ -46,17 +103,19 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             List of weight tensors (tf.Variable).
         """
         if layers is None:
-            layers = model.layers
+            return list(model.trainable_weights)
 
         weights = []
         for layer in layers:
-            if hasattr(layer, 'weights') and layer.weights:
-                weights.extend(layer.weights)
+            trainable_weights = getattr(layer, 'trainable_weights', None)
+            if trainable_weights:
+                weights.extend(trainable_weights)
         return weights
 
     def get_num_params(self, weights: List[tf.Variable]) -> int:
         """Get the total number of parameters."""
-        return int(tf.reduce_sum([tf.size(w) for w in weights]).numpy())
+        watched_weights = self.normalize_weights_to_watch(weights)
+        return int(tf.reduce_sum([tf.size(w) for w in watched_weights]).numpy())
 
     def compute_loss(
         self,
@@ -72,7 +131,6 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             return loss_function(targets, predictions, sample_weight)
         return loss_function(targets, predictions)
 
-    @tf.function
     def compute_jacobian(
         self,
         model: tf.keras.Model,
@@ -83,17 +141,19 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         sample_weight: Optional[tf.Tensor] = None
     ) -> tf.Tensor:
         """Compute the Jacobian of the loss with respect to weights."""
+        watched_weights = self.normalize_weights_to_watch(weights)
         batch_size = tf.shape(targets)[0]
 
         with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(weights)
+            tape.watch(watched_weights)
             predictions = model(inputs)
             if sample_weight is not None:
                 loss = loss_function(targets, predictions, sample_weight)
             else:
                 loss = loss_function(targets, predictions)
 
-        jacobian = tape.jacobian(loss, weights)
+        jacobian = tape.jacobian(loss, watched_weights)
+        self._raise_if_disconnected('compute_jacobian', jacobian, watched_weights)
 
         # Flatten and concatenate
         jacobian = [tf.reshape(j, (batch_size, -1)) for j in jacobian]
@@ -101,7 +161,6 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         return jacobian
 
-    @tf.function
     def compute_gradient(
         self,
         model: tf.keras.Model,
@@ -112,15 +171,18 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         sample_weight: Optional[tf.Tensor] = None
     ) -> tf.Tensor:
         """Compute the gradient of the loss with respect to weights."""
+        watched_weights = self.normalize_weights_to_watch(weights)
+
         with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(weights)
+            tape.watch(watched_weights)
             predictions = model(inputs)
             if sample_weight is not None:
                 loss = tf.expand_dims(loss_function(targets, predictions, sample_weight), axis=-1)
             else:
                 loss = tf.expand_dims(loss_function(targets, predictions), axis=-1)
 
-        gradients = tape.gradient(loss, weights)
+        gradients = tape.gradient(loss, watched_weights)
+        self._raise_if_disconnected('compute_gradient', gradients, watched_weights)
 
         # Flatten and concatenate
         gradients = [tf.reshape(g, (-1,)) for g in gradients]
@@ -246,7 +308,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         # Create the head (from target layer onwards)
         head = tf.keras.Model(
-            inputs=tf.keras.Input(tensor=cut_layer.input),
+            inputs=cut_layer.input,
             outputs=cloned_model.outputs
         )
 
@@ -292,7 +354,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         # Start from -1 (the last layer) and work backwards
         for layer_id in range(1, num_layers + 1):
             layer = model.layers[-layer_id]
-            if hasattr(layer, 'weights') and layer.weights:
+            if hasattr(layer, 'trainable_weights') and layer.trainable_weights:
                 return -layer_id
         raise ValueError('No layers with weights found for the model.')
 
@@ -371,8 +433,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """
         Apply a mapping function to each batch in a dataset.
 
-        By default, this will execute on GPU if available. The mapping function
-        is compiled with tf.function for better performance on GPU.
+        By default, this will execute on GPU if available.
 
         Parameters
         ----------
@@ -399,7 +460,6 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             device = '/' + device
 
         # Wrap the map function to execute on the specified device
-        @tf.function
         def device_map_fn(*args):
             with tf.device(device):
                 return map_fn(*args)
@@ -556,8 +616,19 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         jacobian_fn: Optional[Callable] = None
     ) -> tf.Tensor:
         """Compute the Hessian matrix of the loss with respect to weights using second-order AD."""
+        _ = jacobian_fn
+        watched_weights = self.normalize_weights_to_watch(weights)
+
         # Get dtype from dataset
-        dtype = dataset.element_spec[0].dtype
+        element_spec = dataset.element_spec
+        if isinstance(element_spec, (tuple, list)):
+            first_spec = element_spec[0]
+        elif isinstance(element_spec, dict):
+            first_spec = next(iter(element_spec.values()))
+        else:
+            first_spec = element_spec
+        dtype = getattr(first_spec, 'dtype', tf.float32)
+
         hess = tf.zeros((nb_params, nb_params), dtype=dtype)
         nb_elt = 0
 
@@ -565,17 +636,19 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             batch_size = tf.shape(batch[0])[0]
 
             with tf.GradientTape(persistent=True, watch_accessed_variables=False) as tape_hess:
-                tape_hess.watch(weights)
+                tape_hess.watch(watched_weights)
                 # Compute jacobian inside the tape so we can take second derivatives
                 with tf.GradientTape(watch_accessed_variables=False) as tape_inner:
-                    tape_inner.watch(weights)
+                    tape_inner.watch(watched_weights)
                     predictions = model(batch[0])
                     loss = loss_function(batch[1], predictions)
-                grads = tape_inner.jacobian(loss, weights)
+                grads = tape_inner.jacobian(loss, watched_weights)
+                self._raise_if_disconnected('compute_hessian (inner jacobian)', grads, watched_weights)
                 grads = [tf.reshape(g, (batch_size, -1)) for g in grads]
                 grads = tf.concat(grads, axis=1)
 
-            curr_hess = tape_hess.jacobian(grads, weights)
+            curr_hess = tape_hess.jacobian(grads, watched_weights)
+            self._raise_if_disconnected('compute_hessian', curr_hess, watched_weights)
             curr_hess = [tf.reshape(h, shape=(batch_size, nb_params, -1)) for h in curr_hess]
             curr_hess = tf.concat(curr_hess, axis=-1)
             curr_hess = tf.reduce_sum(curr_hess, axis=0)
@@ -594,13 +667,18 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         targets: tf.Tensor
     ) -> tf.Tensor:
         """Compute Hessian-vector product using forward-over-backward AD."""
-        with tf.autodiff.ForwardAccumulator(weights, v) as acc:
+        watched_weights = self.normalize_weights_to_watch(weights)
+
+        with tf.autodiff.ForwardAccumulator(watched_weights, v) as acc:
             with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-                tape.watch(weights)
+                tape.watch(watched_weights)
                 predictions = model(inputs)
                 loss = loss_function(targets, predictions)
-            backward = tape.jacobian(loss, weights)
+            backward = tape.jacobian(loss, watched_weights)
+        self._raise_if_disconnected('compute_hvp_single', backward, watched_weights)
+
         hvp_list = acc.jvp(backward)
+        self._raise_if_disconnected('compute_hvp_single', hvp_list, watched_weights)
 
         # Flatten and concatenate
         hvp = [tf.reshape(h, shape=(-1,)) for h in hvp_list]
@@ -608,7 +686,6 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         return hvp
 
-    @tf.function
     def compute_hvp_batch(
         self,
         model: Any,
@@ -619,16 +696,19 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         targets: tf.Tensor
     ) -> tf.Tensor:
         """Compute Hessian-vector product for a batch using forward-over-backward AD."""
-        with tf.autodiff.ForwardAccumulator(weights, v) as acc:
+        watched_weights = self.normalize_weights_to_watch(weights)
+
+        with tf.autodiff.ForwardAccumulator(watched_weights, v) as acc:
             with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-                tape.watch(weights)
+                tape.watch(watched_weights)
                 predictions = model(inputs)
                 loss = loss_function(targets, predictions)
                 loss = tf.reduce_sum(loss)
-            grads = tape.gradient(loss, weights)
+            grads = tape.gradient(loss, watched_weights)
+        self._raise_if_disconnected('compute_hvp_batch', grads, watched_weights)
 
-        grads = [tf.zeros_like(w) if g is None else g for g, w in zip(grads, weights)]
         hvp_list = acc.jvp(grads)
+        self._raise_if_disconnected('compute_hvp_batch', hvp_list, watched_weights)
 
         hvp = [tf.reshape(h, shape=(-1,)) for h in hvp_list]
         hvp = tf.concat(hvp, axis=0)
@@ -740,10 +820,13 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         inputs: tf.Tensor
     ) -> Tuple[tf.Tensor, List[tf.Tensor]]:
         """Compute the Jacobian of the model output with respect to the weights."""
+        watched_weights = self.normalize_weights_to_watch(weights)
+
         with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(weights)
+            tape.watch(watched_weights)
             outputs = model(inputs)
-        jacobian = tape.jacobian(outputs, weights)
+        jacobian = tape.jacobian(outputs, watched_weights)
+        self._raise_if_disconnected('compute_output_jacobian_wrt_weights', jacobian, watched_weights)
         return outputs, jacobian
 
     def boolean_mask(self, tensor: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
