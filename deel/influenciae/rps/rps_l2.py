@@ -231,12 +231,25 @@ class RepresenterPointL2(BaseRepresenterPoint):
         """
         tf = import_optional_module("tensorflow", extra="tensorflow")
 
-        inputs = tf.keras.layers.Input(shape=self.feature_extractor.output_shape[1:], dtype=self.model.output.dtype)
+        feature_shape = self.feature_extractor.output_shape
+        if isinstance(feature_shape, list):
+            feature_shape = feature_shape[0]
+        feature_dtype = getattr(self.feature_extractor, 'compute_dtype', None)
+        if feature_dtype is None:
+            feature_dtype = getattr(self.feature_extractor, 'dtype', tf.float32)
+
+        try:
+            model_output_shape = self.backend.get_output_shape(self.model)
+        except (AttributeError, ValueError):
+            model_output_shape = self.backend.get_output_shape(self.original_head)
+        output_units = model_output_shape[-1] if len(model_output_shape) > 1 else 1
+
+        inputs = tf.keras.layers.Input(shape=feature_shape[1:], dtype=feature_dtype)
         last_layer = tf.keras.layers.Dense(
-            self.model.output_shape[-1],
+            output_units,
             use_bias=False,
             kernel_regularizer=tf.keras.regularizers.L2(self.lambda_regularization),
-            dtype=self.model.output.dtype
+            dtype=feature_dtype
         )
         outputs = last_layer(inputs)
         surrogate_model = tf.keras.Model(inputs=inputs, outputs=outputs)
@@ -331,12 +344,15 @@ class RepresenterPointL2(BaseRepresenterPoint):
             ),
         )
 
+        feature_maps = tf.cast(z_batch, alpha.dtype)
+        eps = tf.constant(1e-5, dtype=alpha.dtype)
+
         # Now, divide each of the alpha_i by their feature maps
         alpha = tf.multiply(
             alpha,
             tf.repeat(
                 tf.expand_dims(
-                    tf.divide(tf.ones_like(z_batch), z_batch + tf.constant(1e-5, dtype=alpha.dtype)),
+                    tf.divide(tf.ones_like(feature_maps), feature_maps + eps),
                     axis=-1),
                 alpha.shape[-1], axis=-1
             )

@@ -73,7 +73,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             dataset: DatasetLike,
             ihvp_calculator_factory: InverseHessianVectorProductFactory,
             n_samples_for_hessian: Optional[int],
-            target_layer: Union[int, str],
+            _target_layer: Union[int, str],
             shuffle_buffer_size: int
     ):
         """TensorFlow-specific initialization."""
@@ -84,7 +84,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         # In the paper, the authors explain that in practice, they use a single step of SGD to compute the
         # perturbed model's weights. We will do the same here.
         optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4)
-        target_layer_shape = influence_model.model.layers[target_layer].input.type_spec.shape
+        target_layer_shape = self.feature_extractor.output_shape
         perturbed_head = tf.keras.models.clone_model(self.original_head)
         perturbed_head.set_weights(self.original_head.get_weights())
         perturbed_head.build(target_layer_shape)
