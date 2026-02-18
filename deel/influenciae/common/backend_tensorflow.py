@@ -35,13 +35,37 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     @staticmethod
     def _extract_watch_tensor(weight: Any) -> Optional[Any]:
         """Extract a watchable TensorFlow object from a weight container."""
-        if isinstance(weight, tf.Variable) or tf.is_tensor(weight):
+        if isinstance(weight, (tf.Variable, tf.Tensor)):
             return weight
 
-        for attr_name in ('value', '_value', 'variable'):
+        tensor_candidate = None
+
+        for attr_name in ('_variable', 'variable', '_value', 'value', 'handle'):
             attr_value = getattr(weight, attr_name, None)
-            if isinstance(attr_value, tf.Variable) or tf.is_tensor(attr_value):
+            if callable(attr_value):
+                try:
+                    attr_value = attr_value()
+                except TypeError:
+                    continue
+            if isinstance(attr_value, tf.Variable):
                 return attr_value
+            if isinstance(attr_value, tf.Tensor) and tensor_candidate is None:
+                tensor_candidate = attr_value
+
+            for nested_attr_name in ('_variable', 'variable', '_value', 'value', 'handle'):
+                nested_value = getattr(attr_value, nested_attr_name, None)
+                if callable(nested_value):
+                    try:
+                        nested_value = nested_value()
+                    except TypeError:
+                        continue
+                if isinstance(nested_value, tf.Variable):
+                    return nested_value
+                if isinstance(nested_value, tf.Tensor) and tensor_candidate is None:
+                    tensor_candidate = nested_value
+
+        if tensor_candidate is not None:
+            return tensor_candidate
 
         return None
 
@@ -103,13 +127,13 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             List of weight tensors (tf.Variable).
         """
         if layers is None:
-            return list(model.trainable_weights)
+            return self.normalize_weights_to_watch(list(model.trainable_weights))
 
         weights = []
         for layer in layers:
             trainable_weights = getattr(layer, 'trainable_weights', None)
             if trainable_weights:
-                weights.extend(trainable_weights)
+                weights.extend(self.normalize_weights_to_watch(list(trainable_weights)))
         return weights
 
     def get_num_params(self, weights: List[tf.Variable]) -> int:
