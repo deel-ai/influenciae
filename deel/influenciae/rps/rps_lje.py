@@ -226,7 +226,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         tf = import_optional_module("tensorflow", extra="tensorflow")
 
         # First, we compute the second term, which contains the Hessian vector product
-        weights = self.perturbed_head.trainable_weights
+        weights = self.backend.normalize_weights_to_watch(list(self.perturbed_head.trainable_weights))
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
             tape.watch(weights)
             logits = self.perturbed_head(z_batch)
@@ -253,7 +253,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         second_term = tf.reduce_sum(tf.reshape(second_term, tf.shape(grads)), axis=1)
 
         # Second, we compute the first term, which contains the weights
-        first_term = tf.concat(list(weights), axis=0)
+        first_term = tf.concat(weights, axis=0)
         first_term = tf.multiply(
             first_term,
             tf.repeat(

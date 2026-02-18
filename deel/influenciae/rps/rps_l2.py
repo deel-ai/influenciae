@@ -316,11 +316,13 @@ class RepresenterPointL2(BaseRepresenterPoint):
         tf = import_optional_module("tensorflow", extra="tensorflow")
 
         assert self.linear_layer is not None  # Initialized in __init__
+        weights = self.backend.normalize_weights_to_watch(list(self.linear_layer.trainable_weights))
+
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(self.linear_layer.weights)
+            tape.watch(weights)
             logits = self.linear_layer(z_batch)
             loss = self.linear_layer.compiled_loss(y_batch, logits)
-        alpha = tape.jacobian(loss, self.linear_layer.weights)[0]
+        alpha = tape.jacobian(loss, weights)[0]
         alpha = tf.divide(
             alpha,
             (
