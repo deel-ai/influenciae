@@ -128,7 +128,8 @@ class BaseInfluenceModel:
         """Validate that the loss function doesn't have reduction."""
         if self.backend.framework == Framework.TENSORFLOW:
             reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
-            if hasattr(loss_function, 'reduction') and loss_function.reduction is not reduction.NONE:
+            loss_reduction = getattr(loss_function, 'reduction', None)
+            if loss_reduction is not None and loss_reduction is not reduction.NONE:
                 raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
         # For PyTorch, we could check loss_function.reduction == 'none' but it's less standardized
 
@@ -168,7 +169,7 @@ class BaseInfluenceModel:
         if not isinstance(weights_to_watch, (list, tuple)):
             return [weights_to_watch]
 
-        processed_weights = []
+        processed_weights: List[Any] = []
         for weights in weights_to_watch:
             if isinstance(weights, (list, tuple)):
                 processed_weights.extend(weights)
