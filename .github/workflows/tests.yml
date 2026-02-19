@@ -42,6 +42,7 @@ jobs:
   backend-tests:
     name: ${{ matrix.backend }} ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +126,7 @@ jobs:
           pip install tox
 
       - name: Run ${{ matrix.backend }} tests (${{ matrix.framework-version }})
-        run: tox -e ${{ matrix.tox-env }}
+        run: tox -e ${{ matrix.tox-env }} -- -x --maxfail=1 -ra --durations=25
         env:
           CUDA_VISIBLE_DEVICES: ""
 
@@ -135,6 +136,7 @@ jobs:
   dual-backend-tests:
     name: Both backends ${{ matrix.profile }} (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -185,7 +187,7 @@ jobs:
           pip install tox
 
       - name: Run dual-backend tests (TF ${{ matrix.tensorflow-version }}, Torch ${{ matrix.pytorch-version }})
-        run: tox -e ${{ matrix.tox-env }}
+        run: tox -e ${{ matrix.tox-env }} -- -x --maxfail=1 -ra --durations=25
         env:
           CUDA_VISIBLE_DEVICES: ""
 
