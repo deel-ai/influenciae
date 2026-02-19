@@ -334,7 +334,14 @@ class RepresenterPointL2(BaseRepresenterPoint):
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
             tape.watch(weights)
             logits = self.linear_layer(z_batch)
-            loss = self.loss_function(y_batch, logits)
+            y_batch_for_loss = y_batch
+            if (
+                logits.shape.rank == 2
+                and logits.shape[-1] == 1
+                and y_batch.shape.rank == 1
+            ):
+                y_batch_for_loss = tf.expand_dims(y_batch, axis=-1)
+            loss = self.loss_function(y_batch_for_loss, logits)
             loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
         alpha = tape.jacobian(loss, weights)[0]
         alpha = tf.divide(
@@ -366,11 +373,21 @@ class RepresenterPointL2(BaseRepresenterPoint):
     def _ensure_per_sample_loss_tensorflow(loss: Any, tf: Any) -> Any:
         """Ensure TensorFlow losses are per-sample vectors."""
         loss_rank = loss.shape.rank
-        if loss_rank is None:
-            loss_rank = int(tf.rank(loss))
 
         if loss_rank == 0:
             raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        if loss_rank is None:
+            with tf.control_dependencies([
+                tf.debugging.assert_rank_at_least(
+                    loss,
+                    1,
+                    message="Loss function must return per-sample losses (reduction='none')",
+                )
+            ]):
+                loss = tf.identity(loss)
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            return tf.reduce_sum(loss, axis=1)
 
         if loss_rank > 1:
             loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
