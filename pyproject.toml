@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -143,6 +143,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
+    "matplotlib.*",
     "numpy.*",
     "sklearn.*",
     "tensorflow.*",
