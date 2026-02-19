@@ -49,6 +49,71 @@ def test_surrogate_model():
     assert mean_bce < 0.1
 
 
+def test_alpha_does_not_use_compiled_loss(monkeypatch):
+    tf.random.set_seed(0)
+
+    x_train = tf.random.normal((12, 4), dtype=tf.float32)
+    y_train = tf.random.normal((12, 4), dtype=tf.float32)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(4)
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(4,)),
+        tf.keras.layers.Dense(6, activation='relu'),
+        tf.keras.layers.Dense(4, use_bias=False)
+    ])
+    _ = model(x_train)
+
+    loss_function = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)
+    rps_l2 = RepresenterPointL2(
+        model,
+        train_set,
+        loss_function=loss_function,
+        lambda_regularization=0.1,
+        epochs=1,
+    )
+
+    def _raise_compiled_loss(*_args, **_kwargs):
+        raise RuntimeError("compiled_loss should not be called in RPS-L2 alpha computation")
+
+    assert rps_l2.linear_layer is not None
+    monkeypatch.setattr(rps_l2.linear_layer, "compiled_loss", _raise_compiled_loss, raising=False)
+
+    z_batch = rps_l2.feature_extractor(x_train[:4])
+    alpha = rps_l2._compute_alpha(z_batch, y_train[:4])
+    assert alpha.shape == (4, 4)
+
+
+def test_alpha_raises_on_scalar_loss():
+    tf.random.set_seed(0)
+
+    x_train = tf.random.normal((12, 4), dtype=tf.float32)
+    y_train = tf.random.normal((12, 4), dtype=tf.float32)
+    train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(4)
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(4,)),
+        tf.keras.layers.Dense(6, activation='relu'),
+        tf.keras.layers.Dense(4, use_bias=False)
+    ])
+    _ = model(x_train)
+
+    loss_function = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)
+    rps_l2 = RepresenterPointL2(
+        model,
+        train_set,
+        loss_function=loss_function,
+        lambda_regularization=0.1,
+        epochs=1,
+    )
+
+    # Simulate a misconfigured loss that returns a scalar.
+    rps_l2.loss_function = lambda y_true, y_pred: tf.reduce_sum(tf.square(y_true - y_pred))
+
+    z_batch = rps_l2.feature_extractor(x_train[:4])
+    with pytest.raises(ValueError, match="per-sample"):
+        rps_l2._compute_alpha(z_batch, y_train[:4])
+
+
 def test_gradients():
     x_train = tf.random.normal((100, 32, 32, 3), dtype=tf.float32)
     y_train = tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100)

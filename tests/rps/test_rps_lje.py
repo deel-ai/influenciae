@@ -130,6 +130,66 @@ def test_alpha():
     assert relative_almost_equal(alpha, alpha_test, percent=0.1)  # results tend to contain large numbers, relative makes more sense
 
 
+def test_alpha_does_not_use_compiled_loss(monkeypatch):
+    tf.random.set_seed(0)
+
+    model = Sequential()
+    model.add(Input(shape=(3,), dtype=tf.float32))
+    model.add(Dense(4, activation='relu', dtype=tf.float32))
+    model.add(Dense(2, use_bias=False, dtype=tf.float32))
+
+    def per_sample_mse(y_true, y_pred):
+        return tf.reduce_sum(tf.square(y_true - y_pred), axis=1)
+
+    _ = model(tf.random.normal((8, 3), dtype=tf.float32))
+
+    inputs_train = tf.random.normal((8, 3), dtype=tf.float32)
+    targets_train = tf.random.normal((8, 2), dtype=tf.float32)
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(4)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=per_sample_mse)
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+
+    def _raise_compiled_loss(*_args, **_kwargs):
+        raise RuntimeError("compiled_loss should not be called in RPS-LJE alpha computation")
+
+    monkeypatch.setattr(rps_lje.perturbed_head, "compiled_loss", _raise_compiled_loss, raising=False)
+
+    feature_extractor = Sequential(model.layers[:-1])
+    feature_maps = feature_extractor(inputs_train)
+    alpha = rps_lje._compute_alpha(feature_maps, targets_train)
+
+    assert alpha.shape == (8, 2)
+
+
+def test_alpha_raises_on_scalar_loss():
+    tf.random.set_seed(0)
+
+    model = Sequential()
+    model.add(Input(shape=(3,), dtype=tf.float32))
+    model.add(Dense(4, activation='relu', dtype=tf.float32))
+    model.add(Dense(2, use_bias=False, dtype=tf.float32))
+
+    base_loss = CategoricalCrossentropy(from_logits=True, reduction=Reduction.NONE)
+    _ = model(tf.random.normal((8, 3), dtype=tf.float32))
+
+    inputs_train = tf.random.normal((8, 3), dtype=tf.float32)
+    targets_train = tf.random.normal((8, 2), dtype=tf.float32)
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(4)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=base_loss)
+    rps_lje = RepresenterPointLJE(influence_model, train_dataset, ExactIHVPFactory(), target_layer=-1)
+
+    # Simulate a misconfigured loss that returns a scalar.
+    rps_lje.loss_function = lambda y_true, y_pred: tf.reduce_sum(tf.square(y_true - y_pred))
+
+    feature_extractor = Sequential(model.layers[:-1])
+    feature_maps = feature_extractor(inputs_train)
+
+    with pytest.raises(ValueError, match="per-sample"):
+        rps_lje._compute_alpha(feature_maps, targets_train)
+
+
 def test_compute_influence_vector():
     tf.random.set_seed(0)
 

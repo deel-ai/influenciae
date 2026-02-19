@@ -107,12 +107,14 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
         # Accumulate the gradients for the whole dataset and then update
         trainable_vars = perturbed_head.trainable_variables
-        accum_vars = [tf.Variable(tf.zeros_like(t_var.read_value()), trainable=False)
+        accum_vars = [tf.Variable(tf.zeros_like(t_var), trainable=False)
                       for t_var in trainable_vars]
         for x, y in dataset_to_estimate_hessian:
             with tf.GradientTape() as tape:
                 y_pred = perturbed_head(x)
-                loss = -perturbed_head.loss(y, y_pred)
+                loss = self.loss_function(y, y_pred)
+                loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
+                loss = -tf.reduce_mean(loss)
             gradients = tape.gradient(loss, trainable_vars)
             _ = [accum_vars[i].assign_add(grad) for i, grad in enumerate(gradients)]
         optimizer.apply_gradients(zip(accum_vars, trainable_vars))
@@ -123,10 +125,26 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         # Create the new model with the perturbed weights to compute the hessian matrix
         model = InfluenceModel(
             self.perturbed_head,
-            1,  # layer 0 is InputLayer
+            start_layer=None,
             loss_function=influence_model.loss_function
         )
         self.ihvp_calculator = ihvp_calculator_factory.build(model, dataset_to_estimate_hessian)
+
+    @staticmethod
+    def _ensure_per_sample_loss_tensorflow(loss: Any, tf: Any) -> Any:
+        """Ensure TensorFlow losses are per-sample vectors."""
+        loss_rank = loss.shape.rank
+        if loss_rank is None:
+            loss_rank = int(tf.rank(loss))
+
+        if loss_rank == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        if loss_rank > 1:
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            loss = tf.reduce_sum(loss, axis=1)
+
+        return loss
 
     def _init_pytorch(
             self,
@@ -230,7 +248,8 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
             tape.watch(weights)
             logits = self.perturbed_head(z_batch)
-            loss = self.perturbed_head.compiled_loss(y_batch, logits)
+            loss = self.loss_function(y_batch, logits)
+            loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
         grads = tape.jacobian(loss, weights)[0]
         grads = tf.multiply(
             grads,

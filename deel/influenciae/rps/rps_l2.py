@@ -254,7 +254,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         outputs = last_layer(inputs)
         surrogate_model = tf.keras.Model(inputs=inputs, outputs=outputs)
         surrogate_model.layers[-1].trainable = True
-        surrogate_model.compile(loss=self.model.compiled_loss)
+        surrogate_model.compile(loss=self.loss_function)
 
         return surrogate_model
 
@@ -334,7 +334,8 @@ class RepresenterPointL2(BaseRepresenterPoint):
         with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
             tape.watch(weights)
             logits = self.linear_layer(z_batch)
-            loss = self.linear_layer.compiled_loss(y_batch, logits)
+            loss = self.loss_function(y_batch, logits)
+            loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
         alpha = tape.jacobian(loss, weights)[0]
         alpha = tf.divide(
             alpha,
@@ -360,6 +361,22 @@ class RepresenterPointL2(BaseRepresenterPoint):
         alpha = tf.reduce_sum(alpha, axis=1)
 
         return alpha
+
+    @staticmethod
+    def _ensure_per_sample_loss_tensorflow(loss: Any, tf: Any) -> Any:
+        """Ensure TensorFlow losses are per-sample vectors."""
+        loss_rank = loss.shape.rank
+        if loss_rank is None:
+            loss_rank = int(tf.rank(loss))
+
+        if loss_rank == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        if loss_rank > 1:
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            loss = tf.reduce_sum(loss, axis=1)
+
+        return loss
 
     def _compute_alpha_pytorch(self, z_batch: Any, y_batch: Any) -> Any:
         """PyTorch-specific alpha computation (stable + matches TF intent)."""
