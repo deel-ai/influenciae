@@ -114,9 +114,23 @@ if _HAS_TENSORFLOW:
             direction = self.attempt_step(model, curr_weights, gradients, closure)
 
             # Repeat progressively smaller steps until the (approximate) Wolfe condition is verified
-            while not self.wolfe_condition(direction, current_loss, norm, self.parameters.eta):
+            max_backtracking_steps = 1000
+            n_steps = 0
+            while True:
+                wolfe_ok = self.wolfe_condition(direction, current_loss, norm, self.parameters.eta)
+                if hasattr(wolfe_ok, "numpy"):
+                    wolfe_ok = bool(wolfe_ok.numpy())
+                else:
+                    wolfe_ok = bool(wolfe_ok)
+
+                if wolfe_ok:
+                    break
+
                 self.parameters.eta *= self.parameters.beta
-                if self.parameters.max_eta < self.parameters.eta < self.parameters.min_eta:
+                n_steps += 1
+                if n_steps >= max_backtracking_steps:
+                    break
+                if self.parameters.eta < self.parameters.min_eta or self.parameters.eta > self.parameters.max_eta:
                     break
                 direction = self.attempt_step(model, curr_weights, gradients, closure)
 

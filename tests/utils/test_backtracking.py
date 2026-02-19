@@ -53,6 +53,39 @@ def test_backtracking_line_search():
     assert almost_equal(b_estimated, tf.cast(b, tf.float32), epsilon=5e-2)
 
 
+def test_backtracking_line_search_stops_when_eta_leaves_bounds(monkeypatch):
+    optimizer = BacktrackingLineSearch(batches_per_epoch=1, scaling_factor=0.1)
+    optimizer.parameters.min_eta = 0.5
+    optimizer.parameters.max_eta = 2.0
+
+    call_count = {'attempt_step': 0}
+
+    def _fake_attempt_step(_model, _curr_weights, _gradients, _closure):
+        call_count['attempt_step'] += 1
+        if call_count['attempt_step'] > 100:
+            raise RuntimeError("Backtracking loop did not terminate")
+        return tf.constant(1.0)
+
+    monkeypatch.setattr(optimizer, "attempt_step", _fake_attempt_step)
+    monkeypatch.setattr(optimizer, "wolfe_condition", lambda *_args, **_kwargs: False)
+
+    class _DummyModel:
+        @staticmethod
+        def get_weights():
+            return []
+
+    optimizer.step(
+        _DummyModel(),
+        current_loss=tf.constant(1.0),
+        x_inputs=tf.constant([0.0]),
+        labels=tf.constant([0.0]),
+        gradients=[tf.constant([1.0])],
+    )
+
+    assert call_count['attempt_step'] < 100
+    assert almost_equal(tf.constant(optimizer.parameters.eta), tf.constant(optimizer.parameters.min_eta))
+
+
 def test_backtracking_line_search_pytorch():
     """
     PyTorch equivalent test for BacktrackingLineSearchPyTorch optimizer.
@@ -175,4 +208,3 @@ def test_backtracking_line_search_pytorch_state_dict():
     assert optimizer2.parameters.max_eta == 5.0
     assert optimizer2.parameters.min_eta == 1e-5
     assert optimizer2.batches_per_epoch == 10
-
