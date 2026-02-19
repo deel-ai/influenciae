@@ -8,20 +8,16 @@ on:
 
 jobs:
   lint:
-    name: Pylint (Python ${{ matrix.python-version }})
+    name: Pylint (Python 3.13)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.13"
         cache: pip
 
     - name: Install dependencies
@@ -30,7 +26,7 @@ jobs:
         pip install tox
 
     - name: Run pylint
-      run: tox -e py$(echo ${{ matrix.python-version }} | tr -d .)-lint
+      run: tox -e lint
 
   typecheck:
     name: Type Check (mypy)
