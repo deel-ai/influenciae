@@ -8,6 +8,7 @@ PyTorch backend implementation.
 # pylint: disable=too-many-lines
 import inspect
 import os
+import warnings
 from typing import Any, List, Tuple, Callable, Optional
 
 import numpy as np
@@ -20,6 +21,9 @@ from .pytorch_lazy_dataset import (
     CachedDataset,
     to_lazy_dataset,
 )
+
+
+_PINV_CUDA_FALLBACK_WARNED = False
 
 
 class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
@@ -793,7 +797,36 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def pinv(self, matrix: torch.Tensor) -> torch.Tensor:  # pylint: disable=not-callable
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
-        return torch.linalg.pinv(matrix)
+        try:
+            return torch.linalg.pinv(matrix)
+        except RuntimeError as exc:
+            error_message = str(exc)
+            is_cuda_loader_issue = (
+                matrix.device.type == "cuda"
+                and (
+                    "libtorch_cuda_linalg.so" in error_message
+                    or "cusolverDnXgeev_bufferSize" in error_message
+                    or "libcusolver" in error_message
+                    or "Error in dlopen" in error_message
+                )
+            )
+            if not is_cuda_loader_issue:
+                raise
+
+            global _PINV_CUDA_FALLBACK_WARNED  # pylint: disable=global-statement
+            if not _PINV_CUDA_FALLBACK_WARNED:
+                warnings.warn(
+                    "Falling back to CPU for torch.linalg.pinv because your local PyTorch/CUDA setup "
+                    "cannot load CUDA linear-algebra symbols (cuSOLVER). This is an environment issue "
+                    "and may significantly reduce performance. Install matching CUDA runtime libraries "
+                    "for your PyTorch build to restore GPU performance.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                _PINV_CUDA_FALLBACK_WARNED = True
+
+            pinv_cpu = torch.linalg.pinv(matrix.detach().cpu())
+            return pinv_cpu.to(device=matrix.device, dtype=matrix.dtype)
 
     def cast(self, tensor: Any, dtype: Any) -> Any:
         """Cast a tensor to a different dtype."""
