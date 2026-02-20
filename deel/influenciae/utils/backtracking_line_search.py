@@ -107,9 +107,25 @@ if _HAS_TENSORFLOW:
 
             # Attempt a first direction
             norm = self.c_gradnorm(gradients)
+
             def closure():
-                return model.compiled_loss(labels, model(x_inputs, training=True))
-            # closure = lambda: model.compiled_loss(labels, model(x_inputs, training=True))
+                # Use compute_loss in case of Keras 3 models
+                predictions = model(x_inputs, training=True)
+                compute_loss = getattr(model, "compute_loss", None)
+                if compute_loss is not None:
+                    training = getattr(model, "training", None)
+                    try:
+                        return compute_loss(
+                            x=x_inputs,
+                            y=labels,
+                            y_pred=predictions,
+                            sample_weight=None,
+                            training=training,
+                        )
+                    except TypeError:
+                        pass
+                return model.compiled_loss(labels, predictions)
+
             self.parameters.eta *= self.parameters.gamma
             direction = self.attempt_step(model, curr_weights, gradients, closure)
 
