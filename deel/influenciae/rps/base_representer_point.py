@@ -125,6 +125,43 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
                 last_linear = module
         return last_linear
 
+    @staticmethod
+    def _normalize_tensorflow_binary_targets(y_batch: Any, logits: Any, tf: Any) -> Any:
+        """Normalize binary TensorFlow targets to match logits shape."""
+        if (
+            logits.shape.rank == 2
+            and logits.shape[-1] == 1
+            and y_batch.shape.rank == 1
+        ):
+            return tf.expand_dims(y_batch, axis=-1)
+        return y_batch
+
+    @staticmethod
+    def _ensure_per_sample_loss_tensorflow(loss: Any, tf: Any) -> Any:
+        """Ensure TensorFlow losses are per-sample vectors."""
+        loss_rank = loss.shape.rank
+
+        if loss_rank == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        if loss_rank is None:
+            with tf.control_dependencies([
+                tf.debugging.assert_rank_at_least(
+                    loss,
+                    1,
+                    message="Loss function must return per-sample losses (reduction='none')",
+                )
+            ]):
+                loss = tf.identity(loss)
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            return tf.reduce_sum(loss, axis=1)
+
+        if loss_rank > 1:
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            loss = tf.reduce_sum(loss, axis=1)
+
+        return loss
+
     @abstractmethod
     def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
         """
