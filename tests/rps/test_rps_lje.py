@@ -9,33 +9,14 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import Reduction, CategoricalCrossentropy, BinaryCrossentropy
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ExactIHVPFactory
+from deel.influenciae.common import ExactIHVPFactory
 
 from deel.influenciae.rps import RepresenterPointLJE
 
-from ..utils_test import assert_inheritance, almost_equal, relative_almost_equal
+from ..utils_test import assert_allclose, assert_inheritance, almost_equal, relative_almost_equal
 
 
 pytestmark = pytest.mark.tensorflow
-
-
-def _normalize_weights_to_watch(weights):
-    """Convert Keras 3 weight containers to tape-watchable tensors/variables."""
-    normalized_weights = []
-    for weight in weights:
-        if isinstance(weight, tf.Variable) or tf.is_tensor(weight):
-            normalized_weights.append(weight)
-            continue
-
-        for attr_name in ('value', '_value', 'variable'):
-            attr_value = getattr(weight, attr_name, None)
-            if isinstance(attr_value, tf.Variable) or tf.is_tensor(attr_value):
-                normalized_weights.append(attr_value)
-                break
-        else:
-            raise TypeError(f"Unsupported weight type for GradientTape: {type(weight)}")
-
-    return normalized_weights
 
 
 def test_alpha():
@@ -68,59 +49,77 @@ def test_alpha():
     # Compute alpha manually
     # First, create the perturbed model
     optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4)
-    perturbed_model = Sequential(model.layers[target_layer:])
+    perturbed_model = tf.keras.models.clone_model(rps_lje.original_head)
     perturbed_model.build(input_shape=feature_extractor.output_shape)
-    watched_weights = _normalize_weights_to_watch(perturbed_model.trainable_weights)
+    perturbed_model.set_weights(rps_lje.original_head.get_weights())
+    perturbed_trainable_vars = list(perturbed_model.trainable_variables)
 
-    with tf.GradientTape() as tape:
-        logits = perturbed_model(feature_maps)
-        loss = tf.reduce_mean(-loss_function(targets_train, logits))
-    grads = tape.gradient(loss, watched_weights)
-    optimizer.apply_gradients(zip(grads, watched_weights))
-
-    # Now, we can compute alpha
-    # Start with the second term
-    dataset_for_hessian = tf.data.Dataset.from_tensor_slices((feature_maps, targets_train)).batch(5)
-    ihvp = ExactIHVP(InfluenceModel(perturbed_model, start_layer=0, loss_function=loss_function), dataset_for_hessian)
     with tf.GradientTape() as tape:
         logits = perturbed_model(feature_maps)
         loss = loss_function(targets_train, logits)
-    grads = tape.jacobian(loss, watched_weights)[0]
+        loss = rps_lje._ensure_per_sample_loss_tensorflow(loss, tf)
+        loss = -tf.reduce_mean(loss)
+    grads = tape.gradient(loss, perturbed_trainable_vars)
+    optimizer.apply_gradients(zip(grads, perturbed_trainable_vars))
 
-    # Divide grads by feature maps
-    grads_div_feature_maps = []
-    for i in range(inputs_train.shape[0]):
-        feature_map = tf.reshape(feature_maps[i], (-1, 1)) if len(feature_maps[i].shape) == 1 else feature_maps[i]
-        divisor = tf.tile(
-            tf.cast(tf.shape(feature_map)[0], feature_map.dtype) * feature_map +
-            tf.constant(1e-5, dtype=feature_map.dtype),
-            (1, grads.shape[-1])
-        )
-        grads_div_feature_maps.append(tf.divide(grads[i], divisor))
-    grads_div_feature_maps = tf.convert_to_tensor(grads_div_feature_maps)
-    second_term = []
-    for i in range(inputs_train.shape[0]):
-        second_term.append(ihvp._compute_ihvp_single_batch(
-            tf.expand_dims(grads_div_feature_maps[i], axis=0), use_gradient=False
-        ))
-    second_term = tf.convert_to_tensor(second_term)
-    second_term = tf.reshape(second_term, grads.shape)
-    second_term = tf.reduce_sum(second_term, axis=1)
+    watched_weights = rps_lje.backend.normalize_weights_to_watch(list(perturbed_model.trainable_weights))
+
+    # Check that manual perturbation matches implementation perturbation.
+    impl_weights = rps_lje.backend.normalize_weights_to_watch(list(rps_lje.perturbed_head.trainable_weights))
+    assert_allclose(tf.concat(watched_weights, axis=0), tf.concat(impl_weights, axis=0), rtol=2e-5, atol=1e-7)
+
+    # Now, we can compute alpha
+    # Start with the second term
+    ihvp = rps_lje.ihvp_calculator
+    with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
+        tape.watch(impl_weights)
+        logits = rps_lje.perturbed_head(feature_maps)
+        loss = loss_function(targets_train, logits)
+        loss = rps_lje._ensure_per_sample_loss_tensorflow(loss, tf)
+    grads = tape.jacobian(loss, impl_weights)[0]
+
+    grads = tf.multiply(
+        grads,
+        tf.repeat(
+            tf.expand_dims(
+                tf.divide(
+                    tf.ones_like(feature_maps),
+                    tf.cast(tf.shape(feature_maps)[0], feature_maps.dtype) * feature_maps
+                    + tf.cast(rps_lje.epsilon, feature_maps.dtype),
+                ),
+                axis=-1,
+            ),
+            grads.shape[-1],
+            axis=-1,
+        ),
+    )
+    second_term = tf.map_fn(
+        lambda v: ihvp._compute_ihvp_single_batch(  # pylint: disable=protected-access
+            tf.expand_dims(v, axis=0),
+            use_gradient=False,
+        ),
+        grads,
+    )
+    second_term = tf.reduce_sum(tf.reshape(second_term, tf.shape(grads)), axis=1)
 
     # Now, compute the first term
     # first term is weights divided by feature maps
-    weights = [w for w in watched_weights]
-    first_term = []
-    for i in range(inputs_train.shape[0]):
-        feature_map = tf.reshape(feature_maps[i], (-1, 1)) if len(feature_maps[i].shape) == 1 else feature_maps[i]
-        divisor = tf.tile(
-            tf.cast(tf.shape(feature_map)[0], feature_map.dtype) * feature_map +
-            tf.constant(1e-5, dtype=feature_map.dtype),
-            (1, grads.shape[-1])
-        )
-        first_term.append(tf.divide(weights, divisor))
-    first_term = tf.convert_to_tensor(first_term)
-    first_term = tf.reshape(first_term, grads.shape)
+    weights = tf.concat(impl_weights, axis=0)
+    first_term = tf.multiply(
+        weights,
+        tf.repeat(
+            tf.expand_dims(
+                tf.divide(
+                    tf.ones_like(feature_maps),
+                    tf.cast(tf.shape(feature_maps)[0], feature_maps.dtype) * feature_maps
+                    + tf.cast(rps_lje.epsilon, feature_maps.dtype),
+                ),
+                axis=-1,
+            ),
+            weights.shape[-1],
+            axis=-1,
+        ),
+    )
     first_term = tf.reduce_sum(first_term, axis=1)
 
     # Combine to get alpha_test
@@ -217,8 +216,8 @@ def test_compute_influence_vector():
     z_batch_test = feature_extractor(inputs_train)
     alpha_test = rps_lje._compute_alpha(z_batch_test, targets_train)
 
-    assert almost_equal(z_batch, z_batch_test)
-    assert almost_equal(alpha, alpha_test)  # alpha is already tested somewhere else
+    assert_allclose(z_batch, z_batch_test, rtol=2e-5, atol=1e-7)
+    assert_allclose(alpha, alpha_test, rtol=2e-5, atol=1e-7)  # alpha is already tested somewhere else
 
 
 def test_preprocess_sample_to_evaluate():
@@ -251,8 +250,8 @@ def test_preprocess_sample_to_evaluate():
     feature_maps = feature_extractor(inputs_test)
 
     # Check that we get the feature maps and the targets
-    assert almost_equal(pre_evaluate_computed[0], feature_maps)
-    assert almost_equal(pre_evaluate_computed[1], targets_test)
+    assert_allclose(pre_evaluate_computed[0], feature_maps, rtol=2e-5, atol=1e-7)
+    assert_allclose(pre_evaluate_computed[1], targets_test, rtol=2e-5, atol=1e-7)
 
 
 def test_compute_influence_value_from_influence_vector_binary():

@@ -107,8 +107,8 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
         # Accumulate the gradients for the whole dataset and then update
         trainable_vars = perturbed_head.trainable_variables
-        accum_vars = [tf.Variable(tf.zeros_like(t_var), trainable=False)
-                      for t_var in trainable_vars]
+        accum_vars = [tf.Variable(tf.zeros_like(t_var), trainable=False) for t_var in trainable_vars]
+        total_samples = 0
         for x, y in dataset_to_estimate_hessian:
             with tf.GradientTape() as tape:
                 y_pred = perturbed_head(x)
@@ -116,8 +116,21 @@ class RepresenterPointLJE(BaseRepresenterPoint):
                 loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
                 loss = -tf.reduce_mean(loss)
             gradients = tape.gradient(loss, trainable_vars)
-            _ = [accum_vars[i].assign_add(grad) for i, grad in enumerate(gradients)]
-        optimizer.apply_gradients(zip(accum_vars, trainable_vars))
+
+            batch_size_tensor = tf.shape(x)[0]
+            batch_size = int(batch_size_tensor.numpy())
+            total_samples += batch_size
+
+            for i, grad in enumerate(gradients):
+                if grad is None:
+                    raise ValueError("Gradient is None while computing perturbed-head update for RPS-LJE")
+                accum_vars[i].assign_add(grad * tf.cast(batch_size, grad.dtype))
+
+        if total_samples == 0:
+            raise ValueError("Dataset used for Hessian estimation is empty")
+
+        mean_grads = [accum_var / tf.cast(total_samples, accum_var.dtype) for accum_var in accum_vars]
+        optimizer.apply_gradients(zip(mean_grads, trainable_vars))
 
         # Keep the perturbed head
         self.perturbed_head = perturbed_head
@@ -180,16 +193,27 @@ class RepresenterPointLJE(BaseRepresenterPoint):
 
         # Accumulate the gradients for the whole dataset and then update
         optimizer.zero_grad()
-        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        dtype = next(perturbed_head.parameters()).dtype
+        total_loss = torch.tensor(0.0, device=device, dtype=dtype)
+        total_samples = 0
         for f_batch, y_batch in dataset_to_estimate_hessian:
             f_batch = f_batch.to(device)
             y_batch = y_batch.to(device)
             y_pred = perturbed_head(f_batch)
-            # Negative loss for gradient ascent (like TF implementation)
-            batch_loss = -influence_model.loss_function(y_pred, y_batch).mean()
-            total_loss = total_loss + batch_loss
 
-        total_loss.backward()
+            per_sample_loss = influence_model.loss_function(y_pred, y_batch)
+            if per_sample_loss.dim() > 1:
+                per_sample_loss = per_sample_loss.view(per_sample_loss.shape[0], -1).sum(dim=1)
+            elif per_sample_loss.dim() == 0:
+                raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+            total_loss = total_loss - per_sample_loss.sum()
+            total_samples += int(f_batch.shape[0])
+
+        if total_samples == 0:
+            raise ValueError("Dataset used for Hessian estimation is empty")
+
+        (total_loss / float(total_samples)).backward()
         optimizer.step()
 
         # Set perturbed head to eval mode
