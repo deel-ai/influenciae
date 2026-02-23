@@ -86,6 +86,96 @@ def test_backtracking_line_search_stops_when_eta_leaves_bounds(monkeypatch):
     assert almost_equal(tf.constant(optimizer.parameters.eta), tf.constant(optimizer.parameters.min_eta))
 
 
+def test_backtracking_line_search_fallback_adds_regularization_losses(monkeypatch):
+    optimizer = BacktrackingLineSearch(batches_per_epoch=1, scaling_factor=0.1)
+
+    class _DummyModel:
+        def __init__(self):
+            self.losses = [tf.constant(0.25, dtype=tf.float32)]
+
+        @staticmethod
+        def get_weights():
+            return []
+
+        @staticmethod
+        def __call__(x_inputs, training=True):
+            _ = training
+            return x_inputs
+
+        @staticmethod
+        def compiled_loss(_labels, _predictions):
+            return tf.constant(1.5, dtype=tf.float32)
+
+    captured = {'loss': None}
+
+    def _fake_attempt_step(_model, _curr_weights, _gradients, closure):
+        captured['loss'] = closure()
+        return captured['loss']
+
+    monkeypatch.setattr(optimizer, "attempt_step", _fake_attempt_step)
+    monkeypatch.setattr(optimizer, "wolfe_condition", lambda *_args, **_kwargs: True)
+
+    optimizer.step(
+        _DummyModel(),
+        current_loss=tf.constant(1.5, dtype=tf.float32),
+        x_inputs=tf.constant([1.0], dtype=tf.float32),
+        labels=tf.constant([1.0], dtype=tf.float32),
+        gradients=[tf.constant([0.0], dtype=tf.float32)],
+    )
+
+    assert captured['loss'] is not None
+    assert almost_equal(captured['loss'], tf.constant(1.75, dtype=tf.float32), epsilon=1e-6)
+
+
+def test_backtracking_line_search_prefers_compute_loss(monkeypatch):
+    optimizer = BacktrackingLineSearch(batches_per_epoch=1, scaling_factor=0.1)
+
+    class _DummyModel:
+        def __init__(self):
+            self.losses = [tf.constant(0.25, dtype=tf.float32)]
+            self.compute_loss_called = False
+
+        @staticmethod
+        def get_weights():
+            return []
+
+        @staticmethod
+        def __call__(x_inputs, training=True):
+            _ = training
+            return x_inputs
+
+        def compute_loss(self, x=None, y=None, y_pred=None, sample_weight=None, training=True):
+            self.compute_loss_called = True
+            _ = (x, y, y_pred, sample_weight, training)
+            return tf.constant(1.75, dtype=tf.float32)
+
+        @staticmethod
+        def compiled_loss(_labels, _predictions):
+            raise RuntimeError("compiled_loss should not be used when compute_loss is available")
+
+    captured = {'loss': None}
+
+    def _fake_attempt_step(_model, _curr_weights, _gradients, closure):
+        captured['loss'] = closure()
+        return captured['loss']
+
+    monkeypatch.setattr(optimizer, "attempt_step", _fake_attempt_step)
+    monkeypatch.setattr(optimizer, "wolfe_condition", lambda *_args, **_kwargs: True)
+
+    dummy_model = _DummyModel()
+    optimizer.step(
+        dummy_model,
+        current_loss=tf.constant(1.5, dtype=tf.float32),
+        x_inputs=tf.constant([1.0], dtype=tf.float32),
+        labels=tf.constant([1.0], dtype=tf.float32),
+        gradients=[tf.constant([0.0], dtype=tf.float32)],
+    )
+
+    assert dummy_model.compute_loss_called
+    assert captured['loss'] is not None
+    assert almost_equal(captured['loss'], tf.constant(1.75, dtype=tf.float32), epsilon=1e-6)
+
+
 def test_backtracking_line_search_pytorch():
     """
     PyTorch equivalent test for BacktrackingLineSearchPyTorch optimizer.

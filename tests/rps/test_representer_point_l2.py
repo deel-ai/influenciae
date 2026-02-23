@@ -16,6 +16,8 @@ pytestmark = pytest.mark.tensorflow
 
 
 def test_surrogate_model():
+    tf.random.set_seed(0)
+
     x_train = tf.random.normal((100, 32, 32, 3), dtype=tf.float32)
     y_train = tf.random.categorical(tf.math.log([[0.25, 0.25, 0.25, 0.25]]), 100)
     y_train = tf.one_hot(tf.squeeze(y_train, axis=0), depth=4)
