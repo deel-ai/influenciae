@@ -109,22 +109,64 @@ if _HAS_TENSORFLOW:
             norm = self.c_gradnorm(gradients)
 
             def closure():
-                # Use compute_loss in case of Keras 3 models
                 predictions = model(x_inputs, training=True)
+                regularization_losses = list(getattr(model, "losses", []))
+
+                # Compatibility with Keras 3, which changed the signature of compute_loss and compiled_loss
                 compute_loss = getattr(model, "compute_loss", None)
                 if compute_loss is not None:
-                    training = getattr(model, "training", None)
                     try:
                         return compute_loss(
                             x=x_inputs,
                             y=labels,
                             y_pred=predictions,
                             sample_weight=None,
-                            training=training,
+                            training=True,
                         )
                     except TypeError:
-                        pass
-                return model.compiled_loss(labels, predictions)
+                        try:
+                            return compute_loss(
+                                x=x_inputs,
+                                y=labels,
+                                y_pred=predictions,
+                                sample_weight=None,
+                            )
+                        except TypeError:
+                            pass
+
+                compiled_loss = getattr(model, "compiled_loss", None)
+                if compiled_loss is None:
+                    raise AttributeError(
+                        "The model must expose either `compute_loss` or `compiled_loss` "
+                        "to be optimized with BacktrackingLineSearch."
+                    )
+
+                try:
+                    return compiled_loss(
+                        labels,
+                        predictions,
+                        sample_weight=None,
+                        regularization_losses=regularization_losses,
+                    )
+                except TypeError:
+                    try:
+                        return compiled_loss(
+                            labels,
+                            predictions,
+                            regularization_losses=regularization_losses,
+                        )
+                    except TypeError:
+                        try:
+                            base_loss = compiled_loss(labels, predictions)
+                        except TypeError:
+                            base_loss = compiled_loss(y_true=labels, y_pred=predictions)
+
+                # Compatibility with Keras 3
+                # In case the loss function does not support regularization losses, we add them manually if they exist
+                if regularization_losses:
+                    reg_loss = tf.add_n([tf.cast(loss_term, base_loss.dtype) for loss_term in regularization_losses])
+                    return base_loss + reg_loss
+                return base_loss
 
             self.parameters.eta *= self.parameters.gamma
             direction = self.attempt_step(model, curr_weights, gradients, closure)
