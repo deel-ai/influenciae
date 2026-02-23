@@ -217,6 +217,13 @@ class RepresenterPointL2(BaseRepresenterPoint):
         with tf.GradientTape() as tape:
             logits = self.linear_layer(z_batch, training=True)
             loss = mse_loss(y_target, logits)
+            # Compatibility with Keras 3: add regularization losses if present
+            if self.linear_layer.losses:
+                regularization_loss = tf.add_n([
+                    tf.cast(loss_term, loss.dtype)
+                    for loss_term in self.linear_layer.losses
+                ])
+                loss = loss + regularization_loss
         gradients = tape.gradient(loss, self.linear_layer.trainable_weights)
         return loss, gradients, z_batch, y_target
 
