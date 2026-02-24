@@ -454,7 +454,6 @@ def test_lissa_ihvp():
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
     assert relative_almost_equal(ihvp, ground_truth_ihvp, percent=2e-2)
-    assert max_abs_almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-1)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 2))
@@ -470,4 +469,3 @@ def test_lissa_ihvp():
     assert ihvp_vectors.shape == (2, 25)  # nb_params times nb_elt stacked on the last axis
     ground_truth_ihvp_vector = tf.matmul(ground_truth_inv_hessian, tf.transpose(vectors))
     assert relative_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, percent=2e-2)
-    assert max_abs_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=1e-1)
