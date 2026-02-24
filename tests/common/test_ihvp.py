@@ -11,7 +11,7 @@ from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 
-from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils_test import almost_equal, max_abs_almost_equal, jacobian_ground_truth, hessian_ground_truth
 
 
 pytestmark = pytest.mark.tensorflow
@@ -34,9 +34,9 @@ def _build_lissa_ihvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=3.0,
+        scale=5.0,
         damping=1e-4,
-        n_opt_iters=500,
+        n_opt_iters=300,
     )
 
 
@@ -45,9 +45,9 @@ def _build_lissa_hvp(influence_model, train_dataset):
         influence_model,
         extractor_layer=-1,
         train_dataset=train_dataset,
-        scale=3.0,
+        scale=5.0,
         damping=1e-4,
-        n_opt_iters=350,
+        n_opt_iters=300,
     )
 
 
@@ -430,7 +430,7 @@ def test_lissa_ihvp():
 
     # Compute the IHVP using auto-diff and check shapes
     ihvp_calculator = LissaIHVP(influence_model, extractor_layer=-1, train_dataset=train_set.batch(5),
-                                damping=1e-4, scale=3.0, n_opt_iters=500)
+                                damping=1e-4, scale=5.0, n_opt_iters=300)
     ihvp = ihvp_calculator.compute_ihvp(train_set.batch(5))
     ihvp_list = []
     for elt in ihvp:
@@ -447,7 +447,7 @@ def test_lissa_ihvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    assert almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-1)
+    assert max_abs_almost_equal(ihvp, ground_truth_ihvp, epsilon=2e-2)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 2))
@@ -462,4 +462,4 @@ def test_lissa_ihvp():
     ihvp_vectors = tf.concat(ihvp_vectors_list, axis=1)
     assert ihvp_vectors.shape == (2, 25)  # nb_params times nb_elt stacked on the last axis
     ground_truth_ihvp_vector = tf.matmul(ground_truth_inv_hessian, tf.transpose(vectors))
-    assert almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=1e-1)
+    assert max_abs_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=2e-2)
