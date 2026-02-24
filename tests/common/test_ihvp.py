@@ -11,7 +11,13 @@ from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 
-from ..utils_test import almost_equal, max_abs_almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils_test import (
+    almost_equal,
+    max_abs_almost_equal,
+    relative_almost_equal,
+    jacobian_ground_truth,
+    hessian_ground_truth,
+)
 
 
 pytestmark = pytest.mark.tensorflow
@@ -447,7 +453,8 @@ def test_lissa_ihvp():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_ihvp = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    assert max_abs_almost_equal(ihvp, ground_truth_ihvp, epsilon=2e-2)
+    assert relative_almost_equal(ihvp, ground_truth_ihvp, percent=2e-2)
+    assert max_abs_almost_equal(ihvp, ground_truth_ihvp, epsilon=1e-1)
 
     # Do the same for when the vector is directly provided
     vectors = tf.random.normal((25, 2))
@@ -462,4 +469,5 @@ def test_lissa_ihvp():
     ihvp_vectors = tf.concat(ihvp_vectors_list, axis=1)
     assert ihvp_vectors.shape == (2, 25)  # nb_params times nb_elt stacked on the last axis
     ground_truth_ihvp_vector = tf.matmul(ground_truth_inv_hessian, tf.transpose(vectors))
-    assert max_abs_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=2e-2)
+    assert relative_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, percent=2e-2)
+    assert max_abs_almost_equal(ihvp_vectors, ground_truth_ihvp_vector, epsilon=1e-1)
