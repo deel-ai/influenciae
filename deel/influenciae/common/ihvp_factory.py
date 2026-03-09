@@ -15,7 +15,9 @@ from .inverse_hessian_vector_product import (
     InverseHessianVectorProduct,
     ExactIHVP,
     ConjugateGradientDescentIHVP,
-    LissaIHVP
+    LissaIHVP,
+    KfacIHVP,
+    EkfacIHVP,
 )
 
 from ..types import Union, Optional, Any
@@ -195,4 +197,97 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
             self.feature_extractor,
             self.damping,
             self.scale
+        )
+
+
+class KfacIHVPFactory(InverseHessianVectorProductFactory):
+    """
+    A factory for instantiating KfacIHVP objects.
+
+    Attributes
+    ----------
+    damping
+        Tikhonov damping added to the Kronecker factors before inversion.
+    target_layers
+        Optional list of layer indices to restrict K-FAC to.
+    """
+    def __init__(
+        self,
+        damping: float = 1e-4,
+        target_layers: Optional[list] = None,
+    ):
+        self.damping = damping
+        self.target_layers = target_layers
+
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+        """
+        Creates an instance of the KfacIHVP class for the provided model and its
+        corresponding (full or partial) training dataset.
+
+        Parameters
+        ----------
+        model_influence
+            A model implementing the InfluenceModel interface.
+        dataset
+            A batched dataset containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        kfac_ihvp
+            An instance of the KfacIHVP class.
+        """
+        return KfacIHVP(
+            model_influence,
+            dataset,
+            damping=self.damping,
+            target_layers=self.target_layers,
+        )
+
+
+class EkfacIHVPFactory(InverseHessianVectorProductFactory):
+    """
+    A factory for instantiating EkfacIHVP objects.
+
+    Attributes
+    ----------
+    damping
+        Tikhonov damping added to the corrected eigenvalues before inversion.
+    target_layers
+        Optional list of layer indices to restrict EK-FAC to.
+    n_ekfac_samples
+        Number of samples for corrected eigenvalue estimation.
+    """
+    def __init__(
+        self,
+        damping: float = 1e-4,
+        target_layers: Optional[list] = None,
+        n_ekfac_samples: Optional[int] = None,
+    ):
+        self.damping = damping
+        self.target_layers = target_layers
+        self.n_ekfac_samples = n_ekfac_samples
+
+    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+        """
+        Creates an instance of the EkfacIHVP class for the provided model and its
+        corresponding (full or partial) training dataset.
+
+        Parameters
+        ----------
+        model_influence
+            A model implementing the InfluenceModel interface.
+        dataset
+            A batched dataset containing the model's (full or partial) training dataset.
+
+        Returns
+        -------
+        ekfac_ihvp
+            An instance of the EkfacIHVP class.
+        """
+        return EkfacIHVP(
+            model_influence,
+            dataset,
+            damping=self.damping,
+            target_layers=self.target_layers,
+            n_ekfac_samples=self.n_ekfac_samples,
         )
