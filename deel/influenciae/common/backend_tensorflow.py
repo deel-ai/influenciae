@@ -250,7 +250,18 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def transpose(self, tensor: tf.Tensor) -> tf.Tensor:
         """Transpose a tensor (swap last two dimensions)."""
-        return tf.transpose(tensor)
+        rank = tensor.shape.rank
+        if rank is not None:
+            if rank < 2:
+                return tensor
+            return tf.linalg.matrix_transpose(tensor)
+
+        dynamic_rank = tf.rank(tensor)
+        return tf.cond(
+            dynamic_rank < 2,
+            lambda: tensor,
+            lambda: tf.linalg.matrix_transpose(tensor),
+        )
 
     def tensor_shape(self, tensor: tf.Tensor) -> Tuple[int, ...]:
         """Get the shape of a tensor."""
@@ -577,6 +588,12 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Create a tensor of ones with the same shape and dtype as the input."""
         return tf.ones_like(tensor)
 
+    def eye(self, n: int, dtype: Any = None) -> tf.Tensor:
+        """Create an identity matrix of size (n, n)."""
+        if dtype is None:
+            dtype = tf.float32
+        return tf.eye(n, dtype=dtype)
+
     def argsort(self, tensor: tf.Tensor, axis: int = -1, descending: bool = False) -> tf.Tensor:
         """Return the indices that would sort the tensor along an axis."""
         direction = 'DESCENDING' if descending else 'ASCENDING'
@@ -666,6 +683,10 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                     tape_inner.watch(watched_weights)
                     predictions = model(batch[0])
                     loss = loss_function(batch[1], predictions)
+                    # Ensure per-sample scalar losses: collapse any trailing
+                    # dimensions (e.g. sequence/image axes) before Jacobian/Hessian.
+                    loss = tf.reshape(loss, (batch_size, -1))
+                    loss = tf.reduce_mean(loss, axis=1)
                 grads = tape_inner.jacobian(loss, watched_weights)
                 self._raise_if_disconnected('compute_hessian (inner jacobian)', grads, watched_weights)
                 grads = [tf.reshape(g, (batch_size, -1)) for g in grads]
@@ -923,3 +944,104 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def real(self, tensor: tf.Tensor) -> tf.Tensor:
         """Return the real part of a complex tensor."""
         return tf.math.real(tensor)
+
+    # ------------------------------------------------------------------
+    # K-FAC / EK-FAC support operations
+    # ------------------------------------------------------------------
+
+    @tf.autograph.experimental.do_not_convert
+    def eigh(self, tensor: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Symmetric eigendecomposition using tf.linalg.eigh."""
+        eigenvalues, eigenvectors = tf.linalg.eigh(tensor)
+        return eigenvalues, eigenvectors
+
+    @tf.autograph.experimental.do_not_convert
+    def kron(self, a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
+        """Kronecker product of two 2-D matrices via reshape + tensordot."""
+        a_shape = tf.shape(a)
+        b_shape = tf.shape(b)
+        # a: (m, n), b: (p, q) -> result: (m*p, n*q)
+        # Expand: a[:, :, None, None] * b[None, None, :, :] -> (m, n, p, q)
+        # Then transpose to (m, p, n, q) and reshape to (m*p, n*q)
+        product = a[:, :, tf.newaxis, tf.newaxis] * b[tf.newaxis, tf.newaxis, :, :]
+        product = tf.transpose(product, perm=[0, 2, 1, 3])
+        return tf.reshape(product, [a_shape[0] * b_shape[0], a_shape[1] * b_shape[1]])
+
+    @tf.autograph.experimental.do_not_convert
+    def outer(self, a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
+        """Outer product of two 1-D vectors."""
+        return tf.tensordot(a, b, axes=0)
+
+    def is_linear_layer(self, layer: Any) -> bool:
+        """Check whether *layer* is tf.keras.layers.Dense."""
+        return isinstance(layer, tf.keras.layers.Dense)
+
+    def is_conv2d_layer(self, layer: Any) -> bool:
+        """Check whether *layer* is tf.keras.layers.Conv2D."""
+        return isinstance(layer, tf.keras.layers.Conv2D)
+
+    @tf.autograph.experimental.do_not_convert
+    def get_layer_weight_and_bias(self, layer: tf.keras.layers.Layer) -> Tuple[Any, Optional[Any]]:
+        """Return the kernel and optional bias of a Dense or Conv2D layer."""
+        weight = layer.kernel
+        bias = getattr(layer, 'bias', None)
+        # Keras stores bias as None when use_bias=False.
+        # In Keras 3, trainable weights can be wrapped objects (not strict
+        # ``tf.Variable`` instances), so we keep any non-None bias reference.
+        return weight, bias
+
+    def register_forward_hook(self, layer: tf.keras.layers.Layer, hook: Callable) -> Any:
+        """
+        Register a forward hook on a Keras layer.
+
+        Uses a lightweight wrapper around ``layer.call`` that invokes the hook
+        after the original forward pass.  Returns a handle object whose
+        ``remove()`` restores the original ``call``.
+        """
+        original_call = layer.call
+
+        def hooked_call(*args, **kwargs):
+            # Keras ``call`` receives the layer input as the first positional arg.
+            output = original_call(*args, **kwargs)
+            # Match PyTorch convention: hook(layer, input, output)
+            layer_input = args[0] if args else kwargs.get('inputs', None)
+            hook(layer, layer_input, output)
+            return output
+
+        layer.call = hooked_call
+
+        class _Handle:
+            """Minimal handle that restores the original ``call``."""
+            def remove(self):
+                layer.call = original_call
+
+        return _Handle()
+
+    def register_backward_hook(self, layer: tf.keras.layers.Layer, hook: Callable) -> Any:
+        """
+        Register a backward hook on a Keras layer.
+
+        Keras does not natively support backward hooks.  This implementation
+        stores the hook reference so that the caller (e.g. ``KroneckerFactors``)
+        can invoke it manually inside a ``GradientTape`` context.  The returned
+        handle's ``remove()`` simply clears the stored reference.
+        """
+        # Store on the layer so the factor computation code can retrieve it.
+        if not hasattr(layer, '_kfac_backward_hooks'):
+            layer._kfac_backward_hooks = []
+
+        layer._kfac_backward_hooks.append(hook)
+
+        class _Handle:
+            """Minimal handle that removes the hook from the layer."""
+            def remove(self):
+                try:
+                    layer._kfac_backward_hooks.remove(hook)
+                except ValueError:
+                    pass
+
+        return _Handle()
+
+    def remove_hook(self, handle: Any) -> None:
+        """Remove a previously registered hook."""
+        handle.remove()

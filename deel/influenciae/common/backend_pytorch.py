@@ -774,6 +774,12 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Create a tensor of ones with the same shape and dtype as the input."""
         return torch.ones_like(tensor)
 
+    def eye(self, n: int, dtype: Any = None) -> torch.Tensor:
+        """Create an identity matrix of size (n, n)."""
+        if dtype is None:
+            dtype = torch.float32
+        return torch.eye(n, dtype=dtype)
+
     def argsort(self, tensor: torch.Tensor, axis: int = -1, descending: bool = False) -> torch.Tensor:
         """Return the indices that would sort the tensor along an axis."""
         return torch.argsort(tensor, dim=axis, descending=descending)
@@ -1197,3 +1203,45 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def real(self, tensor: torch.Tensor) -> torch.Tensor:
         """Return the real part of a complex tensor."""
         return tensor.real if tensor.is_complex() else tensor
+
+    # ------------------------------------------------------------------
+    # K-FAC / EK-FAC support operations
+    # ------------------------------------------------------------------
+
+    def eigh(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Symmetric eigendecomposition using torch.linalg.eigh."""
+        return torch.linalg.eigh(tensor)
+
+    def kron(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Kronecker product of two matrices."""
+        return torch.kron(a, b)
+
+    def outer(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Outer product of two vectors."""
+        return torch.outer(a, b)
+
+    def is_linear_layer(self, layer: Any) -> bool:
+        """Check whether *layer* is nn.Linear."""
+        return isinstance(layer, nn.Linear)
+
+    def is_conv2d_layer(self, layer: Any) -> bool:
+        """Check whether *layer* is nn.Conv2d."""
+        return isinstance(layer, nn.Conv2d)
+
+    def get_layer_weight_and_bias(self, layer: nn.Module) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Return the weight and optional bias of a Linear or Conv2d layer."""
+        weight = layer.weight
+        bias = layer.bias  # None when the layer was created with bias=False
+        return weight, bias
+
+    def register_forward_hook(self, layer: nn.Module, hook: Callable) -> torch.utils.hooks.RemovableHandle:
+        """Register a forward hook on a PyTorch module."""
+        return layer.register_forward_hook(hook)
+
+    def register_backward_hook(self, layer: nn.Module, hook: Callable) -> torch.utils.hooks.RemovableHandle:
+        """Register a full-backward hook on a PyTorch module."""
+        return layer.register_full_backward_hook(hook)
+
+    def remove_hook(self, handle: torch.utils.hooks.RemovableHandle) -> None:
+        """Remove a previously registered hook."""
+        handle.remove()

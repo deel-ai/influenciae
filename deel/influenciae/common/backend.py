@@ -784,6 +784,24 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """Create a tensor of ones with the same shape and dtype as the input."""
 
     @abstractmethod
+    def eye(self, n: int, dtype: Any = None) -> Any:
+        """
+        Create an identity matrix of size ``(n, n)``.
+
+        Parameters
+        ----------
+        n
+            Size of the identity matrix.
+        dtype
+            Optional data type.  If ``None``, uses the backend's default float type.
+
+        Returns
+        -------
+        identity
+            Identity matrix of shape ``(n, n)``.
+        """
+
+    @abstractmethod
     def argsort(self, tensor: Any, axis: int = -1, descending: bool = False) -> Any:
         """
         Return the indices that would sort the tensor along an axis.
@@ -1432,6 +1450,175 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         -------
         real_tensor
             The real part of the tensor.
+        """
+
+    # ------------------------------------------------------------------
+    # K-FAC / EK-FAC support operations
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def eigh(self, tensor: Any) -> Tuple[Any, Any]:
+        """
+        Compute eigenvalues and eigenvectors of a real symmetric (Hermitian) matrix.
+
+        Unlike ``eig``, this exploits symmetry for better numerical stability and
+        performance.  The eigenvalues are returned in ascending order.
+
+        Parameters
+        ----------
+        tensor
+            A real symmetric matrix of shape ``(n, n)``.
+
+        Returns
+        -------
+        eigenvalues
+            Eigenvalues in ascending order, shape ``(n,)``.
+        eigenvectors
+            Orthonormal eigenvectors as columns, shape ``(n, n)``.
+        """
+
+    @abstractmethod
+    def kron(self, a: Any, b: Any) -> Any:
+        """
+        Compute the Kronecker product of two 2-D matrices.
+
+        Parameters
+        ----------
+        a
+            First matrix of shape ``(m, n)``.
+        b
+            Second matrix of shape ``(p, q)``.
+
+        Returns
+        -------
+        kronecker_product
+            Matrix of shape ``(m*p, n*q)``.
+        """
+
+    @abstractmethod
+    def outer(self, a: Any, b: Any) -> Any:
+        """
+        Compute the outer product of two 1-D vectors.
+
+        Parameters
+        ----------
+        a
+            First vector of shape ``(m,)``.
+        b
+            Second vector of shape ``(n,)``.
+
+        Returns
+        -------
+        outer_product
+            Matrix of shape ``(m, n)``.
+        """
+
+    @abstractmethod
+    def is_linear_layer(self, layer: Any) -> bool:
+        """
+        Check whether *layer* is a fully-connected / dense layer.
+
+        Parameters
+        ----------
+        layer
+            A framework-specific layer object.
+
+        Returns
+        -------
+        is_linear
+            ``True`` when the layer is ``nn.Linear`` (PyTorch) or
+            ``tf.keras.layers.Dense`` (TensorFlow).
+        """
+
+    @abstractmethod
+    def is_conv2d_layer(self, layer: Any) -> bool:
+        """
+        Check whether *layer* is a 2-D convolution layer.
+
+        Parameters
+        ----------
+        layer
+            A framework-specific layer object.
+
+        Returns
+        -------
+        is_conv2d
+            ``True`` when the layer is ``nn.Conv2d`` (PyTorch) or
+            ``tf.keras.layers.Conv2D`` (TensorFlow).
+        """
+
+    @abstractmethod
+    def get_layer_weight_and_bias(self, layer: Any) -> Tuple[Any, Optional[Any]]:
+        """
+        Return the weight matrix and optional bias vector of a supported layer.
+
+        Parameters
+        ----------
+        layer
+            A linear or convolutional layer.
+
+        Returns
+        -------
+        weight
+            The weight tensor.
+        bias
+            The bias tensor, or ``None`` if the layer has no bias.
+        """
+
+    @abstractmethod
+    def register_forward_hook(self, layer: Any, hook: Callable) -> Any:
+        """
+        Register a forward hook on *layer*.
+
+        The hook signature follows PyTorch convention::
+
+            hook(layer, input, output) -> None
+
+        Parameters
+        ----------
+        layer
+            The layer to attach the hook to.
+        hook
+            The hook callable.
+
+        Returns
+        -------
+        handle
+            An opaque handle that can be passed to :meth:`remove_hook`.
+        """
+
+    @abstractmethod
+    def register_backward_hook(self, layer: Any, hook: Callable) -> Any:
+        """
+        Register a backward (full-backward) hook on *layer*.
+
+        The hook signature follows PyTorch convention::
+
+            hook(layer, grad_input, grad_output) -> None
+
+        Parameters
+        ----------
+        layer
+            The layer to attach the hook to.
+        hook
+            The hook callable.
+
+        Returns
+        -------
+        handle
+            An opaque handle that can be passed to :meth:`remove_hook`.
+        """
+
+    @abstractmethod
+    def remove_hook(self, handle: Any) -> None:
+        """
+        Remove a previously registered hook.
+
+        Parameters
+        ----------
+        handle
+            The handle returned by :meth:`register_forward_hook` or
+            :meth:`register_backward_hook`.
         """
 
 def get_backend(framework: Framework) -> BaseBackend:
