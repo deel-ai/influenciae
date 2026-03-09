@@ -1380,6 +1380,381 @@ class EkfacIHVP(InverseHessianVectorProduct):
         )
 
 
+class KfacIHVP(InverseHessianVectorProduct):
+    """
+    Inverse-Hessian-Vector Product approximation using Kronecker-Factored
+    Approximate Curvature (K-FAC).
+
+    K-FAC approximates the Fisher information matrix block-diagonally per layer,
+    factoring each block as a Kronecker product of the input activation covariance
+    ``A_l`` and the output gradient covariance ``G_l``.  The per-layer IHVP is then:
+
+        ``(A_l + λI)^{-1}  V_l  (G_l + λI)^{-1}``
+
+    where ``V_l`` is the gradient reshaped as an ``(n_out, n_in)`` matrix.
+
+    Notes
+    -----
+    Only ``nn.Linear`` / ``Dense`` and ``nn.Conv2d`` / ``Conv2D`` layers are
+    supported.  Parameters from unsupported layers are left untouched (their IHVP
+    contribution is set to zero, equivalent to infinite damping).
+
+    Parameters
+    ----------
+    model
+        The model implementing the InfluenceModel interface.
+    train_dataset
+        A batched dataset for estimating the Kronecker factors.
+    damping
+        Tikhonov damping added to A and G before inversion.
+    target_layers
+        Optional list of layer indices to restrict K-FAC to.  ``None`` means
+        all supported layers.
+    """
+
+    def __init__(
+        self,
+        model: InfluenceModel,
+        train_dataset: Any,
+        damping: float = 1e-4,
+        target_layers: Optional[List[int]] = None,
+    ):
+        super().__init__(model, train_dataset)
+        self.damping = damping
+
+        # Build layer map and compute factors
+        self.layer_map = LayerParameterMap(model, self.backend, target_layers)
+        self.factors = KroneckerFactors(model, train_dataset, self.backend, self.layer_map)
+
+        # Pre-compute damped inverses: (A + damping * I)^{-1} and (G + damping * I)^{-1}
+        self.A_inv = {}
+        self.G_inv = {}
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.factors.A:
+                continue
+
+            a_factor = self.factors.A[idx]
+            g_factor = self.factors.G[idx]
+
+            # A + damping * I
+            a_shape = self.backend.tensor_shape(a_factor)
+            a_eye = self.backend.cast(
+                self.backend.eye(a_shape[0]),
+                self.backend.get_dtype(a_factor)
+            )
+            damping_tensor_a = self.backend.cast(
+                self.backend.constant(damping),
+                self.backend.get_dtype(a_factor)
+            )
+            self.A_inv[idx] = self.backend.pinv(a_factor + damping_tensor_a * a_eye)
+
+            # G + damping * I
+            g_shape = self.backend.tensor_shape(g_factor)
+            g_eye = self.backend.cast(
+                self.backend.eye(g_shape[0]),
+                self.backend.get_dtype(g_factor)
+            )
+            damping_tensor_g = self.backend.cast(
+                self.backend.constant(damping),
+                self.backend.get_dtype(g_factor)
+            )
+            self.G_inv[idx] = self.backend.pinv(g_factor + damping_tensor_g * g_eye)
+
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        """
+        Compute K-FAC IHVP for a single batch.
+
+        For each supported layer, extracts the gradient slice, reshapes into a
+        matrix whose layout matches the framework's native weight storage order,
+        applies the K-FAC formula (``G_inv @ V @ A_inv`` for PyTorch,
+        ``A_inv @ V_tf @ G_inv`` for TensorFlow — see the comment block above
+        this class), and writes the result back to the flat vector.
+
+        Parameters
+        ----------
+        group_batch
+            A tuple with a single batch of tensors.
+        use_gradient
+            If True, compute gradients from the batch; otherwise treat batch[0]
+            as pre-computed gradient vectors.
+
+        Returns
+        -------
+        ihvp
+            Tensor of shape ``(nb_params, batch_size)``.
+        """
+        if use_gradient:
+            grads = self.backend.reshape(
+                self.model.batch_jacobian_tensor(group_batch),
+                (-1, self.model.nb_params)
+            )
+        else:
+            grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
+
+        batch_size = self.backend.get_batch_size(grads)
+
+        # Start with zeros (unsupported layers contribute nothing)
+        result = self.backend.zeros_like(grads)
+
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.A_inv:
+                continue
+
+            # Extract per-layer gradient slice: (batch, layer_params)
+            layer_grads = grads[:, info.flat_start:info.flat_end]
+
+            # Derive n_out and n_in_eff from the pre-computed factor matrices
+            g_inv = self.G_inv[idx]  # (n_out, n_out)
+            a_inv = self.A_inv[idx]  # (n_in_eff, n_in_eff)
+            n_out = int(self.backend.tensor_shape(g_inv)[0])
+            n_in_eff = int(self.backend.tensor_shape(a_inv)[0])
+
+            # Framework-aware reshape and IHVP application.
+            #
+            # PyTorch flat gradient layout: (n_out, n_in_eff) row-major
+            #   -> reshape to (batch, n_out, n_in_eff)
+            #   -> apply G_inv @ V @ A_inv -> (batch, n_out, n_in_eff)
+            #   -> flatten directly
+            #
+            # TF flat gradient layout: (n_in_eff, n_out) row-major
+            #   -> reshape to (batch, n_in_eff, n_out)
+            #   -> apply A_inv @ V_tf @ G_inv -> (batch, n_in_eff, n_out)
+            #     (equivalent because A_inv and G_inv are symmetric:
+            #      A_inv @ V^T @ G_inv = (G_inv @ V @ A_inv)^T)
+            #   -> flatten directly (back to TF order)
+            if self.backend.framework.value == "tensorflow":
+                v_mat = self.backend.reshape(layer_grads, (batch_size, n_in_eff, n_out))
+                ihvp_layer = self.backend.matmul(
+                    self.backend.matmul(a_inv, v_mat),
+                    g_inv
+                )
+            else:
+                v_mat = self.backend.reshape(layer_grads, (batch_size, n_out, n_in_eff))
+                ihvp_layer = self.backend.matmul(
+                    self.backend.matmul(g_inv, v_mat),
+                    a_inv
+                )
+
+            # Flatten back to (batch, layer_params)
+            ihvp_flat = self.backend.reshape(ihvp_layer, (batch_size, -1))
+
+            result = self._write_layer_slice(result, ihvp_flat, info.flat_start, info.flat_end)
+
+        return self.backend.transpose(result)  # (nb_params, batch_size)
+
+    def _write_layer_slice(self, result: Any, values: Any, start: int, end: int) -> Any:
+        """Write *values* into columns [start:end] of *result*.
+
+        Since in-place assignment may not be supported by all backends, this
+        constructs a new tensor.
+        """
+        backend = self.backend
+        nb_params = int(backend.tensor_shape(result)[1])
+
+        parts = []
+        if start > 0:
+            parts.append(result[:, :start])
+        parts.append(values)
+        if end < nb_params:
+            parts.append(result[:, end:])
+
+        return backend.concat(parts, axis=1)
+
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        """HVP is not directly supported for K-FAC; raises NotImplementedError."""
+        raise NotImplementedError(
+            "K-FAC provides an approximate IHVP, not a direct HVP. "
+            "Use compute_ihvp() instead."
+        )
+
+
+class EkfacIHVP(InverseHessianVectorProduct):
+    """
+    Inverse-Hessian-Vector Product approximation using Eigenvalue-corrected
+    Kronecker-Factored Approximate Curvature (EK-FAC).
+
+    EK-FAC improves upon K-FAC by:
+    1. Eigendecomposing each factor: ``A_l = Q_A Λ_A Q_A^T``,
+       ``G_l = Q_G Λ_G Q_G^T``.
+    2. Rotating the gradient into the eigenbasis.
+    3. Dividing by *corrected* diagonal eigenvalues estimated from training data.
+    4. Rotating back.
+
+    This yields a more accurate IHVP at modest extra cost and is the method
+    recommended by Grosse et al. (2023) for large-scale influence function
+    computation.
+
+    Parameters
+    ----------
+    model
+        The model implementing the InfluenceModel interface.
+    train_dataset
+        A batched dataset for estimating the factors and corrected eigenvalues.
+    damping
+        Tikhonov damping added to the corrected eigenvalues before inversion.
+    target_layers
+        Optional list of layer indices to restrict EK-FAC to.
+    n_ekfac_samples
+        Number of samples for corrected eigenvalue estimation.  ``None`` means
+        use the full dataset.
+    """
+
+    def __init__(
+        self,
+        model: InfluenceModel,
+        train_dataset: Any,
+        damping: float = 1e-4,
+        target_layers: Optional[List[int]] = None,
+        n_ekfac_samples: Optional[int] = None,
+    ):
+        super().__init__(model, train_dataset)
+        self.damping = damping
+
+        self.layer_map = LayerParameterMap(model, self.backend, target_layers)
+        self.factors = EKFACFactors(
+            model, train_dataset, self.backend, self.layer_map,
+            n_ekfac_samples=n_ekfac_samples,
+        )
+
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        """
+        Compute EK-FAC IHVP for a single batch.
+
+        Steps per layer (PyTorch / TF are handled symmetrically):
+
+        1. Extract per-layer gradient slice and reshape into a matrix whose
+           layout matches the framework's native weight storage order.
+        2. Rotate into the K-FAC eigenbasis.
+        3. Divide element-wise by ``(Lambda_corrected + damping)``.
+        4. Rotate back and flatten to the native flat gradient order.
+
+        Parameters
+        ----------
+        group_batch
+            A tuple with a single batch of tensors.
+        use_gradient
+            If True, compute gradients from the batch.
+
+        Returns
+        -------
+        ihvp
+            Tensor of shape ``(nb_params, batch_size)``.
+        """
+        if use_gradient:
+            grads = self.backend.reshape(
+                self.model.batch_jacobian_tensor(group_batch),
+                (-1, self.model.nb_params)
+            )
+        else:
+            grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
+
+        batch_size = self.backend.get_batch_size(grads)
+        backend = self.backend
+        result = backend.zeros_like(grads)
+
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.factors.Q_A or idx not in self.factors.Lambda_corrected:
+                continue
+
+            # Extract gradient slice
+            layer_grads = grads[:, info.flat_start:info.flat_end]
+
+            # Derive n_out and n_in_eff from the eigenvector matrices (always
+            # correctly dimensioned regardless of framework weight conventions).
+            q_a = self.factors.Q_A[idx]    # (n_in_eff, n_in_eff)
+            q_g = self.factors.Q_G[idx]    # (n_out, n_out)
+            lam_corr = self.factors.Lambda_corrected[idx]  # (n_out * n_in_eff,)
+
+            n_out = int(backend.tensor_shape(q_g)[0])
+            n_in_eff = int(backend.tensor_shape(q_a)[0])
+
+            q_g_t = backend.transpose(q_g)  # (n_out, n_out) — symmetric, but kept for clarity
+            q_a_t = backend.transpose(q_a)  # (n_in_eff, n_in_eff)
+
+            # Framework-aware reshape, rotate, divide, rotate-back, flatten.
+            #
+            # Lambda_corrected is stored as flatten((n_out, n_in_eff)) in both
+            # frameworks (since it's computed from Q_G/Q_A-rotated quantities
+            # that are framework-independent).
+            damping_tensor = backend.cast(
+                backend.constant(self.damping),
+                backend.get_dtype(lam_corr)
+            )
+            lam_damped = lam_corr + damping_tensor
+
+            if backend.framework.value == "tensorflow":
+                # TF flat gradient is in (n_in_eff, n_out) row-major order
+                v_mat = backend.reshape(layer_grads, (batch_size, n_in_eff, n_out))
+
+                # Rotate: V'_tf = Q_A^T @ V_tf @ Q_G  ->  (batch, n_in_eff, n_out)
+                # This equals (Q_G^T @ V @ Q_A)^T = V'^T
+                v_rotated = backend.matmul(backend.matmul(q_a_t, v_mat), q_g)
+
+                # Lambda_corrected is flat (n_out * n_in_eff,) from (n_out, n_in_eff).
+                # V'_tf is flat (n_in_eff * n_out,) from (n_in_eff, n_out).
+                # Transpose Lambda: reshape to (n_out, n_in_eff), transpose to
+                # (n_in_eff, n_out), flatten to (n_in_eff * n_out,).
+                lam_mat = backend.reshape(lam_damped, (n_out, n_in_eff))
+                lam_tf = backend.reshape(
+                    backend.transpose(lam_mat),  # (n_in_eff, n_out) — 2-D transpose is fine
+                    (-1,)
+                )
+
+                v_rot_flat = backend.reshape(v_rotated, (batch_size, -1))
+                v_divided = v_rot_flat / backend.expand_dims(lam_tf, axis=0)
+
+                # Reshape back to (batch, n_in_eff, n_out)
+                v_div_mat = backend.reshape(v_divided, (batch_size, n_in_eff, n_out))
+
+                # Rotate back: Q_A @ V''_tf @ Q_G^T  ->  (batch, n_in_eff, n_out)
+                ihvp_layer = backend.matmul(backend.matmul(q_a, v_div_mat), q_g_t)
+            else:
+                # PyTorch flat gradient is in (n_out, n_in_eff) row-major order
+                v_mat = backend.reshape(layer_grads, (batch_size, n_out, n_in_eff))
+
+                # Rotate: V' = Q_G^T @ V @ Q_A  ->  (batch, n_out, n_in_eff)
+                v_rotated = backend.matmul(backend.matmul(q_g_t, v_mat), q_a)
+
+                # Flatten, divide by lambda, unflatten
+                v_rot_flat = backend.reshape(v_rotated, (batch_size, -1))
+                v_divided = v_rot_flat / backend.expand_dims(lam_damped, axis=0)
+                v_div_mat = backend.reshape(v_divided, (batch_size, n_out, n_in_eff))
+
+                # Rotate back: Q_G @ V'' @ Q_A^T  ->  (batch, n_out, n_in_eff)
+                ihvp_layer = backend.matmul(backend.matmul(q_g, v_div_mat), q_a_t)
+
+            # Flatten back to (batch, layer_params) in the framework's native order
+            ihvp_flat = backend.reshape(ihvp_layer, (batch_size, -1))
+
+            result = self._write_layer_slice(result, ihvp_flat, info.flat_start, info.flat_end)
+
+        return backend.transpose(result)
+
+    def _write_layer_slice(self, result: Any, values: Any, start: int, end: int) -> Any:
+        """Write *values* into columns [start:end] of *result*."""
+        backend = self.backend
+        nb_params = int(backend.tensor_shape(result)[1])
+
+        parts = []
+        if start > 0:
+            parts.append(result[:, :start])
+        parts.append(values)
+        if end < nb_params:
+            parts.append(result[:, end:])
+
+        return backend.concat(parts, axis=1)
+
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        """HVP is not directly supported for EK-FAC; raises NotImplementedError."""
+        raise NotImplementedError(
+            "EK-FAC provides an approximate IHVP, not a direct HVP. "
+            "Use compute_ihvp() instead."
+        )
+
+
 class IHVPCalculator(Enum):
     """
     Inverse Hessian Vector Product Calculator interface.
