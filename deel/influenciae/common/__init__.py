@@ -26,5 +26,7 @@ from .model_wrappers import (
 )
 from .base_influence import SelfInfluenceCalculator, BaseInfluenceCalculator, CACHE
 from .inverse_hessian_vector_product import InverseHessianVectorProduct, ExactIHVP, ConjugateGradientDescentIHVP, \
-     IHVPCalculator, LissaIHVP, ForwardOverBackwardHVP
-from .ihvp_factory import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
+     IHVPCalculator, LissaIHVP, ForwardOverBackwardHVP, KfacIHVP, EkfacIHVP
+from .ihvp_factory import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory, \
+     KfacIHVPFactory, EkfacIHVPFactory
+from .kfac_factors import LayerParameterMap, KroneckerFactors, EKFACFactors
