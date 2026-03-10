@@ -623,9 +623,43 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Get the dtype of a tensor."""
         return tensor.dtype
 
+    def to_cpu(self, tensor: Any) -> Any:
+        """Move a tensor (or nested tensor structure) to CPU memory."""
+        if isinstance(tensor, tf.Tensor):
+            with tf.device('/CPU:0'):
+                return tf.identity(tensor)
+        if isinstance(tensor, list):
+            return [self.to_cpu(item) for item in tensor]
+        if isinstance(tensor, tuple):
+            return tuple(self.to_cpu(item) for item in tensor)
+        if isinstance(tensor, dict):
+            return {key: self.to_cpu(value) for key, value in tensor.items()}
+        return tensor
+
+    def to_device(self, tensor: Any, reference: Optional[Any] = None) -> Any:
+        """Move a tensor (or nested tensor structure) to a compute device."""
+        if isinstance(tensor, list):
+            return [self.to_device(item, reference=reference) for item in tensor]
+        if isinstance(tensor, tuple):
+            return tuple(self.to_device(item, reference=reference) for item in tensor)
+        if isinstance(tensor, dict):
+            return {key: self.to_device(value, reference=reference) for key, value in tensor.items()}
+        if not isinstance(tensor, tf.Tensor):
+            return tensor
+
+        target_device = getattr(reference, 'device', None)
+        if target_device:
+            with tf.device(target_device):
+                return tf.identity(tensor)
+        return tf.identity(tensor)
+
     def float32_dtype(self) -> Any:
         """Return the float32 dtype for the framework."""
         return tf.float32
+
+    def float64_dtype(self) -> Any:
+        """Return the float64 dtype for the framework."""
+        return tf.float64
 
     def int32_dtype(self) -> Any:
         """Return the int32 dtype for the framework."""

@@ -849,9 +849,41 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Get the dtype of a tensor."""
         return tensor.dtype
 
+    def to_cpu(self, tensor: Any) -> Any:
+        """Move a tensor (or nested tensor structure) to CPU memory."""
+        if isinstance(tensor, torch.Tensor):
+            return tensor.detach().to("cpu")
+        if isinstance(tensor, list):
+            return [self.to_cpu(item) for item in tensor]
+        if isinstance(tensor, tuple):
+            return tuple(self.to_cpu(item) for item in tensor)
+        if isinstance(tensor, dict):
+            return {key: self.to_cpu(value) for key, value in tensor.items()}
+        return tensor
+
+    def to_device(self, tensor: Any, reference: Optional[Any] = None) -> Any:
+        """Move a tensor (or nested tensor structure) to a compute device."""
+        target_device = getattr(reference, "device", None)
+
+        if isinstance(tensor, torch.Tensor):
+            if target_device is None:
+                return tensor
+            return tensor.to(device=target_device)
+        if isinstance(tensor, list):
+            return [self.to_device(item, reference=reference) for item in tensor]
+        if isinstance(tensor, tuple):
+            return tuple(self.to_device(item, reference=reference) for item in tensor)
+        if isinstance(tensor, dict):
+            return {key: self.to_device(value, reference=reference) for key, value in tensor.items()}
+        return tensor
+
     def float32_dtype(self) -> Any:
         """Return the float32 dtype for the framework."""
         return torch.float32
+
+    def float64_dtype(self) -> Any:
+        """Return the float64 dtype for the framework."""
+        return torch.float64
 
     def int32_dtype(self) -> Any:
         """Return the int32 dtype for the framework."""

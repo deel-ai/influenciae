@@ -846,8 +846,20 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """Get the dtype of a tensor."""
 
     @abstractmethod
+    def to_cpu(self, tensor: Any) -> Any:
+        """Move a tensor (or nested tensor structure) to CPU memory."""
+
+    @abstractmethod
+    def to_device(self, tensor: Any, reference: Optional[Any] = None) -> Any:
+        """Move a tensor (or nested tensor structure) to a compute device."""
+
+    @abstractmethod
     def float32_dtype(self) -> Any:
         """Return the float32 dtype for the framework."""
+
+    @abstractmethod
+    def float64_dtype(self) -> Any:
+        """Return the float64 dtype for the framework."""
 
     @abstractmethod
     def int32_dtype(self) -> Any:
