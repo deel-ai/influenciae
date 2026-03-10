@@ -210,14 +210,32 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         Tikhonov damping added to the Kronecker factors before inversion.
     target_layers
         Optional list of layer indices to restrict K-FAC to.
+    fisher_type
+        Fisher variant used for curvature estimation: ``"empirical"`` (default)
+        or ``"true"``.
+    module_partition_size
+        Optional number of supported layers to process per pass while computing
+        factors.
+    offload_activations_to_cpu
+        Whether to offload hook-captured activations/gradients to CPU.
+    data_partition_size
+        Optional number of batches per data partition during factor estimation.
     """
     def __init__(
         self,
         damping: float = 1e-4,
         target_layers: Optional[list] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
     ):
         self.damping = damping
         self.target_layers = target_layers
+        self.fisher_type = fisher_type
+        self.module_partition_size = module_partition_size
+        self.offload_activations_to_cpu = offload_activations_to_cpu
+        self.data_partition_size = data_partition_size
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -241,6 +259,10 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
             dataset,
             damping=self.damping,
             target_layers=self.target_layers,
+            fisher_type=self.fisher_type,
+            module_partition_size=self.module_partition_size,
+            offload_activations_to_cpu=self.offload_activations_to_cpu,
+            data_partition_size=self.data_partition_size,
         )
 
 
@@ -256,16 +278,34 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         Optional list of layer indices to restrict EK-FAC to.
     n_ekfac_samples
         Number of samples for corrected eigenvalue estimation.
+    fisher_type
+        Fisher variant used for curvature estimation: ``"empirical"`` (default)
+        or ``"true"``.
+    module_partition_size
+        Optional number of supported layers to process per pass while computing
+        factors.
+    offload_activations_to_cpu
+        Whether to offload hook-captured activations/gradients to CPU.
+    data_partition_size
+        Optional number of batches per data partition during factor estimation.
     """
     def __init__(
         self,
         damping: float = 1e-4,
         target_layers: Optional[list] = None,
         n_ekfac_samples: Optional[int] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
     ):
         self.damping = damping
         self.target_layers = target_layers
         self.n_ekfac_samples = n_ekfac_samples
+        self.fisher_type = fisher_type
+        self.module_partition_size = module_partition_size
+        self.offload_activations_to_cpu = offload_activations_to_cpu
+        self.data_partition_size = data_partition_size
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -290,4 +330,8 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             damping=self.damping,
             target_layers=self.target_layers,
             n_ekfac_samples=self.n_ekfac_samples,
+            fisher_type=self.fisher_type,
+            module_partition_size=self.module_partition_size,
+            offload_activations_to_cpu=self.offload_activations_to_cpu,
+            data_partition_size=self.data_partition_size,
         )
