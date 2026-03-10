@@ -794,11 +794,19 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def maximum(self, a: Any, b: Any) -> torch.Tensor:
         """Element-wise maximum of two tensors/scalars."""
-        # Handle scalar inputs
-        if not isinstance(a, torch.Tensor):
+        if isinstance(a, torch.Tensor) and not isinstance(b, torch.Tensor):
+            b = torch.tensor(b, dtype=a.dtype, device=a.device)
+        elif isinstance(b, torch.Tensor) and not isinstance(a, torch.Tensor):
+            a = torch.tensor(a, dtype=b.dtype, device=b.device)
+        elif not isinstance(a, torch.Tensor) and not isinstance(b, torch.Tensor):
             a = torch.tensor(a)
-        if not isinstance(b, torch.Tensor):
             b = torch.tensor(b)
+
+        if a.device != b.device:
+            if a.numel() == 1:
+                a = a.to(device=b.device)
+            elif b.numel() == 1:
+                b = b.to(device=a.device)
         return torch.maximum(a, b)
 
     def pinv(self, matrix: torch.Tensor) -> torch.Tensor:  # pylint: disable=not-callable
