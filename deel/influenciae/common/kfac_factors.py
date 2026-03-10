@@ -19,12 +19,17 @@ covariance (G).  EK-FAC refines this by eigendecomposing the factors and estimat
 corrected diagonal eigenvalues.
 """
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel
 
 from ..types import Any, Callable, Dict, List, Optional, Tuple
+
+
+def _chunk_layer_infos(layer_infos: List["LayerInfo"], chunk_size: int) -> List[List["LayerInfo"]]:
+    """Split layer infos into chunks of at most *chunk_size* entries."""
+    return [layer_infos[i:i + chunk_size] for i in range(0, len(layer_infos), chunk_size)]
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +250,18 @@ class KroneckerFactors:
         The backend abstraction.
     layer_map
         Pre-computed ``LayerParameterMap``.
+    fisher_type
+        Fisher variant used for curvature estimation: ``"empirical"`` (default)
+        or ``"true"``.
+    module_partition_size
+        Optional number of supported layers to process per pass. ``None`` means
+        process all supported layers together.
+    offload_activations_to_cpu
+        If ``True``, hook-captured activations and gradients are moved to CPU
+        before accumulation and brought back to the compute device when needed.
+    data_partition_size
+        Optional number of batches per data partition.  At each partition
+        boundary the running accumulators are checkpointed in-memory.
     """
 
     def __init__(
@@ -253,14 +270,73 @@ class KroneckerFactors:
         train_dataset: Any,
         backend: BaseBackend,
         layer_map: LayerParameterMap,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
     ):
         self.backend = backend
         self.model = model
         self.layer_map = layer_map
+        if fisher_type not in ("empirical", "true"):
+            raise ValueError("fisher_type must be either 'empirical' or 'true'.")
+        if module_partition_size is not None and module_partition_size <= 0:
+            raise ValueError("module_partition_size must be a strictly positive integer or None.")
+        if data_partition_size is not None and data_partition_size <= 0:
+            raise ValueError("data_partition_size must be a strictly positive integer or None.")
+
+        self.fisher_type = fisher_type
+        self.module_partition_size = module_partition_size
+        self.offload_activations_to_cpu = offload_activations_to_cpu
+        self.data_partition_size = data_partition_size
+        self._true_fisher_warning_emitted = False
+        self._factor_checkpoint: Optional[Dict[str, Any]] = None
         self.A: Dict[int, Any] = {}  # layer_idx -> A factor
         self.G: Dict[int, Any] = {}  # layer_idx -> G factor
 
         self._compute_factors(train_dataset)
+
+    def _warn_true_fisher_fallback(self, loss_function: Callable) -> None:
+        """Warn once when true Fisher sampling is not supported for a loss."""
+        if self._true_fisher_warning_emitted:
+            return
+
+        warnings.warn(
+            "fisher_type='true' is not supported for "
+            f"loss {type(loss_function).__name__}; falling back to empirical Fisher.",
+            stacklevel=2,
+        )
+        self._true_fisher_warning_emitted = True
+
+    def _symmetrize_matrix(self, matrix: Any) -> Any:
+        """Return the symmetric part of a square matrix."""
+        return 0.5 * (matrix + self.backend.transpose(matrix))
+
+    def _iter_layer_partitions(self) -> List[List[LayerInfo]]:
+        """Return layer partitions according to ``module_partition_size``."""
+        if self.module_partition_size is None:
+            return [self.layer_map.layers_info]
+        return _chunk_layer_infos(self.layer_map.layers_info, self.module_partition_size)
+
+    def _get_device_reference_tensor(self) -> Optional[Any]:
+        """Return a tensor living on the target compute device."""
+        model_weights = getattr(self.model, "weights", None)
+        if model_weights:
+            return model_weights[0]
+        return None
+
+    def _checkpoint_factor_accumulators(
+        self,
+        a_sums: Dict[int, Any],
+        g_sums: Dict[int, Any],
+        n_rows_per_layer: Dict[int, int],
+    ) -> None:
+        """Hook point for in-memory factor checkpointing at data-partition boundaries."""
+        self._factor_checkpoint = {
+            "a_sums": a_sums,
+            "g_sums": g_sums,
+            "n_rows_per_layer": n_rows_per_layer,
+        }
 
     # ------------------------------------------------------------------
     # Factor computation
@@ -268,8 +344,18 @@ class KroneckerFactors:
 
     def _compute_factors(self, train_dataset: Any) -> None:
         """Estimate A and G from *train_dataset* using hooks."""
+        for layer_partition in self._iter_layer_partitions():
+            self._compute_factors_for_layer_partition(train_dataset, layer_partition)
+
+    def _compute_factors_for_layer_partition(
+        self,
+        train_dataset: Any,
+        layer_infos: List[LayerInfo],
+    ) -> None:
+        """Estimate A and G for a specific partition of layers."""
         backend = self.backend
         model = self.model
+        device_reference = self._get_device_reference_tensor()
 
         def _to_int(value: Any) -> int:
             """Convert backend scalar values to Python int."""
@@ -288,22 +374,27 @@ class KroneckerFactors:
         activations: Dict[int, Any] = {}
         grad_outputs: Dict[int, Any] = {}
 
-        for info in self.layer_map.layers_info:
+        for info in layer_infos:
             idx = info.layer_idx
 
             def _fwd_hook(layer, inp, out, _idx=idx):
                 # inp is a tuple; take the first element (the actual input tensor)
                 a = inp if not isinstance(inp, tuple) else inp[0]
+                if self.offload_activations_to_cpu:
+                    a = backend.to_cpu(a)
                 activations[_idx] = a
 
             def _bwd_hook(layer, grad_inp, grad_out, _idx=idx):
                 g = grad_out if not isinstance(grad_out, tuple) else grad_out[0]
+                if self.offload_activations_to_cpu:
+                    g = backend.to_cpu(g)
                 grad_outputs[_idx] = g
 
             handles.append(backend.register_forward_hook(info.layer, _fwd_hook))
             handles.append(backend.register_backward_hook(info.layer, _bwd_hook))
 
         # --- Iterate over dataset -----------------------------------------
+        partition_batch_count = 0
         try:
             for batch in train_dataset:
                 if isinstance(batch, (list, tuple)):
@@ -321,16 +412,20 @@ class KroneckerFactors:
                 # We need gradients w.r.t. outputs to trigger backward hooks.
                 # Compute the per-sample loss and backprop.
                 self._forward_backward(model, model_inp, y_true, sample_weight,
-                                       activations, grad_outputs)
+                                       activations, grad_outputs, layer_infos=layer_infos)
 
                 # Accumulate factors
-                for info in self.layer_map.layers_info:
+                for info in layer_infos:
                     idx = info.layer_idx
                     if idx not in activations or idx not in grad_outputs:
                         continue
 
                     a = activations[idx]
                     g = grad_outputs[idx]
+
+                    if self.offload_activations_to_cpu:
+                        a = backend.to_device(a, reference=device_reference)
+                        g = backend.to_device(g, reference=device_reference)
 
                     a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
 
@@ -350,13 +445,21 @@ class KroneckerFactors:
                     else:
                         a_sums[idx] = a_sums[idx] + backend.matmul(backend.transpose(a_mat), a_mat)
                         g_sums[idx] = g_sums[idx] + backend.matmul(backend.transpose(g_mat), g_mat)
+
+                partition_batch_count += 1
+                if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
+                    self._checkpoint_factor_accumulators(a_sums, g_sums, n_rows_per_layer)
+                    partition_batch_count = 0
         finally:
             # --- Cleanup hooks --------------------------------------------
             for h in handles:
                 backend.remove_hook(h)
 
+        if self.data_partition_size is not None and partition_batch_count > 0:
+            self._checkpoint_factor_accumulators(a_sums, g_sums, n_rows_per_layer)
+
         # --- Normalize and store ------------------------------------------
-        for info in self.layer_map.layers_info:
+        for info in layer_infos:
             idx = info.layer_idx
             if idx not in a_sums:
                 continue
@@ -365,16 +468,9 @@ class KroneckerFactors:
             if n_rows <= 0:
                 continue
 
-            a_norm = backend.cast(
-                backend.constant(float(n_rows)),
-                backend.get_dtype(a_sums[idx])
-            )
-            g_norm = backend.cast(
-                backend.constant(float(n_rows)),
-                backend.get_dtype(g_sums[idx])
-            )
-            self.A[idx] = a_sums[idx] / a_norm
-            self.G[idx] = g_sums[idx] / g_norm
+            scale = float(n_rows)
+            self.A[idx] = self._symmetrize_matrix(a_sums[idx] / scale)
+            self.G[idx] = self._symmetrize_matrix(g_sums[idx] / scale)
 
     def _forward_backward(
         self,
@@ -384,6 +480,7 @@ class KroneckerFactors:
         sample_weight: Optional[Any],
         activations: Dict[int, Any],
         grad_outputs: Dict[int, Any],
+        layer_infos: Optional[List[LayerInfo]] = None,
     ) -> None:
         """Run forward + backward to populate hook-captured activations and gradients.
 
@@ -394,13 +491,114 @@ class KroneckerFactors:
         output gradients obtained from the tape.
         """
         backend = self.backend
+        active_layer_infos = self.layer_map.layers_info if layer_infos is None else layer_infos
 
         if backend.framework.value == "pytorch":
-            self._forward_backward_pytorch(model, model_inp, y_true, sample_weight)
+            self._forward_backward_pytorch(
+                model,
+                model_inp,
+                y_true,
+                sample_weight,
+                use_true_fisher=self.fisher_type == "true",
+            )
         else:
             self._forward_backward_tensorflow(
-                model, model_inp, y_true, sample_weight, grad_outputs
+                model,
+                model_inp,
+                y_true,
+                sample_weight,
+                grad_outputs,
+                active_layer_infos,
+                use_true_fisher=self.fisher_type == "true",
             )
+
+    def _sample_true_fisher_targets_pytorch(
+        self,
+        predictions: Any,
+        y_true: Any,
+        loss_function: Callable,
+    ) -> Any:
+        """Sample labels from the model predictive distribution (PyTorch)."""
+        import torch
+        import torch.nn as nn
+
+        detached_predictions = predictions.detach()
+
+        if isinstance(loss_function, nn.MSELoss):
+            noise = torch.randn_like(detached_predictions)
+            return detached_predictions + noise
+
+        if isinstance(loss_function, nn.CrossEntropyLoss):
+            logits = detached_predictions.movedim(1, -1)
+            n_classes = logits.shape[-1]
+            logits_flat = logits.reshape(-1, n_classes)
+            sampled_flat = torch.distributions.Categorical(logits=logits_flat).sample()
+            sampled = sampled_flat.reshape(logits.shape[:-1])
+            return sampled.to(dtype=torch.long)
+
+        if isinstance(loss_function, nn.BCEWithLogitsLoss):
+            probs = torch.sigmoid(detached_predictions)
+            return torch.bernoulli(probs).to(dtype=detached_predictions.dtype)
+
+        if isinstance(loss_function, nn.BCELoss):
+            probs = torch.clamp(detached_predictions, min=1e-7, max=1.0 - 1e-7)
+            return torch.bernoulli(probs).to(dtype=detached_predictions.dtype)
+
+        self._warn_true_fisher_fallback(loss_function)
+        return y_true
+
+    def _sample_true_fisher_targets_tensorflow(
+        self,
+        predictions: Any,
+        y_true: Any,
+        loss_function: Callable,
+    ) -> Any:
+        """Sample labels from the model predictive distribution (TensorFlow)."""
+        import tensorflow as tf
+
+        detached_predictions = tf.stop_gradient(predictions)
+
+        if isinstance(loss_function, tf.keras.losses.MeanSquaredError):
+            noise = tf.random.normal(tf.shape(detached_predictions), dtype=detached_predictions.dtype)
+            return detached_predictions + noise
+
+        if isinstance(loss_function, tf.keras.losses.CategoricalCrossentropy):
+            probs = detached_predictions
+            if getattr(loss_function, "from_logits", False):
+                probs = tf.nn.softmax(probs, axis=-1)
+            probs = probs / tf.reduce_sum(probs, axis=-1, keepdims=True)
+            probs = tf.clip_by_value(probs, 1e-12, 1.0)
+            n_classes = tf.shape(probs)[-1]
+            probs_flat = tf.reshape(probs, (-1, n_classes))
+            sampled_flat = tf.random.categorical(tf.math.log(probs_flat), 1)
+            sampled_flat = tf.squeeze(sampled_flat, axis=-1)
+            sampled = tf.reshape(sampled_flat, tf.shape(probs)[:-1])
+            return tf.one_hot(tf.cast(sampled, tf.int32), depth=n_classes, dtype=detached_predictions.dtype)
+
+        if isinstance(loss_function, tf.keras.losses.SparseCategoricalCrossentropy):
+            probs = detached_predictions
+            if getattr(loss_function, "from_logits", False):
+                probs = tf.nn.softmax(probs, axis=-1)
+            probs = probs / tf.reduce_sum(probs, axis=-1, keepdims=True)
+            probs = tf.clip_by_value(probs, 1e-12, 1.0)
+            n_classes = tf.shape(probs)[-1]
+            probs_flat = tf.reshape(probs, (-1, n_classes))
+            sampled_flat = tf.random.categorical(tf.math.log(probs_flat), 1)
+            sampled_flat = tf.squeeze(sampled_flat, axis=-1)
+            sampled = tf.reshape(sampled_flat, tf.shape(probs)[:-1])
+            target_dtype = y_true.dtype if y_true is not None else tf.int64
+            return tf.cast(sampled, target_dtype)
+
+        if isinstance(loss_function, tf.keras.losses.BinaryCrossentropy):
+            probs = detached_predictions
+            if getattr(loss_function, "from_logits", False):
+                probs = tf.math.sigmoid(probs)
+            probs = tf.clip_by_value(probs, 1e-7, 1.0 - 1e-7)
+            uniforms = tf.random.uniform(tf.shape(probs), dtype=probs.dtype)
+            return tf.cast(uniforms < probs, detached_predictions.dtype)
+
+        self._warn_true_fisher_fallback(loss_function)
+        return y_true
 
     def _forward_backward_pytorch(
         self,
@@ -408,12 +606,15 @@ class KroneckerFactors:
         model_inp: Any,
         y_true: Any,
         sample_weight: Optional[Any],
+        use_true_fisher: bool = False,
     ) -> None:
         """PyTorch: standard forward + backward; hooks fire automatically."""
-        import torch
-
         predictions = model.model(model_inp)
-        loss = model.loss_function(predictions, y_true)
+        targets = y_true
+        if use_true_fisher:
+            targets = self._sample_true_fisher_targets_pytorch(predictions, y_true, model.loss_function)
+
+        loss = model.loss_function(predictions, targets)
         if sample_weight is not None:
             loss = loss * sample_weight
         total_loss = loss.sum()
@@ -429,6 +630,8 @@ class KroneckerFactors:
         y_true: Any,
         sample_weight: Optional[Any],
         grad_outputs: Dict[int, Any],
+        layer_infos: List[LayerInfo],
+        use_true_fisher: bool = False,
     ) -> None:
         """TensorFlow: use GradientTape + per-layer gradient for backward hooks.
 
@@ -457,7 +660,7 @@ class KroneckerFactors:
             with tf.GradientTape(persistent=True) as tape:
                 # Install wrappers *inside* the tape context so `tape` is
                 # available to the closure for `tape.watch`.
-                for info in self.layer_map.layers_info:
+                for info in layer_infos:
                     idx = info.layer_idx
                     _orig = info.layer.call
                     original_calls[idx] = _orig
@@ -476,7 +679,15 @@ class KroneckerFactors:
                 # populate *activations*.
                 predictions = model.model(model_inp, training=False)
 
-                loss = model.loss_function(y_true, predictions)
+                targets = y_true
+                if use_true_fisher:
+                    targets = self._sample_true_fisher_targets_tensorflow(
+                        predictions,
+                        y_true,
+                        model.loss_function,
+                    )
+
+                loss = model.loss_function(targets, predictions)
                 if sample_weight is not None:
                     loss = loss * sample_weight
                 batch_size = tf.shape(predictions)[0]
@@ -486,7 +697,7 @@ class KroneckerFactors:
 
             # Compute gradient of total_loss w.r.t. each layer output and
             # manually invoke backward hooks.
-            for info in self.layer_map.layers_info:
+            for info in layer_infos:
                 idx = info.layer_idx
                 if idx not in layer_outputs:
                     continue
@@ -503,7 +714,7 @@ class KroneckerFactors:
             del tape
         finally:
             # Restore original calls to prevent stacking wrappers
-            for info in self.layer_map.layers_info:
+            for info in layer_infos:
                 idx = info.layer_idx
                 if idx in original_calls:
                     info.layer.call = original_calls[idx]
@@ -545,11 +756,7 @@ class KroneckerFactors:
 
         if info.has_bias:
             # Append column of ones for the bias term
-            batch_size = backend.get_batch_size(a)
-            ones = backend.cast(
-                backend.ones((batch_size, 1)),
-                backend.get_dtype(a)
-            )
+            ones = backend.ones_like(a[:, :1])
             a = backend.concat([a, ones], axis=1)
 
         return a, g
@@ -663,6 +870,15 @@ class EKFACFactors(KroneckerFactors):
     n_ekfac_samples
         Number of samples (batches are consumed until this many samples are seen)
         used for corrected eigenvalue estimation.  ``None`` means use all data.
+    fisher_type
+        Fisher variant used for curvature estimation: ``"empirical"`` (default)
+        or ``"true"``.
+    module_partition_size
+        Optional number of supported layers to process per pass.
+    offload_activations_to_cpu
+        Whether to offload hook-captured activations/gradients to CPU.
+    data_partition_size
+        Optional number of batches per data partition.
     """
 
     def __init__(
@@ -672,9 +888,22 @@ class EKFACFactors(KroneckerFactors):
         backend: BaseBackend,
         layer_map: LayerParameterMap,
         n_ekfac_samples: Optional[int] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
     ):
         # Compute base K-FAC factors (A, G)
-        super().__init__(model, train_dataset, backend, layer_map)
+        super().__init__(
+            model,
+            train_dataset,
+            backend,
+            layer_map,
+            fisher_type=fisher_type,
+            module_partition_size=module_partition_size,
+            offload_activations_to_cpu=offload_activations_to_cpu,
+            data_partition_size=data_partition_size,
+        )
 
         # Eigendecompose A and G
         self.Q_A: Dict[int, Any] = {}
@@ -685,19 +914,59 @@ class EKFACFactors(KroneckerFactors):
         for info in layer_map.layers_info:
             idx = info.layer_idx
             if idx in self.A:
-                lam_a, q_a = backend.eigh(self.A[idx])
-                lam_g, q_g = backend.eigh(self.G[idx])
+                a_factor = self._symmetrize_matrix(self.A[idx])
+                g_factor = self._symmetrize_matrix(self.G[idx])
+                self.A[idx] = a_factor
+                self.G[idx] = g_factor
+
+                a_dtype = backend.get_dtype(a_factor)
+                g_dtype = backend.get_dtype(g_factor)
+
+                # Get the eigenvalues/eigenvectors in float64 for stability, then cast back
+                lam_a, q_a = backend.eigh(backend.cast(a_factor, backend.float64_dtype()))
+                lam_g, q_g = backend.eigh(backend.cast(g_factor, backend.float64_dtype()))
                 self.Q_A[idx] = q_a
                 self.Lambda_A[idx] = lam_a
                 self.Q_G[idx] = q_g
                 self.Lambda_G[idx] = lam_g
 
+                self.Q_A[idx] = backend.cast(self.Q_A[idx], a_dtype)
+                self.Lambda_A[idx] = backend.cast(self.Lambda_A[idx], a_dtype)
+                self.Q_G[idx] = backend.cast(self.Q_G[idx], g_dtype)
+                self.Lambda_G[idx] = backend.cast(self.Lambda_G[idx], g_dtype)
+
         # Corrected eigenvalues
         self.Lambda_corrected: Dict[int, Any] = {}
+        self._corrected_checkpoint: Optional[Dict[str, Any]] = None
         self._estimate_corrected_eigenvalues(train_dataset, n_ekfac_samples)
 
     def _estimate_corrected_eigenvalues(
         self, train_dataset: Any, n_ekfac_samples: Optional[int]
+    ) -> None:
+        """Estimate corrected eigenvalues, optionally using module partitions."""
+        for layer_partition in self._iter_layer_partitions():
+            self._estimate_corrected_eigenvalues_for_layer_partition(
+                train_dataset,
+                n_ekfac_samples,
+                layer_partition,
+            )
+
+    def _checkpoint_corrected_accumulators(
+        self,
+        corrected_sums: Dict[int, Any],
+        n_rows_per_layer: Dict[int, int],
+    ) -> None:
+        """Hook point for in-memory EK-FAC checkpointing at data-partition boundaries."""
+        self._corrected_checkpoint = {
+            "corrected_sums": corrected_sums,
+            "n_rows_per_layer": n_rows_per_layer,
+        }
+
+    def _estimate_corrected_eigenvalues_for_layer_partition(
+        self,
+        train_dataset: Any,
+        n_ekfac_samples: Optional[int],
+        layer_infos: List[LayerInfo],
     ) -> None:
         """Estimate the corrected diagonal eigenvalues for EK-FAC.
 
@@ -711,7 +980,7 @@ class EKFACFactors(KroneckerFactors):
         """
         backend = self.backend
         model = self.model
-        layer_map = self.layer_map
+        device_reference = self._get_device_reference_tensor()
 
         def _to_int(value: Any) -> int:
             """Convert backend scalar values to Python int."""
@@ -730,20 +999,25 @@ class EKFACFactors(KroneckerFactors):
         activations: Dict[int, Any] = {}
         grad_outputs_captured: Dict[int, Any] = {}
 
-        for info in layer_map.layers_info:
+        for info in layer_infos:
             idx = info.layer_idx
 
             def _fwd_hook(layer, inp, out, _idx=idx):
                 a = inp if not isinstance(inp, tuple) else inp[0]
+                if self.offload_activations_to_cpu:
+                    a = backend.to_cpu(a)
                 activations[_idx] = a
 
             def _bwd_hook(layer, grad_inp, grad_out, _idx=idx):
                 g = grad_out if not isinstance(grad_out, tuple) else grad_out[0]
+                if self.offload_activations_to_cpu:
+                    g = backend.to_cpu(g)
                 grad_outputs_captured[_idx] = g
 
             handles.append(backend.register_forward_hook(info.layer, _fwd_hook))
             handles.append(backend.register_backward_hook(info.layer, _bwd_hook))
 
+        partition_batch_count = 0
         try:
             for batch in train_dataset:
                 if isinstance(batch, (list, tuple)):
@@ -760,10 +1034,11 @@ class EKFACFactors(KroneckerFactors):
 
                 self._forward_backward(
                     model, model_inp, y_true, sample_weight,
-                    activations, grad_outputs_captured
+                    activations, grad_outputs_captured,
+                    layer_infos=layer_infos,
                 )
 
-                for info in layer_map.layers_info:
+                for info in layer_infos:
                     idx = info.layer_idx
                     if idx not in activations or idx not in grad_outputs_captured:
                         continue
@@ -772,6 +1047,10 @@ class EKFACFactors(KroneckerFactors):
 
                     a = activations[idx]
                     g = grad_outputs_captured[idx]
+                    if self.offload_activations_to_cpu:
+                        a = backend.to_device(a, reference=device_reference)
+                        g = backend.to_device(g, reference=device_reference)
+
                     a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
 
                     a_rows = _to_int(backend.get_batch_size(a_mat))
@@ -796,17 +1075,19 @@ class EKFACFactors(KroneckerFactors):
                     g_sq = backend.multiply(g_rot, g_rot)  # (batch, n_out)
                     a_sq = backend.multiply(a_rot, a_rot)  # (batch, n_in_eff)
 
-                    # (batch, n_out, 1) * (batch, 1, n_in_eff) -> (batch, n_out, n_in_eff)
-                    g_sq_exp = backend.expand_dims(g_sq, axis=2)
-                    a_sq_exp = backend.expand_dims(a_sq, axis=1)
-                    batch_corrected = backend.multiply(g_sq_exp, a_sq_exp)
-
-                    # Sum across batch dimension
-                    batch_sum = backend.reduce_sum(batch_corrected, axis=0)
+                    # Equivalent to summing per-sample outer products, but avoids
+                    # materializing a large 3-D tensor of shape
+                    # (batch, n_out, n_in_eff).
+                    batch_sum = backend.matmul(backend.transpose(g_sq), a_sq)
                     if idx not in corrected_sums:
                         corrected_sums[idx] = batch_sum
                     else:
                         corrected_sums[idx] = corrected_sums[idx] + batch_sum
+
+                partition_batch_count += 1
+                if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
+                    self._checkpoint_corrected_accumulators(corrected_sums, n_rows_per_layer)
+                    partition_batch_count = 0
 
                 if n_ekfac_samples is not None and n_samples >= n_ekfac_samples:
                     break
@@ -814,8 +1095,11 @@ class EKFACFactors(KroneckerFactors):
             for h in handles:
                 backend.remove_hook(h)
 
+        if self.data_partition_size is not None and partition_batch_count > 0:
+            self._checkpoint_corrected_accumulators(corrected_sums, n_rows_per_layer)
+
         # Normalize and flatten
-        for info in layer_map.layers_info:
+        for info in layer_infos:
             idx = info.layer_idx
             if idx not in corrected_sums:
                 continue
@@ -824,10 +1108,6 @@ class EKFACFactors(KroneckerFactors):
             if n_rows <= 0:
                 continue
 
-            n_tensor = backend.cast(
-                backend.constant(float(n_rows)),
-                backend.get_dtype(corrected_sums[idx])
-            )
             # (n_out, n_in_eff) -> flatten to (n_out * n_in_eff,)
-            corrected = corrected_sums[idx] / n_tensor
+            corrected = corrected_sums[idx] / float(n_rows)
             self.Lambda_corrected[idx] = backend.reshape(corrected, (-1,))
