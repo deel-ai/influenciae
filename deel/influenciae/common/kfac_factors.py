@@ -18,8 +18,14 @@ each block as a Kronecker product of input activation covariance (A) and output 
 covariance (G).  EK-FAC refines this by eigendecomposing the factors and estimating
 corrected diagonal eigenvalues.
 """
+import json
+import os
+import shutil
+import tempfile
 import warnings
 from dataclasses import dataclass
+
+import numpy as np
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel
@@ -30,6 +36,205 @@ from ..types import Any, Callable, Dict, List, Optional, Tuple
 def _chunk_layer_infos(layer_infos: List["LayerInfo"], chunk_size: int) -> List[List["LayerInfo"]]:
     """Split layer infos into chunks of at most *chunk_size* entries."""
     return [layer_infos[i:i + chunk_size] for i in range(0, len(layer_infos), chunk_size)]
+
+
+_FACTOR_CHECKPOINT_SCHEMA_VERSION = 1
+_FACTOR_CHECKPOINT_METADATA_FILE = "metadata.json"
+
+
+def _shape_to_list(shape: Tuple[int, ...]) -> List[Optional[int]]:
+    """Convert tensor shape tuples to JSON-serializable lists."""
+    serialized_shape: List[Optional[int]] = []
+    for dim in shape:
+        if dim is None:
+            serialized_shape.append(None)
+        else:
+            serialized_shape.append(int(dim))
+    return serialized_shape
+
+
+def _serialize_layer_infos(layer_infos: List["LayerInfo"]) -> List[Dict[str, Any]]:
+    """Serialize layer signatures for checkpoint metadata."""
+    serialized = []
+    for info in layer_infos:
+        serialized.append(
+            {
+                "layer_name": str(info.layer_name),
+                "layer_idx": int(info.layer_idx),
+                "flat_start": int(info.flat_start),
+                "flat_end": int(info.flat_end),
+                "has_bias": bool(info.has_bias),
+                "weight_shape": _shape_to_list(info.weight_shape),
+            }
+        )
+    return serialized
+
+
+def _remove_path(path: str) -> None:
+    """Remove a file or directory if it exists."""
+    if not os.path.exists(path):
+        return
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+
+
+def _atomic_write_directory(target_dir: str, writer: Callable[[str], None]) -> None:
+    """Atomically write a checkpoint directory by replacing it at the end."""
+    parent_dir = os.path.dirname(target_dir) or "."
+    os.makedirs(parent_dir, exist_ok=True)
+    tmp_dir = tempfile.mkdtemp(prefix=".tmp_kfac_", dir=parent_dir)
+    try:
+        writer(tmp_dir)
+        _remove_path(target_dir)
+        os.replace(tmp_dir, target_dir)
+    except Exception:
+        _remove_path(tmp_dir)
+        raise
+
+
+def _read_checkpoint_metadata(path: str) -> Dict[str, Any]:
+    """Load and validate the checkpoint metadata JSON file."""
+    metadata_path = os.path.join(path, _FACTOR_CHECKPOINT_METADATA_FILE)
+    if not os.path.isfile(metadata_path):
+        raise FileNotFoundError(
+            f"No factor checkpoint metadata found at '{metadata_path}'."
+        )
+    with open(metadata_path, "r", encoding="utf-8") as file:
+        metadata = json.load(file)
+    if not isinstance(metadata, dict):
+        raise ValueError("Factor checkpoint metadata must be a JSON object.")
+    return metadata
+
+
+def _write_checkpoint_metadata(path: str, metadata: Dict[str, Any]) -> None:
+    """Write metadata.json for factor checkpoints."""
+    metadata_path = os.path.join(path, _FACTOR_CHECKPOINT_METADATA_FILE)
+    with open(metadata_path, "w", encoding="utf-8") as file:
+        json.dump(metadata, file, indent=2, sort_keys=True)
+
+
+def _make_tensor_metadata(file_name: str, array: np.ndarray) -> Dict[str, Any]:
+    """Create metadata entry for a saved tensor."""
+    return {
+        "file": file_name,
+        "shape": [int(dim) for dim in array.shape],
+        "dtype": str(array.dtype),
+    }
+
+
+def _validate_checkpoint_compatibility(
+    metadata: Dict[str, Any],
+    expected_method: str,
+    expected_fisher_type: str,
+    model: BaseInfluenceModel,
+    layer_map: "LayerParameterMap",
+    expected_n_ekfac_samples: Optional[int] = None,
+) -> None:
+    """Validate that checkpoint metadata matches the current model/configuration."""
+    schema_version = metadata.get("schema_version")
+    if schema_version != _FACTOR_CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported factor checkpoint schema version "
+            f"{schema_version!r}; expected {_FACTOR_CHECKPOINT_SCHEMA_VERSION}."
+        )
+
+    method = metadata.get("method")
+    if method != expected_method:
+        raise ValueError(
+            f"Factor checkpoint method mismatch: expected '{expected_method}', got '{method}'."
+        )
+
+    fisher_type = metadata.get("fisher_type")
+    if fisher_type != expected_fisher_type:
+        raise ValueError(
+            "Factor checkpoint fisher_type mismatch: "
+            f"expected '{expected_fisher_type}', got '{fisher_type}'."
+        )
+
+    checkpoint_nb_params = metadata.get("nb_params")
+    if checkpoint_nb_params != int(model.nb_params):
+        raise ValueError(
+            "Factor checkpoint nb_params mismatch: "
+            f"expected {int(model.nb_params)}, got {checkpoint_nb_params}."
+        )
+
+    if expected_method == "ekfac":
+        checkpoint_n_ekfac_samples = metadata.get("n_ekfac_samples")
+        if checkpoint_n_ekfac_samples != expected_n_ekfac_samples:
+            raise ValueError(
+                "EK-FAC checkpoint n_ekfac_samples mismatch: "
+                f"expected {expected_n_ekfac_samples}, got {checkpoint_n_ekfac_samples}."
+            )
+
+    checkpoint_layers = metadata.get("layers")
+    if not isinstance(checkpoint_layers, list):
+        raise ValueError("Factor checkpoint metadata must contain a 'layers' list.")
+
+    current_layers = _serialize_layer_infos(layer_map.layers_info)
+    if len(checkpoint_layers) != len(current_layers):
+        raise ValueError(
+            "Factor checkpoint layer count mismatch: "
+            f"expected {len(current_layers)}, got {len(checkpoint_layers)}."
+        )
+
+    layer_collection = metadata.get("layer_collection")
+    if layer_collection != layer_map.layer_collection:
+        raise ValueError(
+            "Factor checkpoint layer_collection mismatch: "
+            f"expected '{layer_map.layer_collection}', got '{layer_collection}'."
+        )
+
+    compared_fields = ("layer_name", "layer_idx", "flat_start", "flat_end", "has_bias", "weight_shape")
+    for layer_position, (saved_layer, current_layer) in enumerate(zip(checkpoint_layers, current_layers)):
+        if not isinstance(saved_layer, dict):
+            raise ValueError(
+                f"Invalid layer metadata at position {layer_position}: expected object."
+            )
+        for field in compared_fields:
+            if saved_layer.get(field) != current_layer[field]:
+                raise ValueError(
+                    "Factor checkpoint layer signature mismatch at position "
+                    f"{layer_position} for field '{field}': "
+                    f"expected {current_layer[field]!r}, got {saved_layer.get(field)!r}."
+                )
+
+
+def _load_tensor_from_checkpoint(
+    backend: BaseBackend,
+    checkpoint_dir: str,
+    layer_idx: int,
+    tensor_name: str,
+    tensor_metadata: Dict[str, Any],
+    reference_tensor: Optional[Any],
+) -> Any:
+    """Load a tensor from checkpoint metadata and move it to the target device."""
+    file_name = tensor_metadata.get("file")
+    if not isinstance(file_name, str):
+        raise ValueError(
+            f"Invalid checkpoint metadata for layer {layer_idx} tensor '{tensor_name}': missing file name."
+        )
+
+    tensor_path = os.path.join(checkpoint_dir, file_name)
+    if not os.path.isfile(tensor_path):
+        raise FileNotFoundError(
+            f"Missing checkpoint tensor file for layer {layer_idx} tensor '{tensor_name}': '{tensor_path}'."
+        )
+
+    tensor_array = np.load(tensor_path, allow_pickle=False)
+
+    expected_shape = tensor_metadata.get("shape")
+    if expected_shape is not None:
+        expected_shape_tuple = tuple(int(dim) for dim in expected_shape)
+        if tuple(tensor_array.shape) != expected_shape_tuple:
+            raise ValueError(
+                f"Checkpoint tensor shape mismatch for layer {layer_idx} tensor '{tensor_name}': "
+                f"expected {expected_shape_tuple}, got {tuple(tensor_array.shape)}."
+            )
+
+    tensor = backend.convert_to_tensor(tensor_array)
+    return backend.to_device(tensor, reference=reference_tensor)
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +527,119 @@ class KroneckerFactors:
         self.G: Dict[int, Any] = {}  # layer_idx -> G factor
 
         self._compute_factors(train_dataset)
+
+    @staticmethod
+    def checkpoint_exists(path: str) -> bool:
+        """Return whether *path* points to a factor checkpoint directory."""
+        metadata_path = os.path.join(path, _FACTOR_CHECKPOINT_METADATA_FILE)
+        return os.path.isfile(metadata_path)
+
+    def _build_checkpoint_metadata(self, method: str) -> Dict[str, Any]:
+        """Build common checkpoint metadata payload."""
+        return {
+            "schema_version": _FACTOR_CHECKPOINT_SCHEMA_VERSION,
+            "method": method,
+            "fisher_type": self.fisher_type,
+            "nb_params": int(self.model.nb_params),
+            "layer_collection": self.layer_map.layer_collection,
+            "module_partition_size": self.module_partition_size,
+            "offload_activations_to_cpu": bool(self.offload_activations_to_cpu),
+            "data_partition_size": self.data_partition_size,
+            "true_fisher_fallback_used": bool(self._true_fisher_warning_emitted),
+            "layers": _serialize_layer_infos(self.layer_map.layers_info),
+        }
+
+    def save_to_dir(self, path: str) -> None:
+        """Serialize computed K-FAC factors to *path*.
+
+        The checkpoint stores metadata and per-layer factor matrices.
+        """
+
+        def _writer(tmp_dir: str) -> None:
+            metadata = self._build_checkpoint_metadata(method="kfac")
+            for layer_entry in metadata["layers"]:
+                layer_idx = int(layer_entry["layer_idx"])
+                if layer_idx not in self.A or layer_idx not in self.G:
+                    continue
+
+                tensor_entries = {}
+                for tensor_name, tensor in (("A", self.A[layer_idx]), ("G", self.G[layer_idx])):
+                    tensor_array = np.asarray(self.backend.to_numpy(tensor))
+                    file_name = f"{tensor_name}_layer_{layer_idx}.npy"
+                    np.save(os.path.join(tmp_dir, file_name), tensor_array, allow_pickle=False)
+                    tensor_entries[tensor_name] = _make_tensor_metadata(file_name, tensor_array)
+
+                layer_entry["tensors"] = tensor_entries
+
+            _write_checkpoint_metadata(tmp_dir, metadata)
+
+        _atomic_write_directory(path, _writer)
+
+    @classmethod
+    def load_from_dir(
+        cls,
+        model: BaseInfluenceModel,
+        backend: BaseBackend,
+        layer_map: LayerParameterMap,
+        path: str,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
+    ) -> "KroneckerFactors":
+        """Load precomputed K-FAC factors from *path* without recomputing."""
+        metadata = _read_checkpoint_metadata(path)
+        _validate_checkpoint_compatibility(
+            metadata=metadata,
+            expected_method="kfac",
+            expected_fisher_type=fisher_type,
+            model=model,
+            layer_map=layer_map,
+        )
+
+        instance = cls.__new__(cls)
+        instance.backend = backend
+        instance.model = model
+        instance.layer_map = layer_map
+        instance.fisher_type = fisher_type
+        instance.module_partition_size = module_partition_size
+        instance.offload_activations_to_cpu = offload_activations_to_cpu
+        instance.data_partition_size = data_partition_size
+        instance._true_fisher_warning_emitted = bool(metadata.get("true_fisher_fallback_used", False))
+        instance._factor_checkpoint = None
+        instance.A = {}
+        instance.G = {}
+
+        reference_tensor = instance._get_device_reference_tensor()
+        for layer_entry in metadata["layers"]:
+            tensors = layer_entry.get("tensors")
+            if not isinstance(tensors, dict):
+                continue
+
+            layer_idx = int(layer_entry["layer_idx"])
+            if "A" not in tensors or "G" not in tensors:
+                raise ValueError(
+                    f"Invalid checkpoint metadata for layer {layer_idx}: both 'A' and 'G' tensors are required."
+                )
+
+            instance.A[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "A",
+                tensors["A"],
+                reference_tensor,
+            )
+            instance.G[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "G",
+                tensors["G"],
+                reference_tensor,
+            )
+
+        return instance
 
     def _warn_true_fisher_fallback(self, loss_function: Callable) -> None:
         """Warn once when true Fisher sampling is not supported for a loss."""
@@ -965,7 +1283,177 @@ class EKFACFactors(KroneckerFactors):
         # Corrected eigenvalues
         self.Lambda_corrected: Dict[int, Any] = {}
         self._corrected_checkpoint: Optional[Dict[str, Any]] = None
+        self.n_ekfac_samples = n_ekfac_samples
         self._estimate_corrected_eigenvalues(train_dataset, n_ekfac_samples)
+
+    def save_to_dir(self, path: str) -> None:
+        """Serialize computed EK-FAC factors to *path*."""
+
+        def _writer(tmp_dir: str) -> None:
+            metadata = self._build_checkpoint_metadata(method="ekfac")
+            metadata["n_ekfac_samples"] = self.n_ekfac_samples
+
+            for layer_entry in metadata["layers"]:
+                layer_idx = int(layer_entry["layer_idx"])
+                if layer_idx not in self.A or layer_idx not in self.G:
+                    continue
+                if layer_idx not in self.Q_A or layer_idx not in self.Q_G:
+                    continue
+                if layer_idx not in self.Lambda_A or layer_idx not in self.Lambda_G:
+                    continue
+                if layer_idx not in self.Lambda_corrected:
+                    continue
+
+                tensors = {
+                    "A": self.A[layer_idx],
+                    "G": self.G[layer_idx],
+                    "Q_A": self.Q_A[layer_idx],
+                    "Q_G": self.Q_G[layer_idx],
+                    "Lambda_A": self.Lambda_A[layer_idx],
+                    "Lambda_G": self.Lambda_G[layer_idx],
+                    "Lambda_corrected": self.Lambda_corrected[layer_idx],
+                }
+
+                tensor_entries = {}
+                for tensor_name, tensor in tensors.items():
+                    tensor_array = np.asarray(self.backend.to_numpy(tensor))
+                    file_name = f"{tensor_name}_layer_{layer_idx}.npy"
+                    np.save(os.path.join(tmp_dir, file_name), tensor_array, allow_pickle=False)
+                    tensor_entries[tensor_name] = _make_tensor_metadata(file_name, tensor_array)
+
+                layer_entry["tensors"] = tensor_entries
+
+            _write_checkpoint_metadata(tmp_dir, metadata)
+
+        _atomic_write_directory(path, _writer)
+
+    @classmethod
+    def load_from_dir(
+        cls,
+        model: BaseInfluenceModel,
+        backend: BaseBackend,
+        layer_map: LayerParameterMap,
+        path: str,
+        n_ekfac_samples: Optional[int] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
+    ) -> "EKFACFactors":
+        """Load precomputed EK-FAC factors from *path* without recomputing."""
+        metadata = _read_checkpoint_metadata(path)
+        _validate_checkpoint_compatibility(
+            metadata=metadata,
+            expected_method="ekfac",
+            expected_fisher_type=fisher_type,
+            model=model,
+            layer_map=layer_map,
+            expected_n_ekfac_samples=n_ekfac_samples,
+        )
+
+        instance = cls.__new__(cls)
+        instance.backend = backend
+        instance.model = model
+        instance.layer_map = layer_map
+        instance.fisher_type = fisher_type
+        instance.module_partition_size = module_partition_size
+        instance.offload_activations_to_cpu = offload_activations_to_cpu
+        instance.data_partition_size = data_partition_size
+        instance._true_fisher_warning_emitted = bool(metadata.get("true_fisher_fallback_used", False))
+        instance._factor_checkpoint = None
+
+        instance.A = {}
+        instance.G = {}
+        instance.Q_A = {}
+        instance.Lambda_A = {}
+        instance.Q_G = {}
+        instance.Lambda_G = {}
+        instance.Lambda_corrected = {}
+        instance._corrected_checkpoint = None
+        instance.n_ekfac_samples = n_ekfac_samples
+
+        reference_tensor = instance._get_device_reference_tensor()
+        required_tensor_names = (
+            "A",
+            "G",
+            "Q_A",
+            "Q_G",
+            "Lambda_A",
+            "Lambda_G",
+            "Lambda_corrected",
+        )
+
+        for layer_entry in metadata["layers"]:
+            tensors = layer_entry.get("tensors")
+            if not isinstance(tensors, dict):
+                continue
+
+            layer_idx = int(layer_entry["layer_idx"])
+            missing_names = [name for name in required_tensor_names if name not in tensors]
+            if missing_names:
+                raise ValueError(
+                    f"Invalid EK-FAC checkpoint metadata for layer {layer_idx}: "
+                    f"missing tensors {missing_names}."
+                )
+
+            instance.A[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "A",
+                tensors["A"],
+                reference_tensor,
+            )
+            instance.G[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "G",
+                tensors["G"],
+                reference_tensor,
+            )
+            instance.Q_A[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "Q_A",
+                tensors["Q_A"],
+                reference_tensor,
+            )
+            instance.Q_G[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "Q_G",
+                tensors["Q_G"],
+                reference_tensor,
+            )
+            instance.Lambda_A[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "Lambda_A",
+                tensors["Lambda_A"],
+                reference_tensor,
+            )
+            instance.Lambda_G[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "Lambda_G",
+                tensors["Lambda_G"],
+                reference_tensor,
+            )
+            instance.Lambda_corrected[layer_idx] = _load_tensor_from_checkpoint(
+                backend,
+                path,
+                layer_idx,
+                "Lambda_corrected",
+                tensors["Lambda_corrected"],
+                reference_tensor,
+            )
+
+        return instance
 
     def _estimate_corrected_eigenvalues(
         self, train_dataset: Any, n_ekfac_samples: Optional[int]
