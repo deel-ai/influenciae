@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP
+from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, KfacIHVP, KfacIHVPFactory
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
 from ..utils_test import (
@@ -104,6 +104,29 @@ def test_compute_influence_vector():
 
             gt = normalize_columns(gt_inf_vec) if normalize else gt_inf_vec
             assert_close(inf_vectors, gt.T, epsilon=tolerance)
+
+
+def test_first_order_accepts_ihvp_factory(tmp_path):
+    """FirstOrderInfluenceCalculator should accept IHVP factories directly."""
+    set_seed(0)
+    model = make_linear_model()
+    loss_fn = nn.MSELoss(reduction="none")
+
+    inputs_train, targets_train = build_regression_tensors(20, seed=11)
+    train_loader = build_loader(inputs_train, targets_train, batch_size=5)
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_fn)
+    checkpoint_path = str(tmp_path / "kfac_first_order")
+    factory = KfacIHVPFactory(damping=1e-3, factors_path=checkpoint_path)
+
+    influence_calculator = FirstOrderInfluenceCalculator(
+        influence_model,
+        train_loader,
+        ihvp_calculator=factory,
+    )
+
+    assert isinstance(influence_calculator.ihvp_calculator, KfacIHVP)
+    assert (tmp_path / "kfac_first_order" / "metadata.json").exists()
 
 
 def test_compute_influence_vector_dataset_and_save_load():

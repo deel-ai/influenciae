@@ -15,7 +15,13 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import Reduction, MeanSquaredError, CategoricalCrossentropy
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, CACHE
+from deel.influenciae.common import (
+    ExactIHVP,
+    ConjugateGradientDescentIHVP,
+    KfacIHVP,
+    KfacIHVPFactory,
+    CACHE,
+)
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth, set_seed_tf
@@ -169,6 +175,29 @@ def test_compute_influence_vector_dataset():
     assert almost_equal(inf_vect, tf.transpose(gt_inf_vec), epsilon=1E-3)
 
     shutil.rmtree("test_temp/")
+
+
+def test_first_order_accepts_ihvp_factory(tmp_path):
+    """FirstOrderInfluenceCalculator should accept IHVP factories directly."""
+    set_seed()
+    model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
+
+    inputs = tf.random.normal((20, 1, 3))
+    targets = tf.random.normal((20, 1))
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(5)
+
+    checkpoint_path = str(tmp_path / "kfac_first_order")
+    factory = KfacIHVPFactory(damping=1e-3, factors_path=checkpoint_path)
+
+    influence_calculator = FirstOrderInfluenceCalculator(
+        influence_model,
+        train_set,
+        ihvp_calculator=factory,
+    )
+
+    assert isinstance(influence_calculator.ihvp_calculator, KfacIHVP)
+    assert (tmp_path / "kfac_first_order" / "metadata.json").exists()
 
 
 def test_preprocess_sample_to_evaluate():
