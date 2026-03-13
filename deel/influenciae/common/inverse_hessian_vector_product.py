@@ -857,6 +857,9 @@ class KfacIHVP(InverseHessianVectorProduct):
         between capture and factor accumulation.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    layer_collection
+        Layer traversal mode used by K-FAC mapping: ``"top_level"``
+        (default) or ``"recursive"``.
     """
 
     def __init__(
@@ -869,13 +872,19 @@ class KfacIHVP(InverseHessianVectorProduct):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        layer_collection: str = "top_level",
     ):
         super().__init__(model, train_dataset)
         self.damping = damping
         self.fisher_type = fisher_type
 
         # Build layer map and compute factors
-        self.layer_map = LayerParameterMap(model, self.backend, target_layers)
+        self.layer_map = LayerParameterMap(
+            model,
+            self.backend,
+            target_layers,
+            layer_collection=layer_collection,
+        )
         self.factors = KroneckerFactors(
             model,
             train_dataset,
@@ -1090,6 +1099,9 @@ class EkfacIHVP(InverseHessianVectorProduct):
         between capture and factor accumulation.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    layer_collection
+        Layer traversal mode used by EK-FAC mapping: ``"top_level"``
+        (default) or ``"recursive"``.
     """
 
     def __init__(
@@ -1103,12 +1115,18 @@ class EkfacIHVP(InverseHessianVectorProduct):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        layer_collection: str = "top_level",
     ):
         super().__init__(model, train_dataset)
         self.damping = damping
         self.fisher_type = fisher_type
 
-        self.layer_map = LayerParameterMap(model, self.backend, target_layers)
+        self.layer_map = LayerParameterMap(
+            model,
+            self.backend,
+            target_layers,
+            layer_collection=layer_collection,
+        )
         self.factors = EKFACFactors(
             model, train_dataset, self.backend, self.layer_map,
             n_ekfac_samples=n_ekfac_samples,

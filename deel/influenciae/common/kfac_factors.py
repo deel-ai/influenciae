@@ -44,8 +44,11 @@ class LayerInfo:
     ----------
     layer
         The framework-specific layer object.
+    layer_name
+        Layer/module name as reported by backend traversal.
     layer_idx
-        Index of the layer in the model's layer list.
+        Index of the layer in the selected collection order
+        (top-level or recursive).
     weight_shape
         Shape of the weight tensor as reported by the framework.  In PyTorch
         this is ``(n_out, n_in)`` for Linear and ``(c_out, c_in, kH, kW)``
@@ -61,6 +64,7 @@ class LayerInfo:
         End index (exclusive) of this layer's parameters in the flat gradient vector.
     """
     layer: Any
+    layer_name: str
     layer_idx: int
     weight_shape: Tuple[int, ...]
     has_bias: bool
@@ -84,18 +88,38 @@ class LayerParameterMap:
         The backend abstraction.
     target_layers
         If provided, restrict K-FAC to these layer indices only.
+    layer_collection
+        Layer traversal mode. ``"top_level"`` keeps previous behavior;
+        ``"recursive"`` traverses nested submodules/layers.
     """
 
     def __init__(
         self,
         model: BaseInfluenceModel,
         backend: BaseBackend,
-        target_layers: Optional[List[int]] = None
+        target_layers: Optional[List[int]] = None,
+        layer_collection: str = "top_level",
     ):
         self.backend = backend
         self.layers_info: List[LayerInfo] = []
+        if layer_collection not in ("top_level", "recursive"):
+            raise ValueError("layer_collection must be either 'top_level' or 'recursive'.")
+        self.layer_collection = layer_collection
 
-        all_layers = backend.get_layers(model.model)
+        all_named_layers = backend.get_named_layers(
+            model.model,
+            recursive=layer_collection == "recursive",
+        )
+        unique_named_layers: List[Tuple[str, Any]] = []
+        seen_layer_ids = set()
+        for layer_name, layer in all_named_layers:
+            layer_id = id(layer)
+            if layer_id in seen_layer_ids:
+                continue
+            seen_layer_ids.add(layer_id)
+            unique_named_layers.append((layer_name, layer))
+        all_named_layers = unique_named_layers
+
         weights = model.weights
 
         def _iter_weight_keys(weight: Any) -> List[Tuple[str, Any]]:
@@ -165,15 +189,17 @@ class LayerParameterMap:
                     weight_key_to_flat[key] = flat_entry
             offset += size
 
-        for layer_idx, layer in enumerate(all_layers):
+        for layer_idx, (layer_name, layer) in enumerate(all_named_layers):
             if target_layers is not None and layer_idx not in target_layers:
                 continue
+
+            normalized_layer_name = str(layer_name) if layer_name else f"<layer_{layer_idx}>"
 
             if not (backend.is_linear_layer(layer) or backend.is_conv2d_layer(layer)):
                 if target_layers is not None:
                     warnings.warn(
-                        f"Layer {layer_idx} ({type(layer).__name__}) is not a Linear/Dense "
-                        f"or Conv2d layer and will be skipped by K-FAC.",
+                        f"Layer {layer_idx} ('{normalized_layer_name}', {type(layer).__name__}) "
+                        f"is not a Linear/Dense or Conv2d layer and will be skipped by K-FAC.",
                         stacklevel=2,
                     )
                 continue
@@ -205,6 +231,7 @@ class LayerParameterMap:
 
             self.layers_info.append(LayerInfo(
                 layer=layer,
+                layer_name=normalized_layer_name,
                 layer_idx=layer_idx,
                 weight_shape=weight_shape,
                 has_bias=has_bias,

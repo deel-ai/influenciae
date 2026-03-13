@@ -220,6 +220,9 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         Whether to offload hook-captured activations/gradients to CPU.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    layer_collection
+        Layer traversal mode for K-FAC mapping: ``"top_level"`` (default)
+        or ``"recursive"``.
     """
     def __init__(
         self,
@@ -229,6 +232,7 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        layer_collection: str = "top_level",
     ):
         self.damping = damping
         self.target_layers = target_layers
@@ -236,6 +240,7 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         self.module_partition_size = module_partition_size
         self.offload_activations_to_cpu = offload_activations_to_cpu
         self.data_partition_size = data_partition_size
+        self.layer_collection = layer_collection
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -259,6 +264,7 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
             dataset,
             damping=self.damping,
             target_layers=self.target_layers,
+            layer_collection=self.layer_collection,
             fisher_type=self.fisher_type,
             module_partition_size=self.module_partition_size,
             offload_activations_to_cpu=self.offload_activations_to_cpu,
@@ -288,6 +294,9 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         Whether to offload hook-captured activations/gradients to CPU.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    layer_collection
+        Layer traversal mode for EK-FAC mapping: ``"top_level"`` (default)
+        or ``"recursive"``.
     """
     def __init__(
         self,
@@ -298,6 +307,7 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        layer_collection: str = "top_level",
     ):
         self.damping = damping
         self.target_layers = target_layers
@@ -306,6 +316,7 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         self.module_partition_size = module_partition_size
         self.offload_activations_to_cpu = offload_activations_to_cpu
         self.data_partition_size = data_partition_size
+        self.layer_collection = layer_collection
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -329,6 +340,7 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             dataset,
             damping=self.damping,
             target_layers=self.target_layers,
+            layer_collection=self.layer_collection,
             n_ekfac_samples=self.n_ekfac_samples,
             fisher_type=self.fisher_type,
             module_partition_size=self.module_partition_size,
