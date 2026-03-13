@@ -7,8 +7,8 @@
 📰 [Paper Groups](https://arxiv.org/abs/1905.13289) |
 📰 [Paper RelatIF](https://arxiv.org/abs/2003.11630) |
 
-This method is an implementation of the famous technique introduced by Koh & Liang in 2017. 
-In essence, by performing a first-order taylor approximation, it proposes that the influence 
+This method is an implementation of the famous technique introduced by Koh & Liang in 2017.
+In essence, by performing a first-order taylor approximation, it proposes that the influence
 function of a neural network model can be computed as follows:
 
 $$ \mathcal{I} (z) \approx H_{\hat{\theta}}^{-1} \, \nabla_\theta \ell (\hat{\theta}, z), $$
@@ -25,6 +25,24 @@ training points (or groups) on other test points (or groups).
 
 It also implements the RelatIF technique, which can be computed by setting the `normalize` attribute
 to `True`.
+
+## Reusing K-FAC / EK-FAC factors
+
+You can cache K-FAC/EK-FAC factors to disk and reuse them across runs by passing an IHVP factory:
+
+```python
+from deel.influenciae.common import InfluenceModel, KfacIHVPFactory
+from deel.influenciae.influence import FirstOrderInfluenceCalculator
+
+influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_fn)
+
+# First run: computes factors and writes them to disk.
+kfac_factory = KfacIHVPFactory(factors_path="./artifacts/kfac_factors")
+calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator=kfac_factory)
+
+# Later runs: loads factors from the same path instead of recomputing.
+calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset, ihvp_calculator=kfac_factory)
+```
 
 ## Notebooks
 
