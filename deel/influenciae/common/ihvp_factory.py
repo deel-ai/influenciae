@@ -298,6 +298,8 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
             keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
             factors_path=self.factors_path,
             overwrite_factors=self.overwrite_factors,
+            factors_path=self.factors_path,
+            overwrite_factors=self.overwrite_factors,
         )
 
 
@@ -401,6 +403,8 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             accumulator_offload_mode=self.accumulator_offload_mode,
             accumulator_offload_dir=self.accumulator_offload_dir,
             keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
+            factors_path=self.factors_path,
+            overwrite_factors=self.overwrite_factors,
             factors_path=self.factors_path,
             overwrite_factors=self.overwrite_factors,
         )
