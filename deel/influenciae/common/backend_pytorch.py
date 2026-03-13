@@ -417,6 +417,19 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         children = list(model.children())
         return children if children else [model]
 
+    def get_named_layers(self, model: nn.Module, recursive: bool = False) -> List[Tuple[str, nn.Module]]:
+        """Get named top-level or recursively discovered PyTorch modules."""
+        if recursive:
+            named_modules = [(name, module) for name, module in model.named_modules() if name]
+            if named_modules:
+                return named_modules
+            return [("", model)]
+
+        named_children = list(model.named_children())
+        if named_children:
+            return named_children
+        return [("", model)]
+
     def forward(self, model: nn.Module, inputs: torch.Tensor) -> torch.Tensor:
         """Run forward pass on a model."""
         return model(inputs)

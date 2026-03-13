@@ -6,7 +6,7 @@
 TensorFlow backend implementation.
 """
 import os
-from typing import Any, List, Tuple, Callable, Optional, Sequence
+from typing import Any, List, Tuple, Callable, Optional, Sequence, Iterable, cast
 from xml.dom import NotFoundErr
 
 import numpy as np
@@ -366,6 +366,106 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def get_layers(self, model: tf.keras.Model) -> List[tf.keras.layers.Layer]:
         """Get all layers from a model."""
         return model.layers
+
+    def get_named_layers(
+        self,
+        model: tf.keras.Model,
+        recursive: bool = False,
+    ) -> List[Tuple[str, tf.keras.layers.Layer]]:
+        """Get named top-level or recursively discovered Keras layers."""
+        if not recursive:
+            layers = model.layers
+            return [(str(layer.name), layer) for layer in layers]
+
+        def _collect_from_layers_attr(root: tf.keras.layers.Layer) -> List[Tuple[str, tf.keras.layers.Layer]]:
+            """Recursively collect layers through the public ``layers`` attribute."""
+            collected: List[Tuple[str, tf.keras.layers.Layer]] = []
+            visited_containers = set()
+
+            def _walk(container: tf.keras.layers.Layer, prefix: str) -> None:
+                container_id = id(container)
+                if container_id in visited_containers:
+                    return
+                visited_containers.add(container_id)
+
+                children = list(getattr(container, "layers", []) or [])
+                for child in children:
+                    child_name = str(getattr(child, "name", f"layer_{len(collected)}"))
+                    full_name = f"{prefix}.{child_name}" if prefix else child_name
+                    collected.append((full_name, child))
+                    _walk(child, full_name)
+
+            _walk(root, "")
+            return collected
+
+        layers_attr_named = _collect_from_layers_attr(model)
+        layer_path_by_id = {id(layer): name for name, layer in layers_attr_named}
+
+        def _collect_from_flatten_layers() -> List[Tuple[str, tf.keras.layers.Layer]]:
+            """Collect recursively via Keras internals when available."""
+            flatten_layers = getattr(model, "_flatten_layers", None)
+            if not callable(flatten_layers):
+                return []
+
+            flattened_layers = None
+            for call_kwargs in (
+                {"include_self": False, "recursive": True},
+                {"include_self": False},
+                {},
+            ):
+                try:
+                    flattened_candidate = flatten_layers(**call_kwargs)
+                    if not hasattr(flattened_candidate, "__iter__"):
+                        continue
+                    flattened_layers = list(cast(Iterable[Any], flattened_candidate))
+                    break
+                except TypeError:
+                    continue
+
+            if flattened_layers is None:
+                return []
+
+            collected: List[Tuple[str, tf.keras.layers.Layer]] = []
+            for layer in flattened_layers:
+                if not isinstance(layer, tf.keras.layers.Layer) or layer is model:
+                    continue
+                layer_name = layer_path_by_id.get(id(layer), str(getattr(layer, "name", f"layer_{len(collected)}")))
+                collected.append((layer_name, layer))
+            return collected
+
+        def _collect_from_submodules() -> List[Tuple[str, tf.keras.layers.Layer]]:
+            """Collect recursively via ``submodules`` when available."""
+            submodules = list(getattr(model, "submodules", []) or [])
+            collected: List[Tuple[str, tf.keras.layers.Layer]] = []
+            for layer in submodules:
+                if not isinstance(layer, tf.keras.layers.Layer) or layer is model:
+                    continue
+                layer_name = layer_path_by_id.get(id(layer), str(getattr(layer, "name", f"layer_{len(collected)}")))
+                collected.append((layer_name, layer))
+            return collected
+
+        named_layers: List[Tuple[str, tf.keras.layers.Layer]] = []
+        seen_layer_ids = set()
+        for source in (
+            _collect_from_flatten_layers(),
+            _collect_from_submodules(),
+            layers_attr_named,
+        ):
+            for layer_name, layer in source:
+                layer_id = id(layer)
+                if layer_id in seen_layer_ids:
+                    continue
+                seen_layer_ids.add(layer_id)
+                normalized_name = str(layer_name) if layer_name else str(getattr(layer, "name", ""))
+                if not normalized_name:
+                    normalized_name = f"layer_{len(named_layers)}"
+                named_layers.append((normalized_name, layer))
+
+        if named_layers:
+            return named_layers
+
+        layers = model.layers
+        return [(str(layer.name), layer) for layer in layers]
 
     def forward(self, model: tf.keras.Model, inputs: tf.Tensor) -> tf.Tensor:
         """Run forward pass on a model."""

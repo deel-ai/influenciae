@@ -502,6 +502,20 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """Get all layers from a model."""
 
     @abstractmethod
+    def get_named_layers(self, model: Any, recursive: bool = False) -> List[Tuple[str, Any]]:
+        """Get named layers from a model.
+
+        Parameters
+        ----------
+        model
+            The model from which layers are extracted.
+        recursive
+            If ``True``, return recursively discovered submodules/layers,
+            excluding the model/container root itself when possible.
+            If ``False``, return only top-level layers.
+        """
+
+    @abstractmethod
     def forward(self, model: Any, inputs: Any) -> Any:
         """Run forward pass on a model."""
 
