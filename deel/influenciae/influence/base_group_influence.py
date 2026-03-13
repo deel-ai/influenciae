@@ -18,7 +18,7 @@ https://arxiv.org/abs/1911.00418
 from abc import abstractmethod
 
 from ..common import InfluenceModel
-from ..common import InverseHessianVectorProduct, IHVPCalculator
+from ..common import InverseHessianVectorProduct, InverseHessianVectorProductFactory, IHVPCalculator
 from ..common import BaseBackend
 
 from ..types import Optional, Union, Any, DatasetLike
@@ -44,7 +44,8 @@ class BaseGroupInfluenceCalculator:
         inverse-hessian-vector product.
     ihvp_calculator
         Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
-        object or an InverseHessianVectorProduct object.
+        object, an InverseHessianVectorProductFactory object, or an
+        InverseHessianVectorProduct object.
     n_samples_for_hessian
         An integer indicating the amount of samples to take from the provided train dataset.
     shuffle_buffer_size
@@ -65,7 +66,12 @@ class BaseGroupInfluenceCalculator:
             self,
             model: InfluenceModel,
             dataset: DatasetLike,
-            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
+            ihvp_calculator: Union[
+                str,
+                InverseHessianVectorProduct,
+                InverseHessianVectorProductFactory,
+                IHVPCalculator,
+            ] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
     ):
@@ -92,6 +98,8 @@ class BaseGroupInfluenceCalculator:
             self.ihvp_calculator = self._build_ihvp(IHVPCalculator.from_string(ihvp_calculator))
         elif isinstance(ihvp_calculator, IHVPCalculator):
             self.ihvp_calculator = self._build_ihvp(ihvp_calculator)
+        elif isinstance(ihvp_calculator, InverseHessianVectorProductFactory):
+            self.ihvp_calculator = ihvp_calculator.build(self.model, self.train_set)
         elif isinstance(ihvp_calculator, InverseHessianVectorProduct):
             self.ihvp_calculator = ihvp_calculator
         else:

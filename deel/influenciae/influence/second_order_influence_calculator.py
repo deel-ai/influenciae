@@ -15,7 +15,7 @@ the influence for a large number of weights.
 from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from ..common import InfluenceModel
-from ..common import InverseHessianVectorProduct, IHVPCalculator
+from ..common import InverseHessianVectorProduct, InverseHessianVectorProductFactory, IHVPCalculator
 
 from ..types import Optional, Union, Any, DatasetLike
 
@@ -45,8 +45,9 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         A batched dataset containing the training dataset over which we will estimate the
         inverse-hessian-vector product.
     ihvp_calculator
-        Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
-        object or an InverseHessianVectorProduct object.
+        Either a string containing the IHVP method ('exact' or 'cgd'), an
+        IHVPCalculator object, an InverseHessianVectorProductFactory object,
+        or an InverseHessianVectorProduct object.
     n_samples_for_hessian
         An integer indicating the amount of samples to take from the provided train dataset.
     shuffle_buffer_size
@@ -57,7 +58,12 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             self,
             model: InfluenceModel,
             dataset: DatasetLike,
-            ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
+            ihvp_calculator: Union[
+                str,
+                InverseHessianVectorProduct,
+                InverseHessianVectorProductFactory,
+                IHVPCalculator,
+            ] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
     ):
