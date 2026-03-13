@@ -10,6 +10,7 @@ functions.
 from abc import ABC, abstractmethod
 from enum import Enum
 from argparse import ArgumentError
+from typing import cast
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
@@ -860,6 +861,11 @@ class KfacIHVP(InverseHessianVectorProduct):
     layer_collection
         Layer traversal mode used by K-FAC mapping: ``"top_level"``
         (default) or ``"recursive"``.
+    factors_path
+        Optional directory path used to cache/load computed factors.
+    overwrite_factors
+        If ``True``, ignore any existing checkpoint at ``factors_path`` and
+        recompute factors before saving.
     """
 
     def __init__(
@@ -873,10 +879,14 @@ class KfacIHVP(InverseHessianVectorProduct):
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
         layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
     ):
         super().__init__(model, train_dataset)
         self.damping = damping
         self.fisher_type = fisher_type
+        self.factors_path = factors_path
+        self.overwrite_factors = overwrite_factors
 
         # Build layer map and compute factors
         self.layer_map = LayerParameterMap(
@@ -885,16 +895,39 @@ class KfacIHVP(InverseHessianVectorProduct):
             target_layers,
             layer_collection=layer_collection,
         )
-        self.factors = KroneckerFactors(
-            model,
-            train_dataset,
-            self.backend,
-            self.layer_map,
-            fisher_type=fisher_type,
-            module_partition_size=module_partition_size,
-            offload_activations_to_cpu=offload_activations_to_cpu,
-            data_partition_size=data_partition_size,
+
+        checkpoint_path = factors_path
+        should_load_factors = (
+            checkpoint_path is not None
+            and not overwrite_factors
+            and KroneckerFactors.checkpoint_exists(checkpoint_path)
         )
+
+        if should_load_factors:
+            assert checkpoint_path is not None
+            self.factors = KroneckerFactors.load_from_dir(
+                model=model,
+                backend=self.backend,
+                layer_map=self.layer_map,
+                path=cast(str, checkpoint_path),
+                fisher_type=fisher_type,
+                module_partition_size=module_partition_size,
+                offload_activations_to_cpu=offload_activations_to_cpu,
+                data_partition_size=data_partition_size,
+            )
+        else:
+            self.factors = KroneckerFactors(
+                model,
+                train_dataset,
+                self.backend,
+                self.layer_map,
+                fisher_type=fisher_type,
+                module_partition_size=module_partition_size,
+                offload_activations_to_cpu=offload_activations_to_cpu,
+                data_partition_size=data_partition_size,
+            )
+            if checkpoint_path is not None:
+                self.factors.save_to_dir(checkpoint_path)
 
         # Pre-compute eigenspaces and inverse damped Kronecker eigenvalues.
         self.Q_A = {}
@@ -1102,6 +1135,11 @@ class EkfacIHVP(InverseHessianVectorProduct):
     layer_collection
         Layer traversal mode used by EK-FAC mapping: ``"top_level"``
         (default) or ``"recursive"``.
+    factors_path
+        Optional directory path used to cache/load computed factors.
+    overwrite_factors
+        If ``True``, ignore any existing checkpoint at ``factors_path`` and
+        recompute factors before saving.
     """
 
     def __init__(
@@ -1116,10 +1154,14 @@ class EkfacIHVP(InverseHessianVectorProduct):
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
         layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
     ):
         super().__init__(model, train_dataset)
         self.damping = damping
         self.fisher_type = fisher_type
+        self.factors_path = factors_path
+        self.overwrite_factors = overwrite_factors
 
         self.layer_map = LayerParameterMap(
             model,
@@ -1127,14 +1169,41 @@ class EkfacIHVP(InverseHessianVectorProduct):
             target_layers,
             layer_collection=layer_collection,
         )
-        self.factors = EKFACFactors(
-            model, train_dataset, self.backend, self.layer_map,
-            n_ekfac_samples=n_ekfac_samples,
-            fisher_type=fisher_type,
-            module_partition_size=module_partition_size,
-            offload_activations_to_cpu=offload_activations_to_cpu,
-            data_partition_size=data_partition_size,
+
+        checkpoint_path = factors_path
+        should_load_factors = (
+            checkpoint_path is not None
+            and not overwrite_factors
+            and EKFACFactors.checkpoint_exists(checkpoint_path)
         )
+
+        if should_load_factors:
+            assert checkpoint_path is not None
+            self.factors = EKFACFactors.load_from_dir(
+                model=model,
+                backend=self.backend,
+                layer_map=self.layer_map,
+                path=cast(str, checkpoint_path),
+                n_ekfac_samples=n_ekfac_samples,
+                fisher_type=fisher_type,
+                module_partition_size=module_partition_size,
+                offload_activations_to_cpu=offload_activations_to_cpu,
+                data_partition_size=data_partition_size,
+            )
+        else:
+            self.factors = EKFACFactors(
+                model,
+                train_dataset,
+                self.backend,
+                self.layer_map,
+                n_ekfac_samples=n_ekfac_samples,
+                fisher_type=fisher_type,
+                module_partition_size=module_partition_size,
+                offload_activations_to_cpu=offload_activations_to_cpu,
+                data_partition_size=data_partition_size,
+            )
+            if checkpoint_path is not None:
+                self.factors.save_to_dir(checkpoint_path)
 
     def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
         """

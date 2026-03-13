@@ -223,6 +223,10 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
     layer_collection
         Layer traversal mode for K-FAC mapping: ``"top_level"`` (default)
         or ``"recursive"``.
+    factors_path
+        Optional directory path used to cache/load K-FAC factors.
+    overwrite_factors
+        If ``True``, recompute and overwrite any existing checkpoint.
     """
     def __init__(
         self,
@@ -233,6 +237,8 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
         layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
     ):
         self.damping = damping
         self.target_layers = target_layers
@@ -241,6 +247,8 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         self.offload_activations_to_cpu = offload_activations_to_cpu
         self.data_partition_size = data_partition_size
         self.layer_collection = layer_collection
+        self.factors_path = factors_path
+        self.overwrite_factors = overwrite_factors
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -269,6 +277,8 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
             module_partition_size=self.module_partition_size,
             offload_activations_to_cpu=self.offload_activations_to_cpu,
             data_partition_size=self.data_partition_size,
+            factors_path=self.factors_path,
+            overwrite_factors=self.overwrite_factors,
         )
 
 
@@ -297,6 +307,10 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
     layer_collection
         Layer traversal mode for EK-FAC mapping: ``"top_level"`` (default)
         or ``"recursive"``.
+    factors_path
+        Optional directory path used to cache/load EK-FAC factors.
+    overwrite_factors
+        If ``True``, recompute and overwrite any existing checkpoint.
     """
     def __init__(
         self,
@@ -308,6 +322,8 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
         layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
     ):
         self.damping = damping
         self.target_layers = target_layers
@@ -317,6 +333,8 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         self.offload_activations_to_cpu = offload_activations_to_cpu
         self.data_partition_size = data_partition_size
         self.layer_collection = layer_collection
+        self.factors_path = factors_path
+        self.overwrite_factors = overwrite_factors
 
     def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
         """
@@ -346,4 +364,6 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             module_partition_size=self.module_partition_size,
             offload_activations_to_cpu=self.offload_activations_to_cpu,
             data_partition_size=self.data_partition_size,
+            factors_path=self.factors_path,
+            overwrite_factors=self.overwrite_factors,
         )
