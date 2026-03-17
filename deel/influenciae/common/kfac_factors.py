@@ -492,8 +492,16 @@ class KroneckerFactors:
         If ``True``, hook-captured activations and gradients are moved to CPU
         before accumulation and brought back to the compute device when needed.
     data_partition_size
-        Optional number of batches per data partition.  At each partition
-        boundary the running accumulators are checkpointed in-memory.
+        Optional number of batches per data partition.
+    accumulator_offload_mode
+        Accumulator checkpoint mode used at data-partition boundaries:
+        ``"none"`` (default), ``"memory"``, or ``"disk"``.
+    accumulator_offload_dir
+        Optional directory where temporary disk-offload partition files are
+        stored when ``accumulator_offload_mode="disk"``.
+    keep_accumulator_offload_artifacts
+        If ``True``, keep temporary disk-offload partition files after factor
+        computation. Otherwise they are removed.
     """
 
     def __init__(
@@ -506,6 +514,9 @@ class KroneckerFactors:
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
     ):
         self.backend = backend
         self.model = model
@@ -516,11 +527,18 @@ class KroneckerFactors:
             raise ValueError("module_partition_size must be a strictly positive integer or None.")
         if data_partition_size is not None and data_partition_size <= 0:
             raise ValueError("data_partition_size must be a strictly positive integer or None.")
+        if accumulator_offload_mode not in ("none", "memory", "disk"):
+            raise ValueError(
+                "accumulator_offload_mode must be one of 'none', 'memory', or 'disk'."
+            )
 
         self.fisher_type = fisher_type
         self.module_partition_size = module_partition_size
         self.offload_activations_to_cpu = offload_activations_to_cpu
         self.data_partition_size = data_partition_size
+        self.accumulator_offload_mode = accumulator_offload_mode
+        self.accumulator_offload_dir = accumulator_offload_dir
+        self.keep_accumulator_offload_artifacts = keep_accumulator_offload_artifacts
         self._true_fisher_warning_emitted = False
         self._factor_checkpoint: Optional[Dict[str, Any]] = None
         self.A: Dict[int, Any] = {}  # layer_idx -> A factor
@@ -586,8 +604,16 @@ class KroneckerFactors:
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
     ) -> "KroneckerFactors":
         """Load precomputed K-FAC factors from *path* without recomputing."""
+        if accumulator_offload_mode not in ("none", "memory", "disk"):
+            raise ValueError(
+                "accumulator_offload_mode must be one of 'none', 'memory', or 'disk'."
+            )
+
         metadata = _read_checkpoint_metadata(path)
         _validate_checkpoint_compatibility(
             metadata=metadata,
@@ -605,6 +631,9 @@ class KroneckerFactors:
         instance.module_partition_size = module_partition_size
         instance.offload_activations_to_cpu = offload_activations_to_cpu
         instance.data_partition_size = data_partition_size
+        instance.accumulator_offload_mode = accumulator_offload_mode
+        instance.accumulator_offload_dir = accumulator_offload_dir
+        instance.keep_accumulator_offload_artifacts = keep_accumulator_offload_artifacts
         instance._true_fisher_warning_emitted = bool(metadata.get("true_fisher_fallback_used", False))
         instance._factor_checkpoint = None
         instance.A = {}
@@ -670,14 +699,100 @@ class KroneckerFactors:
             return model_weights[0]
         return None
 
+    def _make_accumulator_partition_dir(self, prefix: str) -> str:
+        """Create a directory for temporary accumulator partition files."""
+        if self.accumulator_offload_dir is None:
+            return tempfile.mkdtemp(prefix=f"{prefix}_")
+
+        os.makedirs(self.accumulator_offload_dir, exist_ok=True)
+        return tempfile.mkdtemp(prefix=f"{prefix}_", dir=self.accumulator_offload_dir)
+
+    def _write_accumulator_partition_to_disk(
+        self,
+        partition_dir: str,
+        partition_idx: int,
+        tensors: Dict[str, Dict[int, Any]],
+        n_rows_per_layer: Dict[int, int],
+    ) -> str:
+        """Serialize one accumulator partition to a compressed ``.npz`` file."""
+        layer_indices_set = set(n_rows_per_layer.keys())
+        for tensor_dict in tensors.values():
+            layer_indices_set.update(tensor_dict.keys())
+        layer_indices = sorted(int(layer_idx) for layer_idx in layer_indices_set)
+
+        payload: Dict[str, np.ndarray] = {
+            "layer_indices": np.asarray(layer_indices, dtype=np.int64),
+        }
+        for layer_idx in layer_indices:
+            payload[f"rows_{layer_idx}"] = np.asarray([int(n_rows_per_layer.get(layer_idx, 0))], dtype=np.int64)
+            for tensor_name, tensor_dict in tensors.items():
+                if layer_idx not in tensor_dict:
+                    continue
+                tensor_array = np.asarray(self.backend.to_numpy(tensor_dict[layer_idx]))
+                payload[f"{tensor_name}_{layer_idx}"] = tensor_array
+
+        partition_path = os.path.join(partition_dir, f"partition_{partition_idx:06d}.npz")
+        np.savez(partition_path, **payload)
+        return partition_path
+
+    def _merge_accumulator_partitions_from_disk(
+        self,
+        partition_paths: List[str],
+        tensor_names: Tuple[str, ...],
+    ) -> Tuple[Dict[str, Dict[int, np.ndarray]], Dict[int, int]]:
+        """Load and merge accumulator partitions from disk."""
+        merged_tensors: Dict[str, Dict[int, np.ndarray]] = {name: {} for name in tensor_names}
+        merged_rows: Dict[int, int] = {}
+
+        for partition_path in partition_paths:
+            with np.load(partition_path, allow_pickle=False) as partition_data:
+                if "layer_indices" not in partition_data:
+                    raise ValueError(
+                        f"Invalid accumulator partition file '{partition_path}': missing layer_indices."
+                    )
+                layer_indices = [int(v) for v in np.asarray(partition_data["layer_indices"]).tolist()]
+
+                for layer_idx in layer_indices:
+                    rows_key = f"rows_{layer_idx}"
+                    if rows_key not in partition_data:
+                        raise ValueError(
+                            f"Invalid accumulator partition file '{partition_path}': missing '{rows_key}'."
+                        )
+                    n_rows = int(np.asarray(partition_data[rows_key]).reshape(-1)[0])
+                    merged_rows[layer_idx] = merged_rows.get(layer_idx, 0) + n_rows
+
+                    for tensor_name in tensor_names:
+                        tensor_key = f"{tensor_name}_{layer_idx}"
+                        if tensor_key not in partition_data:
+                            continue
+
+                        tensor_array = np.asarray(partition_data[tensor_key])
+                        if layer_idx not in merged_tensors[tensor_name]:
+                            merged_tensors[tensor_name][layer_idx] = tensor_array
+                        else:
+                            merged_tensors[tensor_name][layer_idx] = (
+                                merged_tensors[tensor_name][layer_idx] + tensor_array
+                            )
+
+        return merged_tensors, merged_rows
+
+    def _cleanup_accumulator_partition_dir(self, partition_dir: Optional[str]) -> None:
+        """Cleanup temporary accumulator partition files if requested."""
+        if partition_dir is None:
+            return
+        if self.keep_accumulator_offload_artifacts:
+            return
+        _remove_path(partition_dir)
+
     def _checkpoint_factor_accumulators(
         self,
         a_sums: Dict[int, Any],
         g_sums: Dict[int, Any],
         n_rows_per_layer: Dict[int, int],
     ) -> None:
-        """Hook point for in-memory factor checkpointing at data-partition boundaries."""
+        """Store in-memory factor checkpoint state at data-partition boundaries."""
         self._factor_checkpoint = {
+            "mode": "memory",
             "a_sums": a_sums,
             "g_sums": g_sums,
             "n_rows_per_layer": n_rows_per_layer,
@@ -740,82 +855,152 @@ class KroneckerFactors:
 
         # --- Iterate over dataset -----------------------------------------
         partition_batch_count = 0
+        partition_idx = 0
+        partition_paths: List[str] = []
+        partition_dir: Optional[str] = None
+        if self.accumulator_offload_mode == "disk":
+            partition_dir = self._make_accumulator_partition_dir("kfac_accumulators")
+
+        def _flush_partition_to_checkpoint() -> None:
+            nonlocal a_sums, g_sums, n_rows_per_layer, partition_idx
+            if not a_sums:
+                return
+
+            if self.accumulator_offload_mode == "memory":
+                self._checkpoint_factor_accumulators(a_sums, g_sums, n_rows_per_layer)
+                return
+
+            if self.accumulator_offload_mode != "disk":
+                return
+
+            if partition_dir is None:
+                raise RuntimeError("partition_dir is required for disk accumulator offload mode.")
+
+            partition_path = self._write_accumulator_partition_to_disk(
+                partition_dir=partition_dir,
+                partition_idx=partition_idx,
+                tensors={"a_sums": a_sums, "g_sums": g_sums},
+                n_rows_per_layer=n_rows_per_layer,
+            )
+            partition_idx += 1
+            partition_paths.append(partition_path)
+            self._factor_checkpoint = {
+                "mode": "disk",
+                "partition_dir": partition_dir,
+                "partition_files": list(partition_paths),
+            }
+
+            a_sums = {}
+            g_sums = {}
+            n_rows_per_layer = {}
+
         try:
-            for batch in train_dataset:
-                if isinstance(batch, (list, tuple)):
-                    batch_tuple = tuple(batch)
-                else:
-                    batch_tuple = (batch,)
+            try:
+                for batch in train_dataset:
+                    if isinstance(batch, (list, tuple)):
+                        batch_tuple = tuple(batch)
+                    else:
+                        batch_tuple = (batch,)
 
-                # Use model's preprocessing
-                model_inp, y_true, sample_weight = model.process_batch_for_loss_fn(batch_tuple)
+                    # Use model's preprocessing
+                    model_inp, y_true, sample_weight = model.process_batch_for_loss_fn(batch_tuple)
 
-                # Forward pass
-                activations.clear()
-                grad_outputs.clear()
+                    # Forward pass
+                    activations.clear()
+                    grad_outputs.clear()
 
-                # We need gradients w.r.t. outputs to trigger backward hooks.
-                # Compute the per-sample loss and backprop.
-                self._forward_backward(model, model_inp, y_true, sample_weight,
-                                       activations, grad_outputs, layer_infos=layer_infos)
+                    # We need gradients w.r.t. outputs to trigger backward hooks.
+                    # Compute the per-sample loss and backprop.
+                    self._forward_backward(model, model_inp, y_true, sample_weight,
+                                           activations, grad_outputs, layer_infos=layer_infos)
 
-                # Accumulate factors
+                    # Accumulate factors
+                    for info in layer_infos:
+                        idx = info.layer_idx
+                        if idx not in activations or idx not in grad_outputs:
+                            continue
+
+                        a = activations[idx]
+                        g = grad_outputs[idx]
+
+                        if self.offload_activations_to_cpu:
+                            a = backend.to_device(a, reference=device_reference)
+                            g = backend.to_device(g, reference=device_reference)
+
+                        a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
+
+                        a_rows = _to_int(backend.get_batch_size(a_mat))
+                        g_rows = _to_int(backend.get_batch_size(g_mat))
+                        if a_rows != g_rows:
+                            raise ValueError(
+                                f"Activation/gradient row mismatch for layer {idx}: "
+                                f"{a_rows} vs {g_rows}."
+                            )
+
+                        n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+
+                        if idx not in a_sums:
+                            a_sums[idx] = backend.matmul(backend.transpose(a_mat), a_mat)
+                            g_sums[idx] = backend.matmul(backend.transpose(g_mat), g_mat)
+                        else:
+                            a_sums[idx] = a_sums[idx] + backend.matmul(backend.transpose(a_mat), a_mat)
+                            g_sums[idx] = g_sums[idx] + backend.matmul(backend.transpose(g_mat), g_mat)
+
+                    partition_batch_count += 1
+                    if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
+                        _flush_partition_to_checkpoint()
+                        partition_batch_count = 0
+            finally:
+                # --- Cleanup hooks --------------------------------------------
+                for h in handles:
+                    backend.remove_hook(h)
+
+            if self.data_partition_size is not None and partition_batch_count > 0:
+                _flush_partition_to_checkpoint()
+
+            if self.accumulator_offload_mode == "disk":
+                _flush_partition_to_checkpoint()
+
+            if self.accumulator_offload_mode == "disk":
+                merged_tensors, merged_rows = self._merge_accumulator_partitions_from_disk(
+                    partition_paths,
+                    tensor_names=("a_sums", "g_sums"),
+                )
+
                 for info in layer_infos:
                     idx = info.layer_idx
-                    if idx not in activations or idx not in grad_outputs:
+                    if idx not in merged_tensors["a_sums"]:
                         continue
 
-                    a = activations[idx]
-                    g = grad_outputs[idx]
+                    n_rows = merged_rows.get(idx, 0)
+                    if n_rows <= 0:
+                        continue
 
-                    if self.offload_activations_to_cpu:
-                        a = backend.to_device(a, reference=device_reference)
-                        g = backend.to_device(g, reference=device_reference)
+                    scale = float(n_rows)
+                    a_factor = merged_tensors["a_sums"][idx] / scale
+                    g_factor = merged_tensors["g_sums"][idx] / scale
 
-                    a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
+                    a_tensor = backend.to_device(backend.convert_to_tensor(a_factor), reference=device_reference)
+                    g_tensor = backend.to_device(backend.convert_to_tensor(g_factor), reference=device_reference)
 
-                    a_rows = _to_int(backend.get_batch_size(a_mat))
-                    g_rows = _to_int(backend.get_batch_size(g_mat))
-                    if a_rows != g_rows:
-                        raise ValueError(
-                            f"Activation/gradient row mismatch for layer {idx}: "
-                            f"{a_rows} vs {g_rows}."
-                        )
-
-                    n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
-
+                    self.A[idx] = self._symmetrize_matrix(a_tensor)
+                    self.G[idx] = self._symmetrize_matrix(g_tensor)
+            else:
+                # --- Normalize and store ------------------------------------------
+                for info in layer_infos:
+                    idx = info.layer_idx
                     if idx not in a_sums:
-                        a_sums[idx] = backend.matmul(backend.transpose(a_mat), a_mat)
-                        g_sums[idx] = backend.matmul(backend.transpose(g_mat), g_mat)
-                    else:
-                        a_sums[idx] = a_sums[idx] + backend.matmul(backend.transpose(a_mat), a_mat)
-                        g_sums[idx] = g_sums[idx] + backend.matmul(backend.transpose(g_mat), g_mat)
+                        continue
 
-                partition_batch_count += 1
-                if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
-                    self._checkpoint_factor_accumulators(a_sums, g_sums, n_rows_per_layer)
-                    partition_batch_count = 0
+                    n_rows = n_rows_per_layer.get(idx, 0)
+                    if n_rows <= 0:
+                        continue
+
+                    scale = float(n_rows)
+                    self.A[idx] = self._symmetrize_matrix(a_sums[idx] / scale)
+                    self.G[idx] = self._symmetrize_matrix(g_sums[idx] / scale)
         finally:
-            # --- Cleanup hooks --------------------------------------------
-            for h in handles:
-                backend.remove_hook(h)
-
-        if self.data_partition_size is not None and partition_batch_count > 0:
-            self._checkpoint_factor_accumulators(a_sums, g_sums, n_rows_per_layer)
-
-        # --- Normalize and store ------------------------------------------
-        for info in layer_infos:
-            idx = info.layer_idx
-            if idx not in a_sums:
-                continue
-
-            n_rows = n_rows_per_layer.get(idx, 0)
-            if n_rows <= 0:
-                continue
-
-            scale = float(n_rows)
-            self.A[idx] = self._symmetrize_matrix(a_sums[idx] / scale)
-            self.G[idx] = self._symmetrize_matrix(g_sums[idx] / scale)
+            self._cleanup_accumulator_partition_dir(partition_dir)
 
     def _forward_backward(
         self,
@@ -1224,6 +1409,15 @@ class EKFACFactors(KroneckerFactors):
         Whether to offload hook-captured activations/gradients to CPU.
     data_partition_size
         Optional number of batches per data partition.
+    accumulator_offload_mode
+        Accumulator checkpoint mode used at data-partition boundaries:
+        ``"none"`` (default), ``"memory"``, or ``"disk"``.
+    accumulator_offload_dir
+        Optional directory where temporary disk-offload partition files are
+        stored when ``accumulator_offload_mode="disk"``.
+    keep_accumulator_offload_artifacts
+        If ``True``, keep temporary disk-offload partition files after factor
+        computation. Otherwise they are removed.
     """
 
     def __init__(
@@ -1237,6 +1431,9 @@ class EKFACFactors(KroneckerFactors):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
     ):
         # Compute base K-FAC factors (A, G)
         super().__init__(
@@ -1248,6 +1445,9 @@ class EKFACFactors(KroneckerFactors):
             module_partition_size=module_partition_size,
             offload_activations_to_cpu=offload_activations_to_cpu,
             data_partition_size=data_partition_size,
+            accumulator_offload_mode=accumulator_offload_mode,
+            accumulator_offload_dir=accumulator_offload_dir,
+            keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
         )
 
         # Eigendecompose A and G
@@ -1334,13 +1534,21 @@ class EKFACFactors(KroneckerFactors):
         backend: BaseBackend,
         layer_map: LayerParameterMap,
         path: str,
-        n_ekfac_samples: Optional[int] = None,
         fisher_type: str = "empirical",
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
+        n_ekfac_samples: Optional[int] = None,
     ) -> "EKFACFactors":
         """Load precomputed EK-FAC factors from *path* without recomputing."""
+        if accumulator_offload_mode not in ("none", "memory", "disk"):
+            raise ValueError(
+                "accumulator_offload_mode must be one of 'none', 'memory', or 'disk'."
+            )
+
         metadata = _read_checkpoint_metadata(path)
         _validate_checkpoint_compatibility(
             metadata=metadata,
@@ -1359,6 +1567,9 @@ class EKFACFactors(KroneckerFactors):
         instance.module_partition_size = module_partition_size
         instance.offload_activations_to_cpu = offload_activations_to_cpu
         instance.data_partition_size = data_partition_size
+        instance.accumulator_offload_mode = accumulator_offload_mode
+        instance.accumulator_offload_dir = accumulator_offload_dir
+        instance.keep_accumulator_offload_artifacts = keep_accumulator_offload_artifacts
         instance._true_fisher_warning_emitted = bool(metadata.get("true_fisher_fallback_used", False))
         instance._factor_checkpoint = None
 
@@ -1471,8 +1682,9 @@ class EKFACFactors(KroneckerFactors):
         corrected_sums: Dict[int, Any],
         n_rows_per_layer: Dict[int, int],
     ) -> None:
-        """Hook point for in-memory EK-FAC checkpointing at data-partition boundaries."""
+        """Store in-memory EK-FAC checkpoint state at data-partition boundaries."""
         self._corrected_checkpoint = {
+            "mode": "memory",
             "corrected_sums": corrected_sums,
             "n_rows_per_layer": n_rows_per_layer,
         }
@@ -1533,96 +1745,163 @@ class EKFACFactors(KroneckerFactors):
             handles.append(backend.register_backward_hook(info.layer, _bwd_hook))
 
         partition_batch_count = 0
+        partition_idx = 0
+        partition_paths: List[str] = []
+        partition_dir: Optional[str] = None
+        if self.accumulator_offload_mode == "disk":
+            partition_dir = self._make_accumulator_partition_dir("ekfac_accumulators")
+
+        def _flush_partition_to_checkpoint() -> None:
+            nonlocal corrected_sums, n_rows_per_layer, partition_idx
+            if not corrected_sums:
+                return
+
+            if self.accumulator_offload_mode == "memory":
+                self._checkpoint_corrected_accumulators(corrected_sums, n_rows_per_layer)
+                return
+
+            if self.accumulator_offload_mode != "disk":
+                return
+
+            if partition_dir is None:
+                raise RuntimeError("partition_dir is required for disk accumulator offload mode.")
+
+            partition_path = self._write_accumulator_partition_to_disk(
+                partition_dir=partition_dir,
+                partition_idx=partition_idx,
+                tensors={"corrected_sums": corrected_sums},
+                n_rows_per_layer=n_rows_per_layer,
+            )
+            partition_idx += 1
+            partition_paths.append(partition_path)
+            self._corrected_checkpoint = {
+                "mode": "disk",
+                "partition_dir": partition_dir,
+                "partition_files": list(partition_paths),
+            }
+
+            corrected_sums = {}
+            n_rows_per_layer = {}
+
         try:
-            for batch in train_dataset:
-                if isinstance(batch, (list, tuple)):
-                    batch_tuple = tuple(batch)
-                else:
-                    batch_tuple = (batch,)
+            try:
+                for batch in train_dataset:
+                    if isinstance(batch, (list, tuple)):
+                        batch_tuple = tuple(batch)
+                    else:
+                        batch_tuple = (batch,)
 
-                model_inp, y_true, sample_weight = model.process_batch_for_loss_fn(batch_tuple)
-                batch_size = _to_int(backend.get_batch_size(model_inp))
-                n_samples += batch_size
+                    model_inp, y_true, sample_weight = model.process_batch_for_loss_fn(batch_tuple)
+                    batch_size = _to_int(backend.get_batch_size(model_inp))
+                    n_samples += batch_size
 
-                activations.clear()
-                grad_outputs_captured.clear()
+                    activations.clear()
+                    grad_outputs_captured.clear()
 
-                self._forward_backward(
-                    model, model_inp, y_true, sample_weight,
-                    activations, grad_outputs_captured,
-                    layer_infos=layer_infos,
+                    self._forward_backward(
+                        model, model_inp, y_true, sample_weight,
+                        activations, grad_outputs_captured,
+                        layer_infos=layer_infos,
+                    )
+
+                    for info in layer_infos:
+                        idx = info.layer_idx
+                        if idx not in activations or idx not in grad_outputs_captured:
+                            continue
+                        if idx not in self.Q_A:
+                            continue
+
+                        a = activations[idx]
+                        g = grad_outputs_captured[idx]
+                        if self.offload_activations_to_cpu:
+                            a = backend.to_device(a, reference=device_reference)
+                            g = backend.to_device(g, reference=device_reference)
+
+                        a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
+
+                        a_rows = _to_int(backend.get_batch_size(a_mat))
+                        g_rows = _to_int(backend.get_batch_size(g_mat))
+                        if a_rows != g_rows:
+                            raise ValueError(
+                                f"Activation/gradient row mismatch for layer {idx}: "
+                                f"{a_rows} vs {g_rows}."
+                            )
+
+                        n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+
+                        # Rotate into eigenbasis: (batch, n_in_eff) @ Q_A -> (batch, n_in_eff)
+                        a_rot = backend.matmul(a_mat, self.Q_A[idx])
+                        # (batch, n_out) @ Q_G -> (batch, n_out)
+                        g_rot = backend.matmul(g_mat, self.Q_G[idx])
+
+                        # Corrected eigenvalue: E[ g_rot_i^2 * a_rot_j^2 ]
+                        # g_rot^2: (batch, n_out), a_rot^2: (batch, n_in_eff)
+                        # Outer per sample then average: (batch, n_out, 1) * (batch, 1, n_in_eff)
+                        # Sum across batch -> (n_out, n_in_eff)
+                        g_sq = backend.multiply(g_rot, g_rot)  # (batch, n_out)
+                        a_sq = backend.multiply(a_rot, a_rot)  # (batch, n_in_eff)
+
+                        # Equivalent to summing per-sample outer products, but avoids
+                        # materializing a large 3-D tensor of shape
+                        # (batch, n_out, n_in_eff).
+                        batch_sum = backend.matmul(backend.transpose(g_sq), a_sq)
+                        if idx not in corrected_sums:
+                            corrected_sums[idx] = batch_sum
+                        else:
+                            corrected_sums[idx] = corrected_sums[idx] + batch_sum
+
+                    partition_batch_count += 1
+                    if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
+                        _flush_partition_to_checkpoint()
+                        partition_batch_count = 0
+
+                    if n_ekfac_samples is not None and n_samples >= n_ekfac_samples:
+                        break
+            finally:
+                for h in handles:
+                    backend.remove_hook(h)
+
+            if self.data_partition_size is not None and partition_batch_count > 0:
+                _flush_partition_to_checkpoint()
+
+            if self.accumulator_offload_mode == "disk":
+                _flush_partition_to_checkpoint()
+
+            if self.accumulator_offload_mode == "disk":
+                merged_tensors, merged_rows = self._merge_accumulator_partitions_from_disk(
+                    partition_paths,
+                    tensor_names=("corrected_sums",),
                 )
+                merged_corrected = merged_tensors["corrected_sums"]
 
                 for info in layer_infos:
                     idx = info.layer_idx
-                    if idx not in activations or idx not in grad_outputs_captured:
-                        continue
-                    if idx not in self.Q_A:
+                    if idx not in merged_corrected:
                         continue
 
-                    a = activations[idx]
-                    g = grad_outputs_captured[idx]
-                    if self.offload_activations_to_cpu:
-                        a = backend.to_device(a, reference=device_reference)
-                        g = backend.to_device(g, reference=device_reference)
+                    n_rows = merged_rows.get(idx, 0)
+                    if n_rows <= 0:
+                        continue
 
-                    a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
-
-                    a_rows = _to_int(backend.get_batch_size(a_mat))
-                    g_rows = _to_int(backend.get_batch_size(g_mat))
-                    if a_rows != g_rows:
-                        raise ValueError(
-                            f"Activation/gradient row mismatch for layer {idx}: "
-                            f"{a_rows} vs {g_rows}."
-                        )
-
-                    n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
-
-                    # Rotate into eigenbasis: (batch, n_in_eff) @ Q_A -> (batch, n_in_eff)
-                    a_rot = backend.matmul(a_mat, self.Q_A[idx])
-                    # (batch, n_out) @ Q_G -> (batch, n_out)
-                    g_rot = backend.matmul(g_mat, self.Q_G[idx])
-
-                    # Corrected eigenvalue: E[ g_rot_i^2 * a_rot_j^2 ]
-                    # g_rot^2: (batch, n_out), a_rot^2: (batch, n_in_eff)
-                    # Outer per sample then average: (batch, n_out, 1) * (batch, 1, n_in_eff)
-                    # Sum across batch -> (n_out, n_in_eff)
-                    g_sq = backend.multiply(g_rot, g_rot)  # (batch, n_out)
-                    a_sq = backend.multiply(a_rot, a_rot)  # (batch, n_in_eff)
-
-                    # Equivalent to summing per-sample outer products, but avoids
-                    # materializing a large 3-D tensor of shape
-                    # (batch, n_out, n_in_eff).
-                    batch_sum = backend.matmul(backend.transpose(g_sq), a_sq)
+                    corrected = merged_corrected[idx] / float(n_rows)
+                    corrected_tensor = backend.to_device(
+                        backend.convert_to_tensor(corrected),
+                        reference=device_reference,
+                    )
+                    self.Lambda_corrected[idx] = backend.reshape(corrected_tensor, (-1,))
+            else:
+                # Normalize and flatten
+                for info in layer_infos:
+                    idx = info.layer_idx
                     if idx not in corrected_sums:
-                        corrected_sums[idx] = batch_sum
-                    else:
-                        corrected_sums[idx] = corrected_sums[idx] + batch_sum
+                        continue
 
-                partition_batch_count += 1
-                if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
-                    self._checkpoint_corrected_accumulators(corrected_sums, n_rows_per_layer)
-                    partition_batch_count = 0
+                    n_rows = n_rows_per_layer.get(idx, 0)
+                    if n_rows <= 0:
+                        continue
 
-                if n_ekfac_samples is not None and n_samples >= n_ekfac_samples:
-                    break
+                    # (n_out, n_in_eff) -> flatten to (n_out * n_in_eff,)
+                    corrected = corrected_sums[idx] / float(n_rows)
+                    self.Lambda_corrected[idx] = backend.reshape(corrected, (-1,))
         finally:
-            for h in handles:
-                backend.remove_hook(h)
-
-        if self.data_partition_size is not None and partition_batch_count > 0:
-            self._checkpoint_corrected_accumulators(corrected_sums, n_rows_per_layer)
-
-        # Normalize and flatten
-        for info in layer_infos:
-            idx = info.layer_idx
-            if idx not in corrected_sums:
-                continue
-
-            n_rows = n_rows_per_layer.get(idx, 0)
-            if n_rows <= 0:
-                continue
-
-            # (n_out, n_in_eff) -> flatten to (n_out * n_in_eff,)
-            corrected = corrected_sums[idx] / float(n_rows)
-            self.Lambda_corrected[idx] = backend.reshape(corrected, (-1,))
+            self._cleanup_accumulator_partition_dir(partition_dir)

@@ -858,6 +858,15 @@ class KfacIHVP(InverseHessianVectorProduct):
         between capture and factor accumulation.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    accumulator_offload_mode
+        Accumulator checkpoint mode used at data-partition boundaries:
+        ``"none"`` (default), ``"memory"``, or ``"disk"``.
+    accumulator_offload_dir
+        Optional directory used for temporary disk-offload partition files when
+        ``accumulator_offload_mode="disk"``.
+    keep_accumulator_offload_artifacts
+        If ``True``, keep temporary disk-offload partition files after factor
+        computation.
     layer_collection
         Layer traversal mode used by K-FAC mapping: ``"top_level"``
         (default) or ``"recursive"``.
@@ -878,6 +887,9 @@ class KfacIHVP(InverseHessianVectorProduct):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
         layer_collection: str = "top_level",
         factors_path: Optional[str] = None,
         overwrite_factors: bool = False,
@@ -914,6 +926,9 @@ class KfacIHVP(InverseHessianVectorProduct):
                 module_partition_size=module_partition_size,
                 offload_activations_to_cpu=offload_activations_to_cpu,
                 data_partition_size=data_partition_size,
+                accumulator_offload_mode=accumulator_offload_mode,
+                accumulator_offload_dir=accumulator_offload_dir,
+                keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
             )
         else:
             self.factors = KroneckerFactors(
@@ -925,6 +940,9 @@ class KfacIHVP(InverseHessianVectorProduct):
                 module_partition_size=module_partition_size,
                 offload_activations_to_cpu=offload_activations_to_cpu,
                 data_partition_size=data_partition_size,
+                accumulator_offload_mode=accumulator_offload_mode,
+                accumulator_offload_dir=accumulator_offload_dir,
+                keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
             )
             if checkpoint_path is not None:
                 self.factors.save_to_dir(checkpoint_path)
@@ -1132,6 +1150,15 @@ class EkfacIHVP(InverseHessianVectorProduct):
         between capture and factor accumulation.
     data_partition_size
         Optional number of batches per data partition during factor estimation.
+    accumulator_offload_mode
+        Accumulator checkpoint mode used at data-partition boundaries:
+        ``"none"`` (default), ``"memory"``, or ``"disk"``.
+    accumulator_offload_dir
+        Optional directory used for temporary disk-offload partition files when
+        ``accumulator_offload_mode="disk"``.
+    keep_accumulator_offload_artifacts
+        If ``True``, keep temporary disk-offload partition files after factor
+        computation.
     layer_collection
         Layer traversal mode used by EK-FAC mapping: ``"top_level"``
         (default) or ``"recursive"``.
@@ -1153,6 +1180,9 @@ class EkfacIHVP(InverseHessianVectorProduct):
         module_partition_size: Optional[int] = None,
         offload_activations_to_cpu: bool = False,
         data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
         layer_collection: str = "top_level",
         factors_path: Optional[str] = None,
         overwrite_factors: bool = False,
@@ -1189,6 +1219,9 @@ class EkfacIHVP(InverseHessianVectorProduct):
                 module_partition_size=module_partition_size,
                 offload_activations_to_cpu=offload_activations_to_cpu,
                 data_partition_size=data_partition_size,
+                accumulator_offload_mode=accumulator_offload_mode,
+                accumulator_offload_dir=accumulator_offload_dir,
+                keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
             )
         else:
             self.factors = EKFACFactors(
@@ -1201,6 +1234,9 @@ class EkfacIHVP(InverseHessianVectorProduct):
                 module_partition_size=module_partition_size,
                 offload_activations_to_cpu=offload_activations_to_cpu,
                 data_partition_size=data_partition_size,
+                accumulator_offload_mode=accumulator_offload_mode,
+                accumulator_offload_dir=accumulator_offload_dir,
+                keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
             )
             if checkpoint_path is not None:
                 self.factors.save_to_dir(checkpoint_path)
