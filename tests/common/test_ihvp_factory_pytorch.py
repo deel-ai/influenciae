@@ -14,12 +14,14 @@ from torch.utils.data import DataLoader, TensorDataset
 from ..utils_test import max_abs_almost_equal as almost_equal
 
 from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
+from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP, KfacIHVP, EkfacIHVP
 from deel.influenciae.common import (
     InverseHessianVectorProductFactory,
     ExactIHVPFactory,
     CGDIHVPFactory,
-    LissaIHVPFactory
+    LissaIHVPFactory,
+    KfacIHVPFactory,
+    EkfacIHVPFactory,
 )
 
 
@@ -160,3 +162,73 @@ def test_lissa_factory():
     feature_extractor = nn.Sequential(model[0])
     with pytest.raises(AssertionError):
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
+
+
+def test_kfac_factory():
+    """Test that KfacIHVPFactory produces configured KfacIHVP instances."""
+    torch.manual_seed(42)
+
+    model = nn.Sequential(
+        nn.Linear(4, 3, bias=False, dtype=torch.float64),
+        nn.Linear(3, 2, bias=False, dtype=torch.float64),
+    )
+    loss_fn = nn.MSELoss(reduction="none")
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+
+    inputs = torch.randn((10, 4), dtype=torch.float64)
+    targets = torch.randn((10, 2), dtype=torch.float64)
+    dataset = TensorDataset(inputs, targets)
+    train_loader = DataLoader(dataset, batch_size=5, shuffle=False)
+
+    kfac_factory = KfacIHVPFactory(
+        damping=1e-3,
+        layer_collection="recursive",
+        module_partition_size=1,
+        offload_activations_to_cpu=True,
+        data_partition_size=2,
+        accumulator_offload_mode="memory",
+    )
+    assert isinstance(kfac_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = kfac_factory.build(influence_model, train_loader)
+    assert isinstance(ihvp_from_factory, KfacIHVP)
+    assert ihvp_from_factory.layer_map.layer_collection == "recursive"
+    assert ihvp_from_factory.factors.module_partition_size == 1
+    assert ihvp_from_factory.factors.offload_activations_to_cpu
+    assert ihvp_from_factory.factors.data_partition_size == 2
+    assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"
+
+
+def test_ekfac_factory():
+    """Test that EkfacIHVPFactory produces configured EkfacIHVP instances."""
+    torch.manual_seed(42)
+
+    model = nn.Sequential(
+        nn.Linear(4, 3, bias=False, dtype=torch.float64),
+        nn.Linear(3, 2, bias=False, dtype=torch.float64),
+    )
+    loss_fn = nn.MSELoss(reduction="none")
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+
+    inputs = torch.randn((10, 4), dtype=torch.float64)
+    targets = torch.randn((10, 2), dtype=torch.float64)
+    dataset = TensorDataset(inputs, targets)
+    train_loader = DataLoader(dataset, batch_size=5, shuffle=False)
+
+    ekfac_factory = EkfacIHVPFactory(
+        damping=1e-3,
+        layer_collection="recursive",
+        module_partition_size=1,
+        offload_activations_to_cpu=True,
+        data_partition_size=2,
+        accumulator_offload_mode="memory",
+    )
+    assert isinstance(ekfac_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = ekfac_factory.build(influence_model, train_loader)
+    assert isinstance(ihvp_from_factory, EkfacIHVP)
+    assert ihvp_from_factory.layer_map.layer_collection == "recursive"
+    assert ihvp_from_factory.factors.module_partition_size == 1
+    assert ihvp_from_factory.factors.offload_activations_to_cpu
+    assert ihvp_from_factory.factors.data_partition_size == 2
+    assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"

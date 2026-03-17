@@ -9,9 +9,20 @@ from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import (Reduction, MeanSquaredError)
 
-from deel.influenciae.common import InfluenceModel
-from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
-from deel.influenciae.common import InverseHessianVectorProductFactory, ExactIHVPFactory, CGDIHVPFactory, LissaIHVPFactory
+from deel.influenciae.common import (
+    InfluenceModel,
+    ExactIHVP,
+    ConjugateGradientDescentIHVP,
+    LissaIHVP,
+    KfacIHVP,
+    EkfacIHVP,
+    InverseHessianVectorProductFactory,
+    ExactIHVPFactory,
+    CGDIHVPFactory,
+    LissaIHVPFactory,
+    KfacIHVPFactory,
+    EkfacIHVPFactory,
+)
 
 from ..utils_test import almost_equal
 
@@ -123,3 +134,79 @@ def test_lissa_factory():
     feature_extractor = Sequential(model.layers[:1])
     with pytest.raises(AssertionError):
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
+
+
+def test_kfac_factory():
+    tf.random.set_seed(42)
+
+    model = Sequential([
+        Input(shape=(4,), dtype=tf.float64),
+        Dense(3, use_bias=False, dtype=tf.float64),
+        Dense(2, use_bias=False, dtype=tf.float64),
+    ])
+    influence_model = InfluenceModel(
+        model,
+        start_layer=0,
+        last_layer=-1,
+        loss_function=MeanSquaredError(reduction=Reduction.NONE),
+    )
+
+    inputs = tf.random.normal((10, 4), dtype=tf.float64)
+    target = tf.random.normal((10, 2), dtype=tf.float64)
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
+
+    kfac_factory = KfacIHVPFactory(
+        damping=1e-3,
+        layer_collection="recursive",
+        module_partition_size=1,
+        offload_activations_to_cpu=True,
+        data_partition_size=2,
+        accumulator_offload_mode="memory",
+    )
+    assert isinstance(kfac_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = kfac_factory.build(influence_model, train_set)
+    assert isinstance(ihvp_from_factory, KfacIHVP)
+    assert ihvp_from_factory.layer_map.layer_collection == "recursive"
+    assert ihvp_from_factory.factors.module_partition_size == 1
+    assert ihvp_from_factory.factors.offload_activations_to_cpu
+    assert ihvp_from_factory.factors.data_partition_size == 2
+    assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"
+
+
+def test_ekfac_factory():
+    tf.random.set_seed(42)
+
+    model = Sequential([
+        Input(shape=(4,), dtype=tf.float64),
+        Dense(3, use_bias=False, dtype=tf.float64),
+        Dense(2, use_bias=False, dtype=tf.float64),
+    ])
+    influence_model = InfluenceModel(
+        model,
+        start_layer=0,
+        last_layer=-1,
+        loss_function=MeanSquaredError(reduction=Reduction.NONE),
+    )
+
+    inputs = tf.random.normal((10, 4), dtype=tf.float64)
+    target = tf.random.normal((10, 2), dtype=tf.float64)
+    train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
+
+    ekfac_factory = EkfacIHVPFactory(
+        damping=1e-3,
+        layer_collection="recursive",
+        module_partition_size=1,
+        offload_activations_to_cpu=True,
+        data_partition_size=2,
+        accumulator_offload_mode="memory",
+    )
+    assert isinstance(ekfac_factory, InverseHessianVectorProductFactory)
+
+    ihvp_from_factory = ekfac_factory.build(influence_model, train_set)
+    assert isinstance(ihvp_from_factory, EkfacIHVP)
+    assert ihvp_from_factory.layer_map.layer_collection == "recursive"
+    assert ihvp_from_factory.factors.module_partition_size == 1
+    assert ihvp_from_factory.factors.offload_activations_to_cpu
+    assert ihvp_from_factory.factors.data_partition_size == 2
+    assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"
