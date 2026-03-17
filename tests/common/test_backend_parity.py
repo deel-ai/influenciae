@@ -437,6 +437,74 @@ def test_reduce_sum():
     pt_result_axis = pt_backend.reduce_sum(torch.from_numpy(a), axis=1).numpy()
     assert almost_equal(tf_result_axis, pt_result_axis)
 
+
+def test_eye():
+    """Test identity matrix helper parity."""
+    from deel.influenciae.common import get_backend, Framework
+
+    tf_backend = get_backend(Framework.TENSORFLOW)
+    pt_backend = get_backend(Framework.PYTORCH)
+
+    tf_result = tf_backend.eye(3, dtype=tf.float64).numpy()
+    pt_result = pt_backend.eye(3, dtype=torch.float64).numpy()
+
+    assert almost_equal(tf_result, pt_result)
+
+
+def test_kron():
+    """Test Kronecker product parity."""
+    from deel.influenciae.common import get_backend, Framework
+
+    tf_backend = get_backend(Framework.TENSORFLOW)
+    pt_backend = get_backend(Framework.PYTORCH)
+
+    a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    b = np.array([[0.0, 5.0], [6.0, 7.0]], dtype=np.float64)
+
+    tf_result = tf_backend.kron(tf.constant(a), tf.constant(b)).numpy()
+    pt_result = pt_backend.kron(torch.from_numpy(a), torch.from_numpy(b)).numpy()
+
+    assert almost_equal(tf_result, pt_result)
+
+
+def test_outer():
+    """Test outer product parity."""
+    from deel.influenciae.common import get_backend, Framework
+
+    tf_backend = get_backend(Framework.TENSORFLOW)
+    pt_backend = get_backend(Framework.PYTORCH)
+
+    a = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    b = np.array([4.0, 5.0], dtype=np.float64)
+
+    tf_result = tf_backend.outer(tf.constant(a), tf.constant(b)).numpy()
+    pt_result = pt_backend.outer(torch.from_numpy(a), torch.from_numpy(b)).numpy()
+
+    assert almost_equal(tf_result, pt_result)
+
+
+def test_eigh():
+    """Test symmetric eigendecomposition parity via eigenvalues/reconstruction."""
+    from deel.influenciae.common import get_backend, Framework
+
+    tf_backend = get_backend(Framework.TENSORFLOW)
+    pt_backend = get_backend(Framework.PYTORCH)
+
+    matrix = np.array([[2.0, 1.0], [1.0, 3.0]], dtype=np.float64)
+
+    tf_vals, tf_vecs = tf_backend.eigh(tf.constant(matrix))
+    pt_vals, pt_vecs = pt_backend.eigh(torch.from_numpy(matrix))
+
+    tf_vals_np = tf_vals.numpy()
+    pt_vals_np = pt_vals.numpy()
+    assert almost_equal(tf_vals_np, pt_vals_np)
+
+    tf_reconstructed = tf_vecs @ tf.linalg.diag(tf_vals) @ tf.transpose(tf_vecs)
+    pt_reconstructed = pt_vecs @ torch.diag(pt_vals) @ pt_vecs.T
+
+    assert almost_equal(tf_reconstructed.numpy(), matrix)
+    assert almost_equal(pt_reconstructed.numpy(), matrix)
+
 def test_to_numpy():
     """Test conversion to numpy."""
     from deel.influenciae.common import get_backend, Framework

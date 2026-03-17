@@ -9,7 +9,7 @@ These tests verify the TensorFlow-specific functionality works correctly.
 import numpy as np
 import pytest
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, Input, Flatten, ReLU
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Dense, Flatten, Input, LayerNormalization
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import MeanSquaredError, CategoricalCrossentropy, Reduction
 
@@ -199,6 +199,143 @@ def test_weight_wrappers_are_supported_for_gradients_and_jacobians(backend, simp
     assert jacobian.shape == (batch_size, num_params)
     assert outputs.shape == (batch_size, 2)
     assert len(jac_weights) == len(weights)
+
+
+def test_eigh(backend):
+    """Symmetric eigendecomposition should reconstruct the input matrix."""
+    matrix = tf.constant([[2.0, 1.0], [1.0, 3.0]], dtype=tf.float64)
+
+    eigenvalues, eigenvectors = backend.eigh(matrix)
+    reconstructed = eigenvectors @ tf.linalg.diag(eigenvalues) @ tf.transpose(eigenvectors)
+
+    assert eigenvalues[0] < eigenvalues[1]
+    assert np.allclose(reconstructed.numpy(), matrix.numpy(), atol=1e-10)
+    assert np.allclose(
+        (tf.transpose(eigenvectors) @ eigenvectors).numpy(),
+        np.eye(2, dtype=np.float64),
+        atol=1e-10,
+    )
+
+
+def test_kron(backend):
+    """Kronecker product should match NumPy."""
+    a = tf.constant([[1.0, 2.0], [3.0, 4.0]], dtype=tf.float64)
+    b = tf.constant([[0.0, 5.0], [6.0, 7.0]], dtype=tf.float64)
+
+    result = backend.kron(a, b)
+    expected = np.kron(a.numpy(), b.numpy())
+
+    assert np.allclose(result.numpy(), expected, atol=1e-12)
+    assert result.shape == (4, 4)
+
+
+def test_outer(backend):
+    """Outer product should match NumPy."""
+    a = tf.constant([1.0, 2.0, 3.0], dtype=tf.float64)
+    b = tf.constant([4.0, 5.0], dtype=tf.float64)
+
+    result = backend.outer(a, b)
+    expected = np.outer(a.numpy(), b.numpy())
+
+    assert np.allclose(result.numpy(), expected, atol=1e-12)
+    assert result.shape == (3, 2)
+
+
+def test_eye(backend):
+    """Identity helper should match NumPy."""
+    identity = backend.eye(3, dtype=tf.float64)
+    assert np.allclose(identity.numpy(), np.eye(3), atol=1e-12)
+
+
+def test_is_linear_layer(backend):
+    """Dense layers should be detected as linear layers."""
+    model = Sequential([Input(shape=(3,)), Dense(2)])
+
+    assert backend.is_linear_layer(model.layers[0])
+    assert not backend.is_linear_layer(Conv2D(16, 3))
+    assert not backend.is_linear_layer(BatchNormalization())
+
+
+def test_is_conv2d_layer(backend):
+    """Conv2D layers should be detected by the backend."""
+    model = Sequential([Input(shape=(3,)), Dense(2)])
+
+    assert backend.is_conv2d_layer(Conv2D(16, 3))
+    assert not backend.is_conv2d_layer(model.layers[0])
+    assert not backend.is_conv2d_layer(LayerNormalization())
+
+
+def test_get_layer_weight_and_bias_dense_no_bias(backend):
+    """Weight extraction should return no bias when disabled."""
+    model = Sequential([Input(shape=(4,)), Dense(3, use_bias=False)])
+    layer = model.layers[0]
+
+    weight, bias = backend.get_layer_weight_and_bias(layer)
+    assert weight is layer.kernel
+    assert bias is None
+
+
+def test_get_layer_weight_and_bias_dense_with_bias(backend):
+    """Weight extraction should return layer kernel and bias."""
+    model = Sequential([Input(shape=(4,)), Dense(3, use_bias=True)])
+    layer = model.layers[0]
+
+    weight, bias = backend.get_layer_weight_and_bias(layer)
+    assert weight is layer.kernel
+    assert bias is layer.bias
+
+
+def test_forward_hook(backend):
+    """Forward hooks should receive layer input and output."""
+    model = Sequential([Input(shape=(3,)), Dense(2)])
+    layer = model.layers[0]
+    captured = {}
+
+    def hook(module, inp, out):
+        captured['input'] = inp
+        captured['output'] = out
+
+    handle = backend.register_forward_hook(layer, hook)
+    _ = model(tf.random.normal((1, 3)))
+
+    assert 'input' in captured
+    assert 'output' in captured
+    backend.remove_hook(handle)
+
+
+def test_remove_hook_stops_capture(backend):
+    """Removing a hook should prevent further callbacks."""
+    model = Sequential([Input(shape=(3,)), Dense(2)])
+    layer = model.layers[0]
+    call_count = {'value': 0}
+
+    def hook(module, inp, out):
+        call_count['value'] += 1
+
+    handle = backend.register_forward_hook(layer, hook)
+    _ = model(tf.random.normal((1, 3)))
+    assert call_count['value'] == 1
+
+    backend.remove_hook(handle)
+    _ = model(tf.random.normal((1, 3)))
+    assert call_count['value'] == 1
+
+
+def test_backward_hook_registered(backend):
+    """Backward hooks should be stored and removed on the layer."""
+    model = Sequential([Input(shape=(3,)), Dense(2)])
+    layer = model.layers[0]
+
+    def hook(module, grad_input, grad_output):
+        del module, grad_input, grad_output
+
+    handle = backend.register_backward_hook(layer, hook)
+
+    assert hasattr(layer, '_kfac_backward_hooks')
+    assert hook in layer._kfac_backward_hooks
+
+    backend.remove_hook(handle)
+    assert hook not in layer._kfac_backward_hooks
 
 
 def test_concat(backend):
