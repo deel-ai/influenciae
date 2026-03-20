@@ -153,6 +153,31 @@ def test_compute_ihvp_single_batch_torch():
     assert almost_equal(ihvp_batch, gt_ihvp[:, :3], epsilon=2e-1)
 
 
+def test_batch_jacobian_tensor_is_detached_for_ihvp_torch():
+    """Jacobian tensors used as IHVP right-hand sides should be detached."""
+    torch.manual_seed(42)
+    model = make_linear_model()
+    loss_fn = nn.MSELoss(reduction="none")
+
+    inputs, targets = make_dataset(8, seed=123)
+    train_loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    batch = next(iter(train_loader))
+
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss_fn)
+    ihvp_calculator = ConjugateGradientDescentIHVP(
+        influence_model,
+        extractor_layer=-1,
+        train_dataset=train_loader,
+        n_opt_iters=5,
+    )
+
+    feature_maps = ihvp_calculator.backend.forward(ihvp_calculator.feature_extractor, batch[0])
+    grads = ihvp_calculator.model.batch_jacobian_tensor((feature_maps, *batch[1:]))
+
+    assert not grads.requires_grad
+    assert grads.grad_fn is None
+
+
 def test_compute_hvp_single_batch_torch():
     torch.manual_seed(123)
     model = make_linear_model()

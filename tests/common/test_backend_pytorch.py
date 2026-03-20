@@ -16,6 +16,11 @@ from torch.utils.data import DataLoader, TensorDataset
 pytestmark = pytest.mark.pytorch
 
 
+def _per_sample_mse_loss(pred, target):
+    """Mean MSE per sample."""
+    return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+
 @pytest.fixture
 def simple_model():
     """Create a simple PyTorch model for testing."""
