@@ -102,60 +102,31 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         batch_size = inputs.shape[0]
         num_params = self.get_num_params(weights)
 
-        # Compute per-sample gradients using vmap if available (PyTorch 2.0+)
-        # Otherwise fall back to manual loop
-        try:
-            _ = torch.func.vmap
-            _ = torch.func.grad
+        dtype = weights[0].dtype if weights else inputs.dtype
+        jacobian = torch.zeros(batch_size, num_params, device=inputs.device, dtype=dtype)
 
-            def compute_sample_grad(input_sample, target_sample):
-                """Compute gradient for a single sample."""
-                input_batch = input_sample.unsqueeze(0)
-                target_batch = target_sample.unsqueeze(0)
+        for i in range(batch_size):
+            model.zero_grad()
+            input_sample = inputs[i:i+1]
+            target_sample = targets[i:i+1]
 
-                predictions = model(input_batch)
-                loss = loss_function(predictions, target_batch)
+            predictions = model(input_sample)
+            loss = loss_function(predictions, target_sample)
 
-                if sample_weight is not None:
-                    # Note: sample_weight handling in vmap is complex
-                    pass
+            if sample_weight is not None:
+                loss = loss * sample_weight[i]
 
-                grads = torch.autograd.grad(loss.sum(), weights, create_graph=False)
-                return torch.cat([g.flatten() for g in grads])
+            loss = loss.sum()
+            loss.backward(retain_graph=i < batch_size - 1)
 
-            # Use vmap for efficient batched gradient computation
-            jacobian = torch.stack([
-                compute_sample_grad(inputs[i], targets[i])
-                for i in range(batch_size)
-            ])
+            grads = []
+            for w in weights:
+                if w.grad is not None:
+                    grads.append(w.grad.flatten().clone())
+                else:
+                    grads.append(torch.zeros(w.numel(), device=w.device, dtype=w.dtype))
 
-        except AttributeError:
-            # Fallback for older PyTorch versions
-            dtype = weights[0].dtype if weights else inputs.dtype
-            jacobian = torch.zeros(batch_size, num_params, device=inputs.device, dtype=dtype)
-
-            for i in range(batch_size):
-                model.zero_grad()
-                input_sample = inputs[i:i+1]
-                target_sample = targets[i:i+1]
-
-                predictions = model(input_sample)
-                loss = loss_function(predictions, target_sample)
-
-                if sample_weight is not None:
-                    loss = loss * sample_weight[i]
-
-                loss = loss.sum()
-                loss.backward(retain_graph=i < batch_size - 1)
-
-                grads = []
-                for w in weights:
-                    if w.grad is not None:
-                        grads.append(w.grad.flatten().clone())
-                    else:
-                        grads.append(torch.zeros(w.numel(), device=w.device, dtype=w.dtype))
-
-                jacobian[i] = torch.cat(grads)
+            jacobian[i] = torch.cat(grads)
 
         return jacobian
 

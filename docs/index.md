@@ -5,10 +5,13 @@
 
 <div align="center">
     <a href="#">
-        <img src="https://img.shields.io/badge/Python-3.7, 3.8, 3.9, 3.10-efefef">
+        <img src="https://img.shields.io/badge/Python-3.11, 3.12, 3.13-efefef">
     </a>
     <a href="#tf">
-        <img src="https://img.shields.io/badge/TensorFlow-2.7, 2.8, 2.9-00458A">
+        <img src="https://img.shields.io/badge/TensorFlow-2.11--2.20-00458A">
+    </a>
+    <a href="#tf">
+        <img src="https://img.shields.io/badge/PyTorch-2.0--2.10-EE4C2C">
     </a>
     <a href="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml">
         <img alt="PyLint" src="https://github.com/deel-ai/influenciae/actions/workflows/linter.yml/badge.svg">
@@ -27,7 +30,7 @@
 </div>
 <br>
 
-Influenciae is a Python toolkit dedicated to computing influence values for the discovery of potentially problematic samples in a dataset and the generation of data-centric explanations for deep learning models. In this library based on Tensorflow, we gather state-of-the-art methods for estimating the importance of training samples and their influence on test data-points for validating the quality of datasets and of the models trained on them.
+Influenciae is a Python toolkit dedicated to computing influence values for the discovery of potentially problematic samples in a dataset and the generation of data-centric explanations for deep learning models. In this backend-agnostic library (TensorFlow and PyTorch), we gather state-of-the-art methods for estimating the importance of training samples and their influence on test data-points for validating the quality of datasets and of the models trained on them.
 
 ## 🔥 Tutorials
 
@@ -45,7 +48,13 @@ We propose some hands-on tutorials to get familiar with the library and it's API
 
 ## 🚀 Quick Start
 
-Influenciae requires a version of python 3.7 or higher and several libraries, including Tensorflow and Numpy. Installation can be done using Pypi:
+Influenciae supports Python 3.11, 3.12, and 3.13. TensorFlow and PyTorch backends are optional and can be installed via extras. Installation can be done using PyPI:
+
+| Python version | TensorFlow range | PyTorch range |
+|:---------------|:-----------------|:--------------|
+| 3.11           | 2.12 - 2.20      | 2.0 - 2.10    |
+| 3.12           | 2.16 - 2.20      | 2.2 - 2.10    |
+| 3.13           | 2.20             | 2.5 - 2.10    |
 
 ```python
 pip install influenciae
@@ -53,6 +62,8 @@ pip install influenciae
 
 Once Influenciae is installed, there are two major applications for the different modules (that all follow the same API).
 So, except for group-specific functions that are only available on the `influence` module, all the classes are able to compute self-influence values, the influence with one point w.r.t. another, as well as find the top-k samples for both of these situations.
+
+On the PyTorch backend, dataset helper operations are lazy by default and can be iterated multiple times. Use explicit cache/save calls when you want to materialize intermediary datasets.
 
 ### Discovering influential examples
 
