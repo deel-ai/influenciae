@@ -9,7 +9,7 @@ PyTorch backend implementation.
 import inspect
 import os
 import warnings
-from typing import Any, List, Tuple, Callable, Optional
+from typing import Any, Dict, List, Tuple, Callable, Optional
 
 import numpy as np
 import torch
@@ -72,6 +72,138 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Return weights unchanged for PyTorch autodiff."""
         return list(weights)
 
+    def _get_parameter_names_for_weights(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+    ) -> Optional[List[str]]:
+        """Map watched weights to model parameter names for torch.func transforms."""
+        parameter_names_by_id = {id(parameter): name for name, parameter in model.named_parameters()}
+        watched_parameter_names = []
+        seen_names = set()
+
+        for weight in weights:
+            parameter_name = parameter_names_by_id.get(id(weight))
+            if parameter_name is None or parameter_name in seen_names:
+                return None
+            watched_parameter_names.append(parameter_name)
+            seen_names.add(parameter_name)
+
+        return watched_parameter_names
+
+    def _compute_jacobian_loop(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        sample_weight: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute the Jacobian with a per-sample backward loop."""
+        batch_size = inputs.shape[0]
+        num_params = self.get_num_params(weights)
+        dtype = weights[0].dtype if weights else inputs.dtype
+
+        if not weights:
+            return torch.zeros(batch_size, 0, device=inputs.device, dtype=dtype)
+
+        jacobian = torch.zeros(batch_size, num_params, device=inputs.device, dtype=dtype)
+
+        for i in range(batch_size):
+            model.zero_grad()
+            input_sample = inputs[i:i+1]
+            target_sample = targets[i:i+1]
+
+            predictions = model(input_sample)
+            loss = loss_function(predictions, target_sample)
+
+            if sample_weight is not None:
+                loss = loss * sample_weight[i]
+
+            loss = loss.sum()
+            loss.backward(retain_graph=i < batch_size - 1)
+
+            grads = []
+            for weight in weights:
+                if weight.grad is not None:
+                    grads.append(weight.grad.flatten().clone())
+                else:
+                    grads.append(torch.zeros(weight.numel(), device=weight.device, dtype=weight.dtype))
+
+            jacobian[i] = torch.cat(grads)
+
+        return jacobian
+
+    def _compute_jacobian_vmap(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        sample_weight: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute the Jacobian using torch.func.grad and torch.vmap."""
+        batch_size = inputs.shape[0]
+        dtype = weights[0].dtype if weights else inputs.dtype
+
+        if not weights:
+            return torch.zeros(batch_size, 0, device=inputs.device, dtype=dtype)
+
+        watched_parameter_names = self._get_parameter_names_for_weights(model, weights)
+        if watched_parameter_names is None:
+            raise ValueError("Watched weights cannot be mapped to unique model parameters")
+
+        base_parameters: Dict[str, torch.Tensor] = dict(model.named_parameters())
+        base_buffers: Dict[str, torch.Tensor] = dict(model.named_buffers())
+        watched_values = tuple(base_parameters[name] for name in watched_parameter_names)
+
+        def single_sample_loss(
+            watched_tensors: Tuple[torch.Tensor, ...],
+            input_sample: torch.Tensor,
+            target_sample: torch.Tensor,
+        ) -> torch.Tensor:
+            params = dict(base_parameters)
+            params.update(zip(watched_parameter_names, watched_tensors))
+            predictions = torch.func.functional_call(
+                model,
+                (params, base_buffers),
+                (input_sample.unsqueeze(0),),
+            )
+            loss = loss_function(predictions, target_sample.unsqueeze(0))
+            return loss.sum()
+
+        def single_sample_weighted_loss(
+            watched_tensors: Tuple[torch.Tensor, ...],
+            input_sample: torch.Tensor,
+            target_sample: torch.Tensor,
+            sample_weight_sample: torch.Tensor,
+        ) -> torch.Tensor:
+            params = dict(base_parameters)
+            params.update(zip(watched_parameter_names, watched_tensors))
+            predictions = torch.func.functional_call(
+                model,
+                (params, base_buffers),
+                (input_sample.unsqueeze(0),),
+            )
+            loss = loss_function(predictions, target_sample.unsqueeze(0))
+            loss = loss * sample_weight_sample
+            return loss.sum()
+
+        if sample_weight is None:
+            per_sample_grads = torch.vmap(
+                torch.func.grad(single_sample_loss),
+                in_dims=(None, 0, 0),
+            )(watched_values, inputs, targets)
+        else:
+            per_sample_grads = torch.vmap(
+                torch.func.grad(single_sample_weighted_loss),
+                in_dims=(None, 0, 0, 0),
+            )(watched_values, inputs, targets, sample_weight)
+
+        return torch.cat([grad.reshape(batch_size, -1) for grad in per_sample_grads], dim=1)
+
     def compute_loss(
         self,
         model: nn.Module,
@@ -99,36 +231,40 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         sample_weight: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Compute the Jacobian of the loss with respect to weights."""
-        batch_size = inputs.shape[0]
-        num_params = self.get_num_params(weights)
+        if self._get_parameter_names_for_weights(model, weights) is None:
+            jacobian = self._compute_jacobian_loop(
+                model,
+                weights,
+                loss_function,
+                inputs,
+                targets,
+                sample_weight,
+            )
+            return jacobian.detach()
 
-        dtype = weights[0].dtype if weights else inputs.dtype
-        jacobian = torch.zeros(batch_size, num_params, device=inputs.device, dtype=dtype)
-
-        for i in range(batch_size):
-            model.zero_grad()
-            input_sample = inputs[i:i+1]
-            target_sample = targets[i:i+1]
-
-            predictions = model(input_sample)
-            loss = loss_function(predictions, target_sample)
-
-            if sample_weight is not None:
-                loss = loss * sample_weight[i]
-
-            loss = loss.sum()
-            loss.backward(retain_graph=i < batch_size - 1)
-
-            grads = []
-            for w in weights:
-                if w.grad is not None:
-                    grads.append(w.grad.flatten().clone())
-                else:
-                    grads.append(torch.zeros(w.numel(), device=w.device, dtype=w.dtype))
-
-            jacobian[i] = torch.cat(grads)
-
-        return jacobian
+        try:
+            jacobian = self._compute_jacobian_vmap(
+                model,
+                weights,
+                loss_function,
+                inputs,
+                targets,
+                sample_weight,
+            )
+            return jacobian.detach()
+        except (AttributeError, NotImplementedError, RuntimeError, TypeError) as exc:
+            try:
+                jacobian = self._compute_jacobian_loop(
+                    model,
+                    weights,
+                    loss_function,
+                    inputs,
+                    targets,
+                    sample_weight,
+                )
+                return jacobian.detach()
+            except Exception as loop_exc:
+                raise loop_exc from exc
 
     def compute_gradient(
         self,

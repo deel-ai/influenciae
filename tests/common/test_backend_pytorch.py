@@ -16,6 +16,11 @@ from torch.utils.data import DataLoader, TensorDataset
 pytestmark = pytest.mark.pytorch
 
 
+def _per_sample_mse_loss(pred, target):
+    """Mean MSE per sample."""
+    return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+
 @pytest.fixture
 def simple_model():
     """Create a simple PyTorch model for testing."""
@@ -123,10 +128,7 @@ def test_compute_gradient(backend, simple_model):
     targets = torch.randn(4, 2)
     weights = backend.get_model_weights(simple_model)
 
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
-
-    gradient = backend.compute_gradient(simple_model, weights, loss_fn, inputs, targets)
+    gradient = backend.compute_gradient(simple_model, weights, _per_sample_mse_loss, inputs, targets)
 
     num_params = backend.get_num_params(weights)
     assert gradient.shape == (num_params,)
@@ -139,13 +141,113 @@ def test_compute_jacobian(backend, simple_model):
     targets = torch.randn(batch_size, 2)
     weights = backend.get_model_weights(simple_model)
 
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
-
-    jacobian = backend.compute_jacobian(simple_model, weights, loss_fn, inputs, targets)
+    jacobian = backend.compute_jacobian(simple_model, weights, _per_sample_mse_loss, inputs, targets)
 
     num_params = backend.get_num_params(weights)
     assert jacobian.shape == (batch_size, num_params)
+
+
+def test_compute_jacobian_vmap_matches_loop(backend, simple_model):
+    """torch.func Jacobian path should match the loop reference."""
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    weights = backend.get_model_weights(simple_model)
+
+    jacobian_loop = backend._compute_jacobian_loop(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets
+    )
+    jacobian_vmap = backend._compute_jacobian_vmap(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets
+    )
+
+    assert torch.allclose(jacobian_vmap, jacobian_loop)
+
+
+def test_compute_jacobian_returns_detached_tensor(backend, simple_model):
+    """Public Jacobian API should return a detached tensor."""
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    weights = backend.get_model_weights(simple_model)
+
+    jacobian = backend.compute_jacobian(simple_model, weights, _per_sample_mse_loss, inputs, targets)
+
+    assert not jacobian.requires_grad
+    assert jacobian.grad_fn is None
+
+
+def test_compute_jacobian_vmap_matches_loop_with_sample_weight(backend, simple_model):
+    """Weighted torch.func Jacobian path should match the loop reference."""
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    sample_weight = torch.tensor([1.0, 2.0, 0.5, 1.5]).unsqueeze(-1)
+    weights = backend.get_model_weights(simple_model)
+
+    jacobian_loop = backend._compute_jacobian_loop(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets, sample_weight
+    )
+    jacobian_vmap = backend._compute_jacobian_vmap(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets, sample_weight
+    )
+
+    assert torch.allclose(jacobian_vmap, jacobian_loop)
+
+
+def test_compute_jacobian_vmap_matches_loop_for_weight_subset(backend, simple_model):
+    """torch.func Jacobian path should support watched weight subsets."""
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    weights = backend.get_weights_for_layer_range(simple_model, start_layer=None)
+
+    jacobian_loop = backend._compute_jacobian_loop(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets
+    )
+    jacobian_vmap = backend._compute_jacobian_vmap(
+        simple_model, weights, _per_sample_mse_loss, inputs, targets
+    )
+
+    assert torch.allclose(jacobian_vmap, jacobian_loop)
+
+
+def test_compute_jacobian_falls_back_to_loop_when_vmap_fails(backend, simple_model, monkeypatch):
+    """Public Jacobian API should fall back to the loop path when torch.func fails."""
+    inputs = torch.randn(3, 5)
+    targets = torch.randn(3, 2)
+    weights = backend.get_model_weights(simple_model)
+    expected = torch.full((3, backend.get_num_params(weights)), 7.0)
+
+    def fail_vmap(*args, **kwargs):
+        raise RuntimeError("torch.func transform failure")
+
+    monkeypatch.setattr(backend, "_compute_jacobian_vmap", fail_vmap)
+    monkeypatch.setattr(backend, "_compute_jacobian_loop", lambda *args, **kwargs: expected)
+
+    jacobian = backend.compute_jacobian(simple_model, weights, _per_sample_mse_loss, inputs, targets)
+
+    assert torch.equal(jacobian, expected)
+
+
+def test_compute_jacobian_uses_loop_for_unmapped_weights(backend, simple_model, monkeypatch):
+    """Public Jacobian API should skip torch.func for weights outside the model."""
+    inputs = torch.randn(3, 5)
+    targets = torch.randn(3, 2)
+    rogue_weight = nn.Parameter(torch.ones((2, 2)))
+    expected = torch.full((3, rogue_weight.numel()), 5.0)
+
+    def fail_vmap(*args, **kwargs):
+        raise AssertionError("vmap path should not be used for unmapped weights")
+
+    monkeypatch.setattr(backend, "_compute_jacobian_vmap", fail_vmap)
+    monkeypatch.setattr(backend, "_compute_jacobian_loop", lambda *args, **kwargs: expected)
+
+    jacobian = backend.compute_jacobian(
+        simple_model,
+        [rogue_weight],
+        _per_sample_mse_loss,
+        inputs,
+        targets,
+    )
+
+    assert torch.equal(jacobian, expected)
 
 
 def test_concat(backend):
