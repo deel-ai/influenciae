@@ -37,12 +37,12 @@ tensorflow = [
     "tensorflow>=2.11.0,<2.21.0",
 ]
 pytorch = [
-    "torch>=1.13.0,<2.11.0",
+    "torch>=2.0.0,<2.11.0",
 ]
 # Install both backends
 all = [
     "tensorflow>=2.11.0,<2.21.0",
-    "torch>=1.13.0,<2.11.0",
+    "torch>=2.0.0,<2.11.0",
 ]
 
 # Development dependencies
