@@ -12,11 +12,11 @@ https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.bicgst
 https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditioned_BiCGSTAB
 """
 import importlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
 
-from ..types import Callable, Optional, Any
+from ..types import Tensor
 
 if TYPE_CHECKING:
     from ..common.backend import BaseBackend
@@ -35,13 +35,13 @@ def _to_python_float(value: Any) -> float:
     return float(value)
 
 
-def _is_tensorflow_backend(backend: Any) -> bool:
+def _is_tensorflow_backend(backend: "BaseBackend") -> bool:
     """Return True when backend belongs to TensorFlow framework."""
     framework = getattr(backend, "framework", None)
     return getattr(framework, "value", framework) == "tensorflow"
 
 
-def _get_backend_for_tensor(tensor: Any) -> "BaseBackend":
+def _get_backend_for_tensor(tensor: Tensor) -> "BaseBackend":
     """Get backend for tensor without module-level common import."""
     backend_module = importlib.import_module("deel.influenciae.common.backend")
     return backend_module.get_backend_for_tensor(tensor)

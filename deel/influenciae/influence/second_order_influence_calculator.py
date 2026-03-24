@@ -12,12 +12,14 @@ the accuracy of the influence estimations for big groups of data.
 Disclaimer: this method can be very computationally expensive, especially when calculating
 the influence for a large number of weights.
 """
+from typing import Optional, Union
+
 from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, InverseHessianVectorProductFactory, IHVPCalculator
 
-from ..types import Optional, Union, Any, DatasetLike
+from ..types import DatasetLike, Tensor
 
 
 class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
@@ -81,7 +83,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     def compute_influence_vector_group(
             self,
             group: DatasetLike
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -126,7 +128,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
 
         return influence_group
 
-    def _scalar_multiply(self, tensor: Any, scalar: Any) -> Any:
+    def _scalar_multiply(self, tensor: Tensor, scalar: Union[Tensor, float, int]) -> Tensor:
         """
         Multiply a tensor by a scalar.
 
@@ -149,7 +151,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         )
         return self._backend.multiply(tensor, scalar_tensor)
 
-    def _compute_additive_term(self, dataset: DatasetLike) -> Any:
+    def _compute_additive_term(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the additive term as per Basu et al.'s article. It accounts for the influence of each of the
         points that we wish to remove, without taking into account the interactions between each other
@@ -167,7 +169,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
         return self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
-    def _compute_pairwise_interactions(self, dataset: DatasetLike) -> Any:
+    def _compute_pairwise_interactions(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the term corresponding to the pairwise interactions as per Basu et al.'s article. It will
         contain all the interactions between each of the points with each of the other points.
@@ -234,7 +236,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             self,
             group_train: DatasetLike,
             group_to_evaluate: Optional[DatasetLike] = None
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.

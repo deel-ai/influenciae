@@ -3,11 +3,11 @@ Lazy, re-iterable dataset wrappers for the PyTorch backend.
 """
 from math import ceil
 import random
-from typing import cast
+from typing import Any, Callable, Iterator, List, Optional, Union, cast
 from warnings import warn
 
 from .._optional_imports import import_optional_module
-from ..types import DatasetLike, Any, Callable, Iterator, List, Optional, Union
+from ..types import DatasetLike
 
 torch = import_optional_module("torch", extra="pytorch")
 

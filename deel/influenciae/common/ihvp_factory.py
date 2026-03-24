@@ -9,6 +9,7 @@ the objects necessary for computing the different (I)HVPs in second order influe
 functions.
 """
 from abc import abstractmethod
+from typing import Optional, Union
 
 from .model_wrappers import InfluenceModel
 from .inverse_hessian_vector_product import (
@@ -20,7 +21,7 @@ from .inverse_hessian_vector_product import (
     EkfacIHVP,
 )
 
-from ..types import Union, Optional, Any
+from ..types import DatasetLike, Model
 
 
 class InverseHessianVectorProductFactory:
@@ -28,7 +29,7 @@ class InverseHessianVectorProductFactory:
     The base interface for InverseHessianVectorProduct factories.
     """
     @abstractmethod
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of an InverseHessianVectorProduct class with the provided
         parameters.
@@ -53,7 +54,7 @@ class ExactIHVPFactory(InverseHessianVectorProductFactory):
     """
     A factory for instantiating ExactIHVP objects.
     """
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of the ExactIHVP class for a given model
         implementing the InfluenceModel interface and its (full or partial) training dataset.
@@ -91,21 +92,21 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
     """
     def __init__(
         self,
-        feature_extractor: Union[int, Any] = -1,
+        feature_extractor: Union[int, Model] = -1,
         n_cgd_iters: int = 100,
         extractor_layer: Optional[Union[str, int]] = None
     ):
         self.n_cgd_iters = n_cgd_iters
         if isinstance(feature_extractor, int):
             self.extractor_layer: Union[str, int] = feature_extractor
-            self.feature_extractor: Optional[Any] = None
+            self.feature_extractor: Optional[Model] = None
         else:
             assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
                                                 "provide the id of the last extracted layer"
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of the ConjugateGradientDescentIHVP class for the provided model and its
         corresponding (full or partial) training dataset.
@@ -153,7 +154,7 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
     """
     def __init__(
         self,
-        feature_extractor: Union[int, Any] = -1,
+        feature_extractor: Union[int, Model] = -1,
         n_cgd_iters: int = 100,
         extractor_layer: Optional[Union[str, int]] = None,
         damping: float = 1e-4,
@@ -164,14 +165,14 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
         self.scale = scale
         if isinstance(feature_extractor, int):
             self.extractor_layer: Union[str, int] = feature_extractor
-            self.feature_extractor: Optional[Any] = None
+            self.feature_extractor: Optional[Model] = None
         else:
             assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
                                                 "provide the id of the last extracted layer"
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of the LissaIHVP class for the provided model and its
         corresponding (full or partial) training dataset.

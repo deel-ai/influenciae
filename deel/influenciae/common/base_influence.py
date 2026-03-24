@@ -14,12 +14,13 @@ the computation can be written as a matrix-vector product with a matrix that can
 """
 from abc import abstractmethod
 from enum import Enum
+from typing import Optional, Tuple
 from warnings import warn
 
 from .backend import BaseBackend
 from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 from ..utils.sorted_dict import BatchSort, ORDER
-from ..types import Optional, Tuple, Any, DatasetLike
+from ..types import DType, DatasetLike, Tensor
 
 
 class CACHE(Enum):
@@ -55,7 +56,7 @@ class SelfInfluenceCalculator:
         return self.backend
 
     @abstractmethod
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -96,7 +97,7 @@ class SelfInfluenceCalculator:
             device
         )
 
-    def _compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> Any:
+    def _compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> Optional[Tensor]:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
         This version returns a tensor instead of a dataset.
@@ -131,7 +132,7 @@ class SelfInfluenceCalculator:
             train_set: DatasetLike,
             k: int,
             order: ORDER = ORDER.DESCENDING
-    ) -> Tuple[Any, Any]:
+    ) -> Tuple[Tensor, Tensor]:
         """
         Compute the k most influential data-points of the model's training dataset by computing
         Cook's distance for each point individually.
@@ -250,7 +251,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     """
 
     @abstractmethod
-    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Preprocess a sample to evaluate
 
@@ -265,7 +266,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         raise NotImplementedError()
 
     @abstractmethod
-    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -413,7 +414,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             save_influence_vector_ds_path: Optional[str] = None,
             save_top_k_ds_path: Optional[str] = None,
             order: ORDER = ORDER.DESCENDING,
-            d_type: Any = None,
+            d_type: Optional[DType] = None,
             device: Optional[str] = None
     ) -> DatasetLike:
         """
@@ -517,9 +518,9 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     def _estimate_inf_values_with_inf_vect_dataset(
             self,
             inf_vect_dataset: DatasetLike,
-            samples_to_evaluate: Tuple[Any, ...],
+            samples_to_evaluate: Tuple[Tensor, ...],
             device: Optional[str] = None
-    ) -> Tuple[Tuple[Any, ...], DatasetLike]:
+    ) -> Tuple[Tuple[Tensor, ...], DatasetLike]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -558,11 +559,11 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _top_k_with_inf_vect_dataset_train(
             self,
-            sample_to_evaluate: Tuple[Any, ...],
+            sample_to_evaluate: Tuple[Tensor, ...],
             nearest_neighbor: BaseNearestNeighbors,
             batch_size_eval: Optional[int] = None,
             device: Optional[str] = None
-    ) -> Tuple[Tuple[Any, ...], Any, Tuple[Any, ...]]:
+    ) -> Tuple[Tuple[Tensor, ...], Tensor, Tuple[Tensor, ...]]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -598,10 +599,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _estimate_influence_values_from_influence_vector(
             self,
-            samples_to_evaluate: Tuple[Any, ...],
-            inf_vect: Any,
-            preproc_samples_to_evaluate: Optional[Any] = None
-    ) -> Any:
+            samples_to_evaluate: Tuple[Tensor, ...],
+            inf_vect: Tensor,
+            preproc_samples_to_evaluate: Optional[Tensor] = None
+    ) -> Tensor:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -634,9 +635,9 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[Any, ...],
-            samples_to_evaluate: Tuple[Any, ...]
-    ) -> Any:
+            train_samples: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Tensor, ...]
+    ) -> Tensor:
         """
         Estimates the influence value of leaving out a single training sample on the provided test sample.
 
@@ -661,9 +662,9 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     @abstractmethod
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: Any,
-            influence_vector: Any
-    ) -> Any:
+            preproc_test_sample: Tensor,
+            influence_vector: Tensor
+    ) -> Tensor:
         """
         Estimates the influence score of leaving out the influence vector corresponding to a given training
         data-point on a test sample that has already been pre-processed.

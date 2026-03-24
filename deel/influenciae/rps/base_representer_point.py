@@ -8,10 +8,11 @@ Module containing the base class for representer point theorem-based influence c
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
 from abc import abstractmethod
+from typing import Any, Callable, Optional, Tuple, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import BaseInfluenceCalculator, BaseBackend, Framework, get_backend_for_model
-from ..types import Tuple, Callable, Union, Any, Optional, DatasetLike
+from ..types import DatasetLike
 
 
 class BaseRepresenterPoint(BaseInfluenceCalculator):

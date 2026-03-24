@@ -10,12 +10,13 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from .backend import BaseBackend, Framework, get_backend_for_model
+from ..types import DatasetLike, Layer, LossFunction, Model, Tensor, WeightVariable
 
 # Type aliases
-ProcessBatchTypeAlias = Callable[[Tuple[Any, ...]], Tuple[Any, Any, Any]]
+ProcessBatchTypeAlias = Callable[[Tuple[Any, ...]], Tuple[Tensor, Tensor, Optional[Tensor]]]
 
 
-def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Any, Any, Any]:
+def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
     """
     Default batch processing function.
 
@@ -64,9 +65,9 @@ class BaseInfluenceModel:
 
     def __init__(
         self,
-        model: Any,
-        weights_to_watch: Optional[List[Any]] = None,
-        loss_function: Optional[Callable] = None,
+        model: Model,
+        weights_to_watch: Optional[List[WeightVariable]] = None,
+        loss_function: Optional[LossFunction] = None,
         process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch,
         weights_processed: bool = False
     ):
@@ -112,7 +113,7 @@ class BaseInfluenceModel:
 
         self.nb_params = self.backend.get_num_params(self.weights)
 
-    def _get_default_loss_function(self) -> Callable:
+    def _get_default_loss_function(self) -> LossFunction:
         """Get the default loss function for the framework."""
         if self.backend.framework == Framework.TENSORFLOW:
             tf = import_optional_module("tensorflow", extra="tensorflow")
@@ -124,7 +125,7 @@ class BaseInfluenceModel:
         nn = import_optional_module("torch.nn", extra="pytorch")
         return nn.CrossEntropyLoss(reduction='none')
 
-    def _validate_loss_function(self, loss_function: Callable) -> None:
+    def _validate_loss_function(self, loss_function: LossFunction) -> None:
         """Validate that the loss function doesn't have reduction."""
         if self.backend.framework == Framework.TENSORFLOW:
             reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
@@ -133,7 +134,7 @@ class BaseInfluenceModel:
                 raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
         # For PyTorch, we could check loss_function.reduction == 'none' but it's less standardized
 
-    def __call__(self, inputs: Any) -> Any:
+    def __call__(self, inputs: Tensor) -> Tensor:
         """
         Computes the forward pass of the original model.
 
@@ -149,7 +150,10 @@ class BaseInfluenceModel:
         """
         return self.backend.forward(self.model, inputs)
 
-    def _process_weights_list(self, weights_to_watch: Union[Any, List[Any]]) -> List[Any]:
+    def _process_weights_list(
+        self,
+        weights_to_watch: Union[WeightVariable, List[WeightVariable]],
+    ) -> List[WeightVariable]:
         """
         Ensure a proper formatting of the weights (flatten nested lists).
 
@@ -164,12 +168,14 @@ class BaseInfluenceModel:
             A flat list of weights.
         """
         if self.weights_processed:
-            return weights_to_watch
+            if isinstance(weights_to_watch, (list, tuple)):
+                return list(weights_to_watch)
+            return [weights_to_watch]
 
         if not isinstance(weights_to_watch, (list, tuple)):
             return [weights_to_watch]
 
-        processed_weights: List[Any] = []
+        processed_weights: List[WeightVariable] = []
         for weights in weights_to_watch:
             if isinstance(weights, (list, tuple)):
                 processed_weights.extend(weights)
@@ -179,7 +185,7 @@ class BaseInfluenceModel:
         return processed_weights
 
     @property
-    def layers(self) -> List[Any]:
+    def layers(self) -> List[Layer]:
         """
         Access the layers of the original model.
 
@@ -190,7 +196,7 @@ class BaseInfluenceModel:
         """
         return self.backend.get_layers(self.model)
 
-    def _compute_loss(self, batch: Tuple[Any, ...]) -> Any:
+    def _compute_loss(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the model's loss for a single batch of samples.
 
@@ -209,7 +215,7 @@ class BaseInfluenceModel:
             self.model, self.loss_function, model_inp, y_true, sample_weight
         )
 
-    def _compute_jacobian(self, batch: Tuple[Any, ...]) -> Any:
+    def _compute_jacobian(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the model's Jacobian for a single batch of samples.
 
@@ -229,7 +235,7 @@ class BaseInfluenceModel:
             model_inp, y_true, sample_weight
         )
 
-    def _compute_gradient(self, batch: Tuple[Any, ...]) -> Any:
+    def _compute_gradient(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the model's gradient for a single batch of samples.
 
@@ -249,7 +255,7 @@ class BaseInfluenceModel:
             model_inp, y_true, sample_weight
         )
 
-    def _loss_tensor(self, batch: Tuple[Any, ...]) -> Any:
+    def _loss_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the model's loss on the batched tensor.
 
@@ -265,7 +271,7 @@ class BaseInfluenceModel:
         """
         return self._compute_loss(batch)
 
-    def batch_loss(self, dataset: Any) -> Any:
+    def batch_loss(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the model's loss on the whole batched dataset.
 
@@ -282,7 +288,7 @@ class BaseInfluenceModel:
         losses = [self._compute_loss(batch) for batch in dataset]
         return self.backend.concat(losses, axis=0)
 
-    def batch_jacobian_tensor(self, batch: Tuple[Any, ...]) -> Any:
+    def batch_jacobian_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the Jacobian of the loss wrt the weights on a Tensor.
 
@@ -298,7 +304,7 @@ class BaseInfluenceModel:
         """
         return self._compute_jacobian(batch)
 
-    def batch_jacobian(self, dataset: Any) -> Any:
+    def batch_jacobian(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the Jacobian of the loss wrt the weights on the whole batched dataset.
 
@@ -315,7 +321,7 @@ class BaseInfluenceModel:
         jacobians = [self._compute_jacobian(batch) for batch in dataset]
         return self.backend.concat(jacobians, axis=0)
 
-    def batch_gradient_tensor(self, batch: Tuple[Any, ...]) -> Any:
+    def batch_gradient_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the gradient of the loss wrt the weights on a Tensor.
 
@@ -331,7 +337,7 @@ class BaseInfluenceModel:
         """
         return self._compute_gradient(batch)
 
-    def batch_gradient(self, dataset: Any) -> Any:
+    def batch_gradient(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the gradient of the loss wrt the weights on the whole batched dataset.
 
@@ -375,10 +381,10 @@ class InfluenceModel(BaseInfluenceModel):
 
     def __init__(
         self,
-        model: Any,
+        model: Model,
         start_layer: Optional[Union[str, int]] = None,
         last_layer: Optional[Union[str, int]] = None,
-        loss_function: Optional[Callable] = None,
+        loss_function: Optional[LossFunction] = None,
         process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch
     ):
         self.start_layer = start_layer
@@ -401,10 +407,10 @@ class InfluenceModel(BaseInfluenceModel):
     @staticmethod
     def _get_weights_of_interest(
         backend: BaseBackend,
-        model: Any,
+        model: Model,
         start_layer: Optional[Union[str, int]],
         last_layer: Optional[Union[str, int]]
-    ) -> List[Any]:
+    ) -> List[WeightVariable]:
         """
         Gets the list of trainable weights from layer 'start_layer' to layer 'last_layer'.
 

@@ -9,10 +9,12 @@ https://arxiv.org/abs/1811.09720
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from typing import Any, Callable, Optional, Tuple, Union
+
 from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import Framework
-from ..types import Tuple, Callable, Union, Any, Optional, DatasetLike
+from ..types import DatasetLike
 
 
 class RepresenterPointL2(BaseRepresenterPoint):
