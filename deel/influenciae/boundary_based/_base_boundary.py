@@ -5,8 +5,9 @@
 """
 Shared utilities for boundary-based influence calculators.
 """
+from typing import Any, Tuple
+
 from ..common import BaseBackend
-from ..types import Tuple, Any
 
 
 class _BaseBoundaryCalculatorMixin:

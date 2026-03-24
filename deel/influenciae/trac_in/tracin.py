@@ -11,10 +11,11 @@ a more efficient estimation at the cost of a little precision.
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from typing import Any, List, Tuple, Union
+
 import numpy as np
 
 from ..common import InfluenceModel, BaseInfluenceCalculator, BaseBackend
-from ..types import Union, List, Tuple, Any
 
 
 class TracIn(BaseInfluenceCalculator):

@@ -7,12 +7,11 @@ TensorFlow-specific utilities for benchmark workflows.
 """
 import os
 import json
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.optimizers import Optimizer  # pylint: disable=E0611
-
-from ..types import Optional, Dict, Any, List
 
 
 class ModelsSaver(tf.keras.callbacks.Callback):

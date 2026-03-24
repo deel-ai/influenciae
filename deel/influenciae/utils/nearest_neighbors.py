@@ -10,6 +10,7 @@ examples of datasets, as implemented in the influence calculator interface.
 This module is backend-agnostic and supports both TensorFlow and PyTorch.
 """
 from abc import abstractmethod
+from typing import Any, Callable, Optional, Tuple, Union
 from warnings import warn
 
 from .._optional_imports import import_optional_module
@@ -19,7 +20,6 @@ from ..common.backend import (
     Framework,
     get_backend,
 )
-from ..types import Any, Callable, Optional, Tuple, Union
 
 
 def _ensure_reiterable_dataset(dataset: Any, context: str = "dataset") -> Any:

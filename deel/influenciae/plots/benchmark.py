@@ -7,11 +7,10 @@ Module for creating the visualizations for better understanding the results obta
 through the benchmark module.
 """
 import os
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 from matplotlib import pyplot as plt
-
-from ..types import Dict, Tuple, Optional
 
 
 class BenchmarkDisplay:

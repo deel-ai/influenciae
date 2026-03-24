@@ -15,8 +15,9 @@ The adversarial attacks are performed via deep fool.
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from typing import Any, Tuple
+
 from ..common import SelfInfluenceCalculator, BaseBackend, get_backend_for_model
-from ..types import Tuple, Any
 from ._base_boundary import _BaseBoundaryCalculatorMixin
 
 
