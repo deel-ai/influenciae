@@ -1,11 +1,11 @@
 import os
 import shutil
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import pytest
 import tensorflow as tf
 
-from deel.influenciae.types import Optional, Tuple, Any
 from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
 
 

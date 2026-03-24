@@ -15,8 +15,9 @@ This boundary deformation process is performed using deep fool on the target wei
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
+from typing import Any, List, Tuple
+
 from ..common import SelfInfluenceCalculator, BaseBackend, get_backend_for_model
-from ..types import Tuple, List, Any
 from ._base_boundary import _BaseBoundaryCalculatorMixin
 
 

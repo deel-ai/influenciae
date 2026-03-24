@@ -11,6 +11,7 @@ performing influence calculator technique should be able to put forth the mislab
 samples among the top-most influential points.
 """
 import ssl
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -25,8 +26,6 @@ from tensorflow.keras.optimizers import Adam # pylint: disable=E0611
 from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator
 from .tensorflow_benchmark_utils import ModelsSaver
 from .model_resnet import ResNet
-
-from ..types import Tuple, Union, Any, Optional, List
 
 ssl._create_default_https_context = ssl._create_unverified_context # type: ignore[assignment] # pylint: disable=W0212
 

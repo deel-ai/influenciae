@@ -9,9 +9,9 @@ This code was based on an implementation by Louis Bethune (ANITI) -- https://git
 Supports both TensorFlow and PyTorch backends.
 """
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 from .._optional_imports import import_optional_attr, import_optional_module
-from ..types import Callable, Optional
 
 
 @dataclass()

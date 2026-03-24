@@ -6,12 +6,11 @@
 Module implementing plotting functions for image-type data.
 """
 from math import ceil
+from typing import Optional, Union
 
 import tensorflow as tf
 import numpy as np
 from matplotlib import pyplot as plt
-
-from ..types import Optional, Union
 
 
 def _normalize(image: Union[tf.Tensor, np.ndarray]) -> np.ndarray:

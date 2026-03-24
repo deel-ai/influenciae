@@ -1,10 +1,11 @@
+from typing import Any, Optional, Tuple
+
 import numpy as np
 import pytest
 import torch
 
 from torch.utils.data import TensorDataset
 
-from deel.influenciae.types import Optional, Tuple, Any
 from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
 
 
