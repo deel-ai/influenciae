@@ -10,11 +10,12 @@ functions.
 from abc import ABC, abstractmethod
 from enum import Enum
 from argparse import ArgumentError
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 
-from ..types import Optional, Union, Tuple, List, Callable, Any
+from ..types import DatasetLike, Model, Tensor, WeightVariable
 from ..utils.conjugate_gradients import conjugate_gradients_solve
 
 
@@ -31,7 +32,7 @@ class InverseHessianVectorProduct(ABC):
        A batched dataset containing the training dataset's point we wish to employ for the estimation of
        the hessian matrix.
     """
-    def __init__(self, model: BaseInfluenceModel, train_dataset: Optional[Any]):
+    def __init__(self, model: BaseInfluenceModel, train_dataset: Optional[DatasetLike]):
         self.model = model
         self.train_set = train_dataset
         self.backend: BaseBackend = model.backend
@@ -40,7 +41,7 @@ class InverseHessianVectorProduct(ABC):
             self.cardinality = self.backend.get_dataset_cardinality(train_dataset)
 
     @abstractmethod
-    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the inverse-hessian-vector product of a group of points provided in the form of
         a batch of tensors.
@@ -61,7 +62,7 @@ class InverseHessianVectorProduct(ABC):
         """
         raise NotImplementedError
 
-    def compute_ihvp(self, group: Any, use_gradient: bool = True) -> Any:
+    def compute_ihvp(self, group: DatasetLike, use_gradient: bool = True) -> DatasetLike:
         """
         Computes the inverse-hessian-vector product of a group of points.
 
@@ -89,7 +90,7 @@ class InverseHessianVectorProduct(ABC):
         return ihvp_dataset
 
     @abstractmethod
-    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the hessian-vector product of a group of points.
 
@@ -109,7 +110,7 @@ class InverseHessianVectorProduct(ABC):
         """
         raise NotImplementedError()
 
-    def compute_hvp(self, group: Any, use_gradient: bool = True) -> Any:
+    def compute_hvp(self, group: DatasetLike, use_gradient: bool = True) -> DatasetLike:
         """
         Computes the hessian-vector product of a group of points.
 
@@ -171,12 +172,12 @@ class ExactIHVP(InverseHessianVectorProduct):
     def __init__(
             self,
             model: InfluenceModel,
-            train_dataset: Optional[Any] = None,
-            train_hessian: Optional[Any] = None,
+            train_dataset: Optional[DatasetLike] = None,
+            train_hessian: Optional[Tensor] = None,
     ):
         super().__init__(model, train_dataset)
         if train_dataset is not None:
-            self.inv_hessian = self._compute_inv_hessian(self.train_set)
+            self.inv_hessian = self._compute_inv_hessian(train_dataset)
             self.hessian = None
         elif train_hessian is not None:
             self.hessian = train_hessian
@@ -184,7 +185,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         else:
             raise ArgumentError(None, "Either train_dataset or train_hessian can be set to None, but not both")
 
-    def _compute_inv_hessian(self, dataset: Any) -> Any:
+    def _compute_inv_hessian(self, dataset: DatasetLike) -> Tensor:
         """
         Compute the (pseudo)-inverse of the hessian matrix wrt to the model's parameters using
         backward-mode AD.
@@ -214,7 +215,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         )
         return self.backend.pinv(hessian)
 
-    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the inverse-hessian-vector product of a group of points provided in the form of
         a batch of tensors by computing the exact inverse hessian matrix and performing the product
@@ -247,7 +248,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         ihvp = self.backend.matmul(self.inv_hessian, self.backend.transpose(grads_cast))
         return ihvp
 
-    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the hessian-vector product of a group of points provided in the form of a tuple
         of tensors by computing the hessian matrix and performing the product operation.
@@ -277,7 +278,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         hvp = self.backend.matmul(self.hessian, self.backend.transpose(grads))
         return hvp
 
-    def compute_hvp(self, group: Any, use_gradient: bool = True) -> Any:
+    def compute_hvp(self, group: DatasetLike, use_gradient: bool = True) -> DatasetLike:
         """
         Computes the hessian-vector product of a group of points provided in the form of a tuple
         of tensors by computing the hessian matrix and performing the product operation.
@@ -324,8 +325,8 @@ class ForwardOverBackwardHVP:
     def __init__(
             self,
             model: BaseInfluenceModel,
-            train_dataset: Any,
-            weights: Optional[List[Any]] = None,
+            train_dataset: DatasetLike,
+            weights: Optional[List[WeightVariable]] = None,
             stochastic_hvp: bool = False,
             hvp_steps_per_iter: int = 1,
             hvp_batch_size: Optional[int] = None
@@ -361,7 +362,7 @@ class ForwardOverBackwardHVP:
                 stochastic_dataset = self.backend.batch_dataset(stochastic_dataset, hvp_batch_size)
             self._stochastic_dataset = stochastic_dataset
 
-    def _reshape_vector(self, grads: Any) -> List[Any]:
+    def _reshape_vector(self, grads: Tensor) -> List[Tensor]:
         """
         Reshapes the gradient vector to the right shape for being input into the HVP computation.
 
@@ -382,10 +383,10 @@ class ForwardOverBackwardHVP:
 
     def _sub_call(
             self,
-            x: List[Any],
-            feature_maps_hessian_current: Any,
-            y_hessian_current: Any
-    ) -> Any:
+            x: List[Tensor],
+            feature_maps_hessian_current: Tensor,
+            y_hessian_current: Tensor
+    ) -> Tensor:
         """
         Performs the hessian-vector product for a batch of feature maps.
 
@@ -414,7 +415,7 @@ class ForwardOverBackwardHVP:
 
         return hvp
 
-    def __call__(self, x_initial: Any) -> Any:
+    def __call__(self, x_initial: Tensor) -> Tensor:
         """
         Computes the mean hessian-vector product for a given feature map over a set of points.
 
@@ -520,9 +521,9 @@ class IterativeIHVP(InverseHessianVectorProduct):
             iterative_function: Callable,
             model: InfluenceModel,
             extractor_layer: Union[int, str],
-            train_dataset: Any,
+            train_dataset: DatasetLike,
             n_opt_iters: Optional[int] = 100,
-            feature_extractor: Optional[Any] = None,
+            feature_extractor: Optional[Model] = None,
             stochastic_hvp: bool = False,
             hvp_steps_per_iter: int = 1,
             hvp_batch_size: Optional[int] = None,
@@ -562,7 +563,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         )
         self.iterative_function = iterative_function
 
-    def _resolve_extractor_layer_idx(self, full_model: Any, extractor_layer: Union[int, str]) -> int:
+    def _resolve_extractor_layer_idx(self, full_model: Model, extractor_layer: Union[int, str]) -> int:
         """Resolve a layer name/index to a concrete integer index."""
         if isinstance(extractor_layer, str):
             layer_idx, _ = self.backend.find_layer_by_name(full_model, extractor_layer)
@@ -575,7 +576,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         """
         return self._batch_shape_tensor
 
-    def _compute_feature_map_dataset(self, dataset: Any) -> Any:
+    def _compute_feature_map_dataset(self, dataset: DatasetLike) -> DatasetLike:
         """
         Extracts the feature maps for an entire dataset and creates a dataset associating them with
         their corresponding labels.
@@ -603,7 +604,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
 
         return feature_map_dataset
 
-    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the inverse-hessian-vector product of a group of points provided in the form of
         a batch of tensors by inverting the hessian-vector product that is calculated through
@@ -633,7 +634,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         ihvp_list = self.iterative_function(self.hessian_vector_product, rhs, self.n_opt_iters)
         return ihvp_list
 
-    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Tensor, ...], use_gradient: bool = True) -> Tensor:
         """
         Computes the hessian-vector product of a group of points provided in the form of a tuple
         of tensors through forward-over-backward AD.
@@ -697,9 +698,9 @@ class ConjugateGradientDescentIHVP(IterativeIHVP):
             self,
             model: InfluenceModel,
             extractor_layer: Union[int, str],
-            train_dataset: Any,
+            train_dataset: DatasetLike,
             n_opt_iters: Optional[int] = 100,
-            feature_extractor: Optional[Any] = None,
+            feature_extractor: Optional[Model] = None,
             stochastic_hvp: bool = False,
             hvp_steps_per_iter: int = 1,
             hvp_batch_size: Optional[int] = None,
@@ -761,9 +762,9 @@ class LissaIHVP(IterativeIHVP):
             self,
             model: InfluenceModel,
             extractor_layer: Union[int, str],
-            train_dataset: Any,
+            train_dataset: DatasetLike,
             n_opt_iters: Optional[int] = 100,
-            feature_extractor: Optional[Any] = None,
+            feature_extractor: Optional[Model] = None,
             damping: float = 1e-4,
             scale: float = 10.,
             stochastic_hvp: bool = False,
@@ -784,7 +785,7 @@ class LissaIHVP(IterativeIHVP):
         self.damping = self.backend.convert_to_tensor(damping, dtype=self.backend.float32_dtype())
         self.scale = self.backend.convert_to_tensor(scale, dtype=self.backend.float32_dtype())
 
-    def lissa(self, operator: Callable, v: Any, maxiter: int) -> Any:
+    def lissa(self, operator: Callable, v: Tensor, maxiter: int) -> Tensor:
         """
         Performs the Linear time Stochastic Second-order Algorithm (LiSSA) optimization procedure to solve
         a problem of the shape Ax = b by iterating as follows:

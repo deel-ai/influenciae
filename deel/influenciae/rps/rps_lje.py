@@ -10,11 +10,12 @@ https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
 import copy
+from typing import Any, Optional, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
 from ..common import InfluenceModel, InverseHessianVectorProductFactory, Framework
-from ..types import Union, Optional, Any, DatasetLike
+from ..types import DatasetLike
 
 
 class RepresenterPointLJE(BaseRepresenterPoint):

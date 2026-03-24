@@ -8,9 +8,11 @@ Functions"](https://arxiv.org/pdf/2112.03052.pdf). The Arnoldi algorithm effecti
 reduces the dimension of the problem of computing IHVPs and allows for the calculation
 of influence values on big neural network models.
 """
+from typing import Tuple
+
 from ..common import InfluenceModel, BaseInfluenceCalculator, ForwardOverBackwardHVP
 from ..common.backend import BaseBackend
-from ..types import Tuple, Any, DatasetLike
+from ..types import DType, DatasetLike, Tensor
 
 
 class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
@@ -49,7 +51,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
             subspace_dim: int,
             force_hermitian: bool,
             k_largest_eig_vals: int,
-            dtype: Any = None
+            dtype: DType = None
     ):
         self.subspace_dim = subspace_dim
         self.force_hermitian = force_hermitian
@@ -66,7 +68,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         self.eig_vals, self.G = self.arnoldi(self.model.nb_params)
 
-    def arnoldi(self, dim: int) -> Tuple[Any, Any]:
+    def arnoldi(self, dim: int) -> Tuple[Tensor, Tensor]:
         """
         Builds the projection of the inverse of the hessian on the Krylov subspaces.
 
@@ -90,10 +92,10 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
     def _build_orthogonal_basis_iter(
             self,
-            W: Any,
-            A: Any,
+            W: Tensor,
+            A: Tensor,
             index: int
-    ) -> Any:
+    ) -> Tuple[Tensor, Tensor, int]:
         """
         Builds the new vector of the Krylov's basis and computes the projection of the hessian for this vector.
 
@@ -151,9 +153,9 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         zeros_A = self.backend.zeros((A_shape[0] - index - 1, A_shape[1]), dtype=self.dtype)
         A = self.backend.concat([A[:index], A_next_line_expanded, zeros_A], axis=0)
 
-        return [W, A, index + 1]
+        return W, A, index + 1
 
-    def _build_orthogonal_basis(self, v: Any) -> Tuple[Any, Any]:
+    def _build_orthogonal_basis(self, v: Tensor) -> Tuple[Tensor, Tensor]:
         """
         Build orthonormal basis for the Krylov subspaces with the first vector of the basis v.
         Project the hessian on the Krylov subspaces.
@@ -192,7 +194,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         return A, W
 
-    def _distill(self, A: Any, W: Any) -> Tuple[Any, Any]:
+    def _distill(self, A: Tensor, W: Tensor) -> Tuple[Tensor, Tensor]:
         """
         Inverse the projection by performing the following operations:
 
@@ -245,7 +247,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         return eig_vals, G
 
-    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Compute an equivalent of the influence vector for a sample of training points.
 
@@ -268,7 +270,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         return influence_vectors
 
-    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Pre-process a sample to facilitate evaluation afterwards. In this case, it amounts to transforming
         it into it's "influence vector".
@@ -294,9 +296,9 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: Any,
-            influence_vector: Any
-    ) -> Any:
+            preproc_test_sample: Tensor,
+            influence_vector: Tensor
+    ) -> Tensor:
         """
         Compute the influence score of a (pre-processed) sample and an "influence vector" from a training
         data-point
@@ -318,7 +320,7 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
         return influence_values
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Compute the influence score for a training sample
 
@@ -348,9 +350,9 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[Any, ...],
-            samples_to_evaluate: Tuple[Any, ...]
-    ) -> Any:
+            train_samples: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Tensor, ...]
+    ) -> Tensor:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.

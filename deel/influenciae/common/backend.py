@@ -15,6 +15,7 @@ from typing import Any, List, Tuple, Callable, Optional, Union
 import numpy as np
 
 from .._optional_imports import import_optional_attr, import_optional_module
+from ..types import DatasetLike, DType, ElementSpec, Layer, LossFunction, Model, Tensor, WeightVariable
 
 
 class Framework(Enum):
@@ -42,7 +43,7 @@ def get_available_frameworks() -> List[Framework]:
     return available
 
 
-def detect_framework(model: Any) -> Framework:
+def detect_framework(model: Model) -> Framework:
     """
     Detect which framework a model belongs to.
 
@@ -81,7 +82,7 @@ def detect_framework(model: Any) -> Framework:
     )
 
 
-def detect_tensor_framework(tensor: Any) -> Framework:
+def detect_tensor_framework(tensor: Tensor) -> Framework:
     """
     Detect which framework a tensor belongs to.
 
@@ -120,7 +121,7 @@ def detect_tensor_framework(tensor: Any) -> Framework:
     )
 
 
-def detect_dtype_framework(dtype: Any) -> Optional[Framework]:
+def detect_dtype_framework(dtype: DType) -> Optional[Framework]:
     """
     Detect which framework a dtype belongs to.
 
@@ -162,7 +163,7 @@ def detect_dtype_framework(dtype: Any) -> Optional[Framework]:
     return None
 
 
-def get_backend_for_tensor(tensor: Any) -> "BaseBackend":
+def get_backend_for_tensor(tensor: Tensor) -> "BaseBackend":
     """
     Get the appropriate backend for a tensor.
 
@@ -191,7 +192,11 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """Return the framework this backend supports."""
 
     @abstractmethod
-    def get_model_weights(self, model: Any, layers: Optional[List[Any]] = None) -> List[Any]:
+    def get_model_weights(
+        self,
+        model: Model,
+        layers: Optional[List[Layer]] = None,
+    ) -> List[WeightVariable]:
         """
         Get trainable weights from a model.
 
@@ -209,7 +214,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_num_params(self, weights: List[Any]) -> int:
+    def get_num_params(self, weights: List[WeightVariable]) -> int:
         """
         Get the total number of parameters in a list of weights.
 
@@ -225,7 +230,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def normalize_weights_to_watch(self, weights: List[Any]) -> List[Any]:
+    def normalize_weights_to_watch(self, weights: List[WeightVariable]) -> List[WeightVariable]:
         """
         Normalize weights to objects supported by backend autodiff watch APIs.
 
@@ -243,12 +248,12 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_loss(
         self,
-        model: Any,
-        loss_function: Callable,
-        inputs: Any,
-        targets: Any,
-        sample_weight: Optional[Any] = None
-    ) -> Any:
+        model: Model,
+        loss_function: LossFunction,
+        inputs: Tensor,
+        targets: Tensor,
+        sample_weight: Optional[Tensor] = None
+    ) -> Tensor:
         """
         Compute the loss for a batch of samples.
 
@@ -274,13 +279,13 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_jacobian(
         self,
-        model: Any,
-        weights: List[Any],
-        loss_function: Callable,
-        inputs: Any,
-        targets: Any,
-        sample_weight: Optional[Any] = None
-    ) -> Any:
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        inputs: Tensor,
+        targets: Tensor,
+        sample_weight: Optional[Tensor] = None
+    ) -> Tensor:
         """
         Compute the Jacobian of the loss with respect to weights.
 
@@ -308,13 +313,13 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_gradient(
         self,
-        model: Any,
-        weights: List[Any],
-        loss_function: Callable,
-        inputs: Any,
-        targets: Any,
-        sample_weight: Optional[Any] = None
-    ) -> Any:
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        inputs: Tensor,
+        targets: Tensor,
+        sample_weight: Optional[Tensor] = None
+    ) -> Tensor:
         """
         Compute the gradient of the loss with respect to weights.
 
@@ -340,67 +345,67 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def concat(self, tensors: List[Any], axis: int = 0) -> Any:
+    def concat(self, tensors: List[Tensor], axis: int = 0) -> Tensor:
         """Concatenate tensors along an axis."""
 
     @abstractmethod
-    def stack(self, tensors: List[Any], axis: int = 0) -> Any:
+    def stack(self, tensors: List[Tensor], axis: int = 0) -> Tensor:
         """Stack tensors along a new axis."""
 
     @abstractmethod
-    def reshape(self, tensor: Any, shape: Tuple[int, ...]) -> Any:
+    def reshape(self, tensor: Tensor, shape: Tuple[int, ...]) -> Tensor:
         """Reshape a tensor."""
 
     @abstractmethod
-    def to_numpy(self, tensor: Any) -> np.ndarray:
+    def to_numpy(self, tensor: Tensor) -> np.ndarray:
         """Convert a tensor to numpy array."""
 
     @abstractmethod
-    def get_batch_size(self, tensor: Any) -> int:
+    def get_batch_size(self, tensor: Tensor) -> int:
         """Get the batch size (first dimension) of a tensor."""
 
     @abstractmethod
-    def reduce_sum(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
+    def reduce_sum(self, tensor: Tensor, axis: Optional[int] = None, keepdims: bool = False) -> Tensor:
         """Reduce sum along an axis."""
 
     @abstractmethod
-    def expand_dims(self, tensor: Any, axis: int) -> Any:
+    def expand_dims(self, tensor: Tensor, axis: int) -> Tensor:
         """Add a new axis to a tensor."""
 
     @abstractmethod
-    def squeeze(self, tensor: Any, axis: Optional[int] = None) -> Any:
+    def squeeze(self, tensor: Tensor, axis: Optional[int] = None) -> Tensor:
         """Remove dimensions of size 1."""
 
     @abstractmethod
-    def transpose(self, tensor: Any) -> Any:
+    def transpose(self, tensor: Tensor) -> Tensor:
         """Transpose a tensor (swap last two dimensions)."""
 
     @abstractmethod
-    def tensor_shape(self, tensor: Any) -> Tuple[int, ...]:
+    def tensor_shape(self, tensor: Tensor) -> Tuple[int, ...]:
         """Get the shape of a tensor."""
 
     @abstractmethod
-    def tensor_ndim(self, tensor: Any) -> int:
+    def tensor_ndim(self, tensor: Tensor) -> int:
         """Get the number of dimensions of a tensor."""
 
     @abstractmethod
-    def matmul(self, a: Any, b: Any) -> Any:
+    def matmul(self, a: Tensor, b: Tensor) -> Tensor:
         """Matrix multiplication."""
 
     @abstractmethod
-    def multiply(self, a: Any, b: Any) -> Any:
+    def multiply(self, a: Tensor, b: Tensor) -> Tensor:
         """Element-wise multiplication."""
 
     @abstractmethod
-    def abs(self, tensor: Any) -> Any:
+    def abs(self, tensor: Tensor) -> Tensor:
         """Compute absolute value of a tensor."""
 
     @abstractmethod
-    def argmax(self, tensor: Any, axis: int) -> Any:
+    def argmax(self, tensor: Tensor, axis: int) -> Tensor:
         """Return indices of maximum values along an axis."""
 
     @abstractmethod
-    def gather_along_axis(self, tensor: Any, indices: Any, axis: int, batch_dims: int = 0) -> Any:
+    def gather_along_axis(self, tensor: Tensor, indices: Tensor, axis: int, batch_dims: int = 0) -> Tensor:
         """
         Gather values from tensor along an axis using indices.
 
@@ -422,7 +427,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_output_shape(self, model: Any) -> Tuple[Optional[int], ...]:
+    def get_output_shape(self, model: Model) -> Tuple[Optional[int], ...]:
         """
         Get the output shape of a model.
 
@@ -438,7 +443,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def split_model(self, model: Any, target_layer: Union[str, int]) -> Tuple[Any, Any]:
+    def split_model(self, model: Model, target_layer: Union[str, int]) -> Tuple[Model, Model]:
         """
         Split a model into two sub-models at a target layer.
 
@@ -458,7 +463,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def normalize(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
+    def normalize(self, tensor: Tensor, axis: Optional[int] = None, keepdims: bool = False) -> Tensor:
         """
         Normalize a tensor along an axis using L2 norm.
 
@@ -478,7 +483,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def find_layer_by_name(self, model: Any, layer_name: str) -> Tuple[int, Any]:
+    def find_layer_by_name(self, model: Model, layer_name: str) -> Tuple[int, Layer]:
         """
         Find a layer by name and return its index and the layer.
 
@@ -498,20 +503,20 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_layers(self, model: Any) -> List[Any]:
+    def get_layers(self, model: Model) -> List[Layer]:
         """Get all layers from a model."""
 
     @abstractmethod
-    def forward(self, model: Any, inputs: Any) -> Any:
+    def forward(self, model: Model, inputs: Tensor) -> Tensor:
         """Run forward pass on a model."""
 
     @abstractmethod
     def get_weights_for_layer_range(
         self,
-        model: Any,
-        start_layer: Optional[Any] = None,
-        last_layer: Optional[Any] = None
-    ) -> List[Any]:
+        model: Model,
+        start_layer: Optional[Union[str, int]] = None,
+        last_layer: Optional[Union[str, int]] = None
+    ) -> List[WeightVariable]:
         """
         Get weights for a range of layers.
 
@@ -532,7 +537,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
 
     # Dataset operations
     @abstractmethod
-    def map_dataset(self, dataset: Any, map_fn: Callable, device: Optional[str] = None) -> Any:
+    def map_dataset(self, dataset: DatasetLike, map_fn: Callable, device: Optional[str] = None) -> DatasetLike:
         """
         Apply a mapping function to each batch in a dataset.
 
@@ -552,7 +557,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def cache_dataset(self, dataset: Any) -> Any:
+    def cache_dataset(self, dataset: DatasetLike) -> DatasetLike:
         """
         Cache a dataset in memory.
 
@@ -568,7 +573,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def save_dataset(self, dataset: Any, path: str) -> None:
+    def save_dataset(self, dataset: DatasetLike, path: str) -> None:
         """
         Save a dataset to disk.
 
@@ -581,7 +586,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def load_dataset(self, path: str) -> Any:
+    def load_dataset(self, path: str) -> DatasetLike:
         """
         Load a dataset from disk.
 
@@ -597,7 +602,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_dataset_batch_size(self, dataset: Any) -> int:
+    def get_dataset_batch_size(self, dataset: DatasetLike) -> int:
         """
         Get the batch size of a dataset.
 
@@ -613,7 +618,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def zip_datasets(self, dataset1: Any, dataset2: Any) -> Any:
+    def zip_datasets(self, dataset1: DatasetLike, dataset2: DatasetLike) -> DatasetLike:
         """
         Zip two datasets together.
 
@@ -631,7 +636,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def batch_dataset(self, dataset: Any, batch_size: int) -> Any:
+    def batch_dataset(self, dataset: DatasetLike, batch_size: int) -> DatasetLike:
         """
         Batch a dataset.
 
@@ -649,7 +654,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def create_dataset_from_tensors(self, tensors: Any, batch_size: int) -> Any:
+    def create_dataset_from_tensors(self, tensors: Union[Tensor, Tuple[Tensor, ...]], batch_size: int) -> DatasetLike:
         """
         Create a batched dataset from a single tensor or tuple of tensors.
 
@@ -667,7 +672,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def unbatch_dataset(self, dataset: Any) -> Any:
+    def unbatch_dataset(self, dataset: DatasetLike) -> DatasetLike:
         """
         Unbatch a dataset.
 
@@ -683,7 +688,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def shuffle_dataset(self, dataset: Any, buffer_size: int) -> Any:
+    def shuffle_dataset(self, dataset: DatasetLike, buffer_size: int) -> DatasetLike:
         """
         Shuffle a dataset.
 
@@ -701,7 +706,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def take_dataset(self, dataset: Any, count: int) -> Any:
+    def take_dataset(self, dataset: DatasetLike, count: int) -> DatasetLike:
         """
         Take a number of elements from a dataset.
 
@@ -719,7 +724,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_dataset_size(self, dataset: Any) -> int:
+    def get_dataset_size(self, dataset: DatasetLike) -> int:
         """
         Get the total number of elements in a dataset.
 
@@ -735,7 +740,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_dataset_element_spec(self, dataset: Any) -> Any:
+    def get_dataset_element_spec(self, dataset: DatasetLike) -> ElementSpec:
         """
         Get the element spec of a dataset.
 
@@ -751,7 +756,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def assert_batched_dataset(self, dataset: Any) -> None:
+    def assert_batched_dataset(self, dataset: DatasetLike) -> None:
         """
         Assert that a dataset is batched.
 
@@ -768,23 +773,23 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
 
     # Linear algebra operations for IHVP
     @abstractmethod
-    def zeros(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+    def zeros(self, shape: Tuple[int, ...], dtype: Optional[DType] = None) -> Tensor:
         """Create a tensor of zeros."""
 
     @abstractmethod
-    def zeros_like(self, tensor: Any) -> Any:
+    def zeros_like(self, tensor: Tensor) -> Tensor:
         """Create a tensor of zeros with the same shape and dtype as the input."""
 
     @abstractmethod
-    def ones(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+    def ones(self, shape: Tuple[int, ...], dtype: Optional[DType] = None) -> Tensor:
         """Create a tensor of ones."""
 
     @abstractmethod
-    def ones_like(self, tensor: Any) -> Any:
+    def ones_like(self, tensor: Tensor) -> Tensor:
         """Create a tensor of ones with the same shape and dtype as the input."""
 
     @abstractmethod
-    def argsort(self, tensor: Any, axis: int = -1, descending: bool = False) -> Any:
+    def argsort(self, tensor: Tensor, axis: int = -1, descending: bool = False) -> Tensor:
         """
         Return the indices that would sort the tensor along an axis.
 
@@ -804,63 +809,63 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def copy(self, tensor: Any) -> Any:
+    def copy(self, tensor: Tensor) -> Tensor:
         """Create a copy of a tensor."""
 
     @abstractmethod
-    def sqrt(self, tensor: Any) -> Any:
+    def sqrt(self, tensor: Tensor) -> Tensor:
         """Compute element-wise square root."""
 
     @abstractmethod
-    def maximum(self, a: Any, b: Any) -> Any:
+    def maximum(self, a: Union[Tensor, float, int], b: Union[Tensor, float, int]) -> Tensor:
         """Element-wise maximum of two tensors/scalars."""
 
     @abstractmethod
-    def pinv(self, matrix: Any) -> Any:
+    def pinv(self, matrix: Tensor) -> Tensor:
         """Compute the Moore-Penrose pseudo-inverse of a matrix."""
 
     @abstractmethod
-    def cast(self, tensor: Any, dtype: Any) -> Any:
+    def cast(self, tensor: Union[Tensor, float, int, bool], dtype: DType) -> Tensor:
         """Cast a tensor to a different dtype."""
 
     @abstractmethod
-    def get_dtype(self, tensor: Any) -> Any:
+    def get_dtype(self, tensor: Tensor) -> DType:
         """Get the dtype of a tensor."""
 
     @abstractmethod
-    def float32_dtype(self) -> Any:
+    def float32_dtype(self) -> DType:
         """Return the float32 dtype for the framework."""
 
     @abstractmethod
-    def int32_dtype(self) -> Any:
+    def int32_dtype(self) -> DType:
         """Return the int32 dtype for the framework."""
 
     @abstractmethod
-    def int64_dtype(self) -> Any:
+    def int64_dtype(self) -> DType:
         """Return the int64 dtype for the framework."""
 
     @abstractmethod
-    def constant(self, value: Any, dtype: Any = None) -> Any:
+    def constant(self, value: Any, dtype: Optional[DType] = None) -> Tensor:
         """Create a constant tensor."""
 
     @abstractmethod
-    def convert_to_tensor(self, value: Any, dtype: Any = None) -> Any:
+    def convert_to_tensor(self, value: Any, dtype: Optional[DType] = None) -> Tensor:
         """Convert a value to a tensor."""
 
     @abstractmethod
-    def reduce_prod(self, tensor: Any, axis: Optional[int] = None) -> Any:
+    def reduce_prod(self, tensor: Tensor, axis: Optional[int] = None) -> Tensor:
         """Reduce product along an axis."""
 
     @abstractmethod
     def compute_hessian(
         self,
-        model: Any,
-        weights: List[Any],
-        loss_function: Callable,
-        dataset: Any,
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        dataset: DatasetLike,
         nb_params: int,
         jacobian_fn: Optional[Callable] = None
-    ) -> Any:
+    ) -> Tensor:
         """
         Compute the Hessian matrix of the loss with respect to weights.
 
@@ -889,13 +894,13 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_hvp_single(
         self,
-        model: Any,
-        weights: List[Any],
-        loss_function: Callable,
-        v: Any,
-        inputs: Any,
-        targets: Any
-    ) -> Any:
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        v: List[Tensor],
+        inputs: Tensor,
+        targets: Tensor
+    ) -> Tensor:
         """
         Compute Hessian-vector product for a single sample using forward-over-backward AD.
 
@@ -923,13 +928,13 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_hvp_batch(
         self,
-        model: Any,
-        weights: List[Any],
-        loss_function: Callable,
-        v: Any,
-        inputs: Any,
-        targets: Any
-    ) -> Any:
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        v: List[Tensor],
+        inputs: Tensor,
+        targets: Tensor
+    ) -> Tensor:
         """
         Compute Hessian-vector product for a batch using forward-over-backward AD.
 
@@ -955,7 +960,12 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def map_fn(self, fn: Callable, elems: Any, output_signature: Optional[Any] = None) -> Any:
+    def map_fn(
+        self,
+        fn: Callable,
+        elems: Union[Tensor, Tuple[Tensor, ...]],
+        output_signature: Optional[ElementSpec] = None,
+    ) -> Tensor:
         """
         Apply a function to each element in a batch.
 
@@ -975,7 +985,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def get_dataset_cardinality(self, dataset: Any) -> int:
+    def get_dataset_cardinality(self, dataset: DatasetLike) -> int:
         """
         Get the number of batches in a dataset.
 
@@ -991,21 +1001,21 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def is_sequential_model(self, model: Any) -> bool:
+    def is_sequential_model(self, model: Model) -> bool:
         """Check if a model is a Sequential model."""
 
     @abstractmethod
-    def create_sequential_from_layers(self, layers: List[Any]) -> Any:
+    def create_sequential_from_layers(self, layers: List[Layer]) -> Model:
         """Create a Sequential model from a list of layers."""
 
     # Additional operations for boundary-based calculators
     @abstractmethod
     def norm(  # pylint: disable=redefined-builtin
         self,
-        tensor: Any,
+        tensor: Tensor,
         ord: Optional[int] = None,
         axis: Optional[int] = None,
-    ) -> Any:
+    ) -> Tensor:
         """
         Compute the norm of a tensor.
 
@@ -1025,7 +1035,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def top_k(self, tensor: Any, k: int) -> Tuple[Any, Any]:
+    def top_k(self, tensor: Tensor, k: int) -> Tuple[Tensor, Tensor]:
         """
         Return the top k values and their indices from a tensor.
 
@@ -1045,7 +1055,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def arange(self, start: int, end: int, dtype: Any = None) -> Any:
+    def arange(self, start: int, end: int, dtype: Optional[DType] = None) -> Tensor:
         """
         Create a tensor with values from start to end.
 
@@ -1065,7 +1075,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def tile(self, tensor: Any, multiples: Tuple[int, ...]) -> Any:
+    def tile(self, tensor: Tensor, multiples: Tuple[int, ...]) -> Tensor:
         """
         Tile a tensor by repeating it along each dimension.
 
@@ -1083,7 +1093,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def repeat(self, tensor: Any, repeats: int, axis: int) -> Any:
+    def repeat(self, tensor: Tensor, repeats: int, axis: int) -> Tensor:
         """
         Repeat elements of a tensor along an axis.
 
@@ -1103,7 +1113,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def sign(self, tensor: Any) -> Any:
+    def sign(self, tensor: Tensor) -> Tensor:
         """
         Compute the element-wise sign of a tensor.
 
@@ -1119,7 +1129,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def pow(self, tensor: Any, exponent: Any) -> Any:
+    def pow(self, tensor: Tensor, exponent: Union[Tensor, float, int]) -> Tensor:
         """
         Raise tensor elements to a power.
 
@@ -1137,7 +1147,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def logical_and(self, a: Any, b: Any) -> Any:
+    def logical_and(self, a: Tensor, b: Tensor) -> Tensor:
         """
         Compute element-wise logical AND.
 
@@ -1155,7 +1165,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def reduce_any(self, tensor: Any, axis: Optional[int] = None) -> Any:
+    def reduce_any(self, tensor: Tensor, axis: Optional[int] = None) -> Tensor:
         """
         Compute logical OR reduction along an axis.
 
@@ -1173,7 +1183,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def argmin(self, tensor: Any, axis: int) -> Any:
+    def argmin(self, tensor: Tensor, axis: int) -> Tensor:
         """
         Return indices of minimum values along an axis.
 
@@ -1191,7 +1201,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def reduce_mean(self, tensor: Any, axis: Optional[int] = None, keepdims: bool = False) -> Any:
+    def reduce_mean(self, tensor: Tensor, axis: Optional[int] = None, keepdims: bool = False) -> Tensor:
         """
         Compute the mean along an axis.
 
@@ -1211,7 +1221,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def clone_variable(self, variable: Any) -> Any:
+    def clone_variable(self, variable: WeightVariable) -> Tensor:
         """
         Create a copy of a variable (weight tensor).
 
@@ -1227,7 +1237,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def assign_variable(self, variable: Any, value: Any) -> None:
+    def assign_variable(self, variable: WeightVariable, value: Tensor) -> None:
         """
         Assign a value to a variable in-place.
 
@@ -1242,9 +1252,9 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_output_jacobian(
         self,
-        model: Any,
-        inputs: Any
-    ) -> Tuple[Any, Any]:
+        model: Model,
+        inputs: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         """
         Compute the Jacobian of the model output with respect to the input.
 
@@ -1266,10 +1276,10 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def compute_output_jacobian_wrt_weights(
         self,
-        model: Any,
-        weights: List[Any],
-        inputs: Any
-    ) -> Tuple[Any, List[Any]]:
+        model: Model,
+        weights: List[WeightVariable],
+        inputs: Tensor
+    ) -> Tuple[Tensor, List[Tensor]]:
         """
         Compute the Jacobian of the model output with respect to the weights.
 
@@ -1291,7 +1301,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def boolean_mask(self, tensor: Any, mask: Any) -> Any:
+    def boolean_mask(self, tensor: Tensor, mask: Tensor) -> Tensor:
         """
         Apply a boolean mask to a tensor.
 
@@ -1338,7 +1348,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
 
     # Arnoldi algorithm specific operations
     @abstractmethod
-    def random_normal(self, shape: Tuple[int, ...], dtype: Any = None) -> Any:
+    def random_normal(self, shape: Tuple[int, ...], dtype: Optional[DType] = None) -> Tensor:
         """
         Generate random tensor from normal distribution.
 
@@ -1356,7 +1366,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def diag_part(self, tensor: Any, k: int = 0) -> Any:
+    def diag_part(self, tensor: Tensor, k: int = 0) -> Tensor:
         """
         Extract diagonal from a matrix with offset k.
 
@@ -1376,10 +1386,10 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     def eigh_tridiagonal(
         self,
-        maindiag: Any,
-        superdiag: Any,
+        maindiag: Tensor,
+        superdiag: Tensor,
         eigvals_only: bool = False
-    ) -> Tuple[Any, Optional[Any]]:
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         """
         Compute eigenvalues and eigenvectors of a symmetric tridiagonal matrix.
 
@@ -1401,7 +1411,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def eig(self, tensor: Any) -> Tuple[Any, Any]:
+    def eig(self, tensor: Tensor) -> Tuple[Tensor, Tensor]:
         """
         Compute eigenvalues and eigenvectors of a square matrix.
 
@@ -1419,7 +1429,7 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def real(self, tensor: Any) -> Any:
+    def real(self, tensor: Tensor) -> Tensor:
         """
         Return the real part of a complex tensor.
 
@@ -1469,7 +1479,7 @@ def get_backend(framework: Framework) -> BaseBackend:
     raise ValueError(f"Unsupported framework: {framework}")
 
 
-def get_backend_for_model(model: Any) -> BaseBackend:
+def get_backend_for_model(model: Model) -> BaseBackend:
     """
     Get the appropriate backend for a model.
 

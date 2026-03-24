@@ -14,13 +14,15 @@ which does not take into account the pairwise interactions of data-points inside
 For a more precise (but much more computationally expensive) alternative, please refer
 to the SecondOrderInfluenceCalculator module.
 """
+from typing import Optional, Tuple, Union
+
 from .base_group_influence import BaseGroupInfluenceCalculator
 
 from ..common import InfluenceModel
 from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
-from ..types import Optional, Union, Tuple, Any, DatasetLike
+from ..types import DatasetLike, Tensor
 
 
 class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceCalculator):
@@ -85,7 +87,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         self.normalize = normalize
 
-    def _normalize_if_needed(self, v: Any) -> Any:
+    def _normalize_if_needed(self, v: Tensor) -> Tensor:
         """
         Normalize the input vector if the normalize property is True. If False, do nothing
 
@@ -103,7 +105,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             v = self._backend.normalize(v, axis=0, keepdims=True)
         return v
 
-    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -123,7 +125,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_vector = self._backend.transpose(influence_vector)
         return influence_vector
 
-    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Preprocess a sample to evaluate
 
@@ -141,9 +143,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[Any, ...],
-            samples_to_evaluate: Tuple[Any, ...]
-    ) -> Any:
+            train_samples: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Tensor, ...]
+    ) -> Tensor:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.
@@ -167,9 +169,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: Any,
-            influence_vector: Any
-    ) -> Any:
+            preproc_test_sample: Tensor,
+            influence_vector: Tensor
+    ) -> Tensor:
         """
         Estimates the influence score of leaving out the influence vector corresponding to a given training
         data-point on a test sample that has already been pre-processed.
@@ -192,7 +194,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         )
         return influence_values
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -220,7 +222,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     def compute_influence_vector_group(
             self,
             group: DatasetLike
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -251,7 +253,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             self,
             group_train: DatasetLike,
             group_to_evaluate: Optional[DatasetLike] = None
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.

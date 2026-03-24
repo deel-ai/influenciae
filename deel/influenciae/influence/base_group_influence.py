@@ -16,12 +16,13 @@ https://arxiv.org/abs/1911.00418
 """
 
 from abc import abstractmethod
+from typing import Optional, Union
 
 from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 from ..common import BaseBackend
 
-from ..types import Optional, Union, Any, DatasetLike
+from ..types import DatasetLike, Tensor
 
 
 class BaseGroupInfluenceCalculator:
@@ -117,7 +118,7 @@ class BaseGroupInfluenceCalculator:
     def compute_influence_vector_group(
             self,
             group: DatasetLike
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -140,7 +141,7 @@ class BaseGroupInfluenceCalculator:
             self,
             group_train: DatasetLike,
             group_to_evaluate: Optional[DatasetLike] = None
-    ) -> Any:
+    ) -> Tensor:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.
@@ -193,7 +194,7 @@ class BaseGroupInfluenceCalculator:
 
         return size_a
 
-    def _reduce_ihvp_batches(self, ihvp_ds: Any, keepdims: bool = True) -> Any:
+    def _reduce_ihvp_batches(self, ihvp_ds: DatasetLike, keepdims: bool = True) -> Tensor:
         """Sum per-batch IHVP tensors across all batches."""
         reduced_ihvp = None
         for batch in ihvp_ds:

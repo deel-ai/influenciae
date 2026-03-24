@@ -7,6 +7,7 @@ Module implementing factories for the different influence calculation techniques
 This will be useful for streamlining the benchmarks.
 """
 from abc import abstractmethod
+from typing import Any, Callable, Optional, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from ..common import (
@@ -24,7 +25,7 @@ from ..influence import FirstOrderInfluenceCalculator, ArnoldiInfluenceCalculato
 from ..rps import RepresenterPointLJE, RepresenterPointL2
 from ..trac_in import TracIn
 from ..boundary_based import WeightsBoundaryCalculator, SampleBoundaryCalculator
-from ..types import Any, Union, Callable, Optional, DatasetLike
+from ..types import DatasetLike
 
 
 def _resolve_default_loss_function(model: Any) -> Callable:
