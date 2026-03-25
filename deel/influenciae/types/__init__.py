@@ -6,7 +6,7 @@
 Typing module.
 """
 
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Protocol, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional, Protocol, TypeAlias, Union
 
 if TYPE_CHECKING:
     import numpy as np
