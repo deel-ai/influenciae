@@ -30,6 +30,43 @@ def _assert_float32_dtype(tf_backend, pt_backend, tf_tensor, pt_tensor):
     assert pt_backend.get_dtype(pt_tensor) == pt_backend.float32_dtype()
 
 
+def _tf_to_pt_flat_parameter_index(tf_weights, pt_weights):
+    """Build a TF-order to PT-order flat index mapping for aligned model weights."""
+    if len(tf_weights) != len(pt_weights):
+        raise AssertionError("Mismatched number of watched weights")
+
+    mapping = []
+    pt_offset = 0
+    total_tf_params = 0
+
+    for tf_weight, pt_weight in zip(tf_weights, pt_weights):
+        tf_shape = tuple(int(dim) for dim in tf_weight.shape)
+        pt_shape = tuple(int(dim) for dim in pt_weight.shape)
+
+        tf_size = int(np.prod(tf_shape, dtype=np.int64))
+        pt_size = int(np.prod(pt_shape, dtype=np.int64))
+        if tf_size != pt_size:
+            raise AssertionError(f"Weight size mismatch between TF {tf_shape} and PT {pt_shape}")
+
+        if tf_shape == pt_shape:
+            mapping.extend(range(pt_offset, pt_offset + tf_size))
+        elif len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
+            rows, cols = tf_shape
+            for row in range(rows):
+                for col in range(cols):
+                    mapping.append(pt_offset + col * rows + row)
+        else:
+            raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
+
+        pt_offset += pt_size
+        total_tf_params += tf_size
+
+    mapping = np.asarray(mapping, dtype=np.int64)
+    if mapping.shape[0] != total_tf_params:
+        raise AssertionError("Invalid TF/PT index mapping length")
+    return mapping
+
+
 class SimpleLinearModelTF:
     """Create a simple TensorFlow model for testing."""
 
@@ -883,11 +920,65 @@ def test_top_k_invalid_k_raises():
 
     a = np.array([3, 1, 4], dtype=np.float32)
 
-    with pytest.raises(Exception):
+    with pytest.raises((tf.errors.InvalidArgumentError, ValueError)):
         tf_backend.top_k(tf.constant(a), k=4)
 
-    with pytest.raises(Exception):
+    with pytest.raises((RuntimeError, ValueError)):
         pt_backend.top_k(torch.from_numpy(a), k=4)
+
+
+def test_diag_part_eigh_tridiagonal_and_eig_real_parity():
+    """Parity checks for diag_part, eigh_tridiagonal, eig and real helpers."""
+    from deel.influenciae.common import get_backend, Framework
+
+    tf_backend = get_backend(Framework.TENSORFLOW)
+    pt_backend = get_backend(Framework.PYTORCH)
+
+    matrix = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=np.float32)
+    tf_diag = tf_backend.diag_part(tf.constant(matrix), k=1).numpy()
+    pt_diag = pt_backend.diag_part(torch.from_numpy(matrix), k=1).numpy()
+    assert np.array_equal(tf_diag, pt_diag)
+
+    maindiag = np.array([2.0, 3.0], dtype=np.float32)
+    superdiag = np.array([1.0], dtype=np.float32)
+
+    tf_eig_vals, tf_eig_vecs = tf_backend.eigh_tridiagonal(tf.constant(maindiag), tf.constant(superdiag))
+    pt_eig_vals, pt_eig_vecs = pt_backend.eigh_tridiagonal(torch.from_numpy(maindiag), torch.from_numpy(superdiag))
+
+    tf_eig_vals = tf_backend.to_numpy(tf_eig_vals)
+    pt_eig_vals = pt_backend.to_numpy(pt_eig_vals)
+    tf_eig_vecs = tf_backend.to_numpy(tf_eig_vecs)
+    pt_eig_vecs = pt_backend.to_numpy(pt_eig_vecs)
+
+    assert almost_equal(tf_eig_vals, pt_eig_vals, epsilon=1e-5)
+    assert almost_equal(np.abs(tf_eig_vecs), np.abs(pt_eig_vecs), epsilon=1e-5)
+
+    tf_vals_only, tf_vecs_none = tf_backend.eigh_tridiagonal(
+        tf.constant(maindiag), tf.constant(superdiag), eigvals_only=True
+    )
+    pt_vals_only, pt_vecs_none = pt_backend.eigh_tridiagonal(
+        torch.from_numpy(maindiag), torch.from_numpy(superdiag), eigvals_only=True
+    )
+
+    assert tf_vecs_none is None
+    assert pt_vecs_none is None
+    assert almost_equal(tf_backend.to_numpy(tf_vals_only), pt_backend.to_numpy(pt_vals_only), epsilon=1e-5)
+
+    eig_input = np.array([[0.0, -1.0], [1.0, 0.0]], dtype=np.float32)
+    tf_eigvals, _ = tf_backend.eig(tf.constant(eig_input))
+    pt_eigvals, _ = pt_backend.eig(torch.from_numpy(eig_input))
+
+    tf_real = tf_backend.real(tf_eigvals).numpy()
+    pt_real = pt_backend.real(pt_eigvals).numpy()
+    assert almost_equal(np.sort(tf_real), np.sort(pt_real), epsilon=1e-6)
+
+    tf_eigvals_np = tf_backend.to_numpy(tf_eigvals)
+    pt_eigvals_np = pt_backend.to_numpy(pt_eigvals)
+    assert almost_equal(
+        np.sort(np.abs(np.imag(tf_eigvals_np))),
+        np.sort(np.abs(np.imag(pt_eigvals_np))),
+        epsilon=1e-6,
+    )
 
 
 def test_constant():
@@ -1301,7 +1392,8 @@ def test_gather_along_axis_invalid_index_raises():
     indices = np.array([0, 3], dtype=np.int32)
 
     with pytest.raises(tf.errors.InvalidArgumentError):
-        tf_backend.to_numpy(tf_backend.gather_along_axis(tf.constant(a), tf.constant(indices), axis=0))
+        with tf.device("/CPU:0"):
+            tf_backend.to_numpy(tf_backend.gather_along_axis(tf.constant(a), tf.constant(indices), axis=0))
 
     with pytest.raises((RuntimeError, IndexError)):
         pt_backend.to_numpy(pt_backend.gather_along_axis(torch.from_numpy(a), torch.from_numpy(indices).long(), axis=0))
@@ -1380,6 +1472,51 @@ def test_create_sequential_from_layers():
 
     assert tf_output.shape == pt_output.shape
     assert almost_equal(tf_output, pt_output)
+
+
+def test_hessian_computation_match():
+    """Hessian matrices should match across backends up to parameter layout differences."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_dim, hidden_dim, output_dim = 3, 2, 1
+    weights = generate_matching_weights(input_dim, hidden_dim, output_dim, seed=17)
+    inputs, targets = generate_test_data(batch_size=2, input_dim=input_dim, output_dim=output_dim, seed=29)
+
+    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
+    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+    num_params = tf_backend.get_num_params(tf_weights)
+    assert pt_backend.get_num_params(pt_weights) == num_params
+
+    tf_loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    def pt_loss_fn(pred, target):
+        return nn.MSELoss(reduction='none')(pred, target).mean(dim=-1)
+
+    tf_dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+    pt_dataset = [(torch.from_numpy(inputs), torch.from_numpy(targets))]
+
+    tf_hessian = tf_backend.to_numpy(
+        tf_backend.compute_hessian(tf_model, tf_weights, tf_loss_fn, tf_dataset, num_params)
+    )
+    pt_hessian = pt_backend.to_numpy(
+        pt_backend.compute_hessian(pt_model, pt_weights, pt_loss_fn, pt_dataset, num_params)
+    )
+
+    assert np.all(np.isfinite(tf_hessian))
+    assert np.all(np.isfinite(pt_hessian))
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hessian_tf_order = pt_hessian[np.ix_(tf_to_pt, tf_to_pt)]
+
+    assert np.allclose(tf_hessian, tf_hessian.T, atol=1e-5, rtol=1e-5)
+    assert np.allclose(pt_hessian_tf_order, pt_hessian_tf_order.T, atol=1e-5, rtol=1e-5)
+    assert almost_equal(tf_hessian, pt_hessian_tf_order, epsilon=5e-2)
 
 
 def test_hvp_produces_output():
