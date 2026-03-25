@@ -911,6 +911,28 @@ def test_compute_hvp_batch(backend):
     assert torch.all(torch.isfinite(hvp))
 
 
+def test_compute_hvp_batch_equals_sum_of_singles(backend):
+    """Batched HVP should equal the sum of per-sample HVPs."""
+    model = nn.Sequential(nn.Linear(2, 1))
+    weights = backend.get_model_weights(model)
+    vector = [torch.ones_like(weight) for weight in weights]
+
+    inputs = torch.tensor([[1.0, 0.0], [0.5, -1.0]], dtype=torch.float32)
+    targets = torch.tensor([[1.0], [0.0]], dtype=torch.float32)
+
+    def loss_fn(pred, target):
+        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+    hvp_batch = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+    hvp_single_terms = [
+        backend.compute_hvp_single(model, weights, loss_fn, vector, inputs[idx:idx + 1], targets[idx:idx + 1])
+        for idx in range(inputs.shape[0])
+    ]
+    hvp_single_sum = torch.stack(hvp_single_terms, dim=0).sum(dim=0)
+
+    assert torch.allclose(hvp_batch, hvp_single_sum, atol=1e-5, rtol=1e-5)
+
+
 def test_compute_hvp_single_matches_hessian_vector_product(backend):
     """Single-sample HVP should match explicit Hessian-vector multiplication."""
     model = nn.Sequential(nn.Linear(2, 1))
