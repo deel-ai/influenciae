@@ -38,6 +38,13 @@ def backend():
     return PyTorchBackend()
 
 
+@pytest.fixture(autouse=True)
+def _set_test_seed():
+    """Keep stochastic tests deterministic and reproducible."""
+    np.random.seed(1234)
+    torch.manual_seed(1234)
+
+
 def test_framework_property(backend):
     """Test that framework property returns PYTORCH."""
     from deel.influenciae.common import Framework
@@ -154,6 +161,7 @@ def test_compute_gradient(backend, simple_model):
 
     num_params = backend.get_num_params(weights)
     assert gradient.shape == (num_params,)
+    assert torch.all(torch.isfinite(gradient))
     assert torch.linalg.norm(gradient) > 0  # Gradient should be non-zero
 
 def test_compute_jacobian(backend, simple_model):
@@ -533,6 +541,65 @@ def test_influence_model_batch_loss(simple_model):
     assert torch.all(torch.isfinite(loss))
 
 
+def test_influence_model_batch_jacobian(simple_model):
+    """Test InfluenceModel batch Jacobian computation."""
+    from deel.influenciae.common import InfluenceModel
+
+    loss_fn = nn.MSELoss(reduction='none')
+    influence_model = InfluenceModel(simple_model, loss_function=loss_fn)
+
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    dataset = [
+        (inputs[:2], targets[:2]),
+        (inputs[2:], targets[2:]),
+    ]
+
+    jacobian = influence_model.batch_jacobian(dataset)
+
+    assert jacobian.shape == (4, influence_model.nb_params)
+    assert torch.all(torch.isfinite(jacobian))
+
+
+def test_influence_model_batch_gradient(simple_model):
+    """Test InfluenceModel batch gradient computation."""
+    from deel.influenciae.common import InfluenceModel
+
+    loss_fn = nn.MSELoss(reduction='none')
+    influence_model = InfluenceModel(simple_model, loss_function=loss_fn)
+
+    inputs = torch.randn(4, 5)
+    targets = torch.randn(4, 2)
+    dataset = [
+        (inputs[:2], targets[:2]),
+        (inputs[2:], targets[2:]),
+    ]
+
+    gradients = influence_model.batch_gradient(dataset)
+
+    assert gradients.shape == (2, influence_model.nb_params)
+    assert torch.all(torch.isfinite(gradients))
+
+
+def test_loss_with_reduction_raises_error(simple_model):
+    """Test that reduced PyTorch losses are rejected."""
+    from deel.influenciae.common import InfluenceModel
+
+    with pytest.raises(ValueError, match="must not have reduction"):
+        InfluenceModel(simple_model, loss_function=nn.MSELoss(reduction='sum'))
+
+    with pytest.raises(ValueError, match="must not have reduction"):
+        InfluenceModel(simple_model, loss_function=nn.MSELoss(reduction='mean'))
+
+
+def test_loss_without_reduction_works(simple_model):
+    """Test that a per-sample PyTorch loss is accepted."""
+    from deel.influenciae.common import InfluenceModel
+
+    influence_model = InfluenceModel(simple_model, loss_function=nn.MSELoss(reduction="none"))
+    assert influence_model is not None
+
+
 def test_map_dataset_tuple_and_unpacked(backend):
     """Test map_dataset behavior with one-arg and two-arg map functions."""
     dataset = [
@@ -800,6 +867,30 @@ def test_compute_hessian(backend):
 
     assert hessian.shape == (nb_params, nb_params)
     assert torch.all(torch.isfinite(hessian))
+    assert torch.allclose(hessian, hessian.T, atol=1e-5, rtol=1e-5)
+
+
+def test_compute_hvp_single(backend):
+    """Test single-sample Hessian-vector product computation."""
+    model = nn.Sequential(nn.Linear(2, 1))
+    weights = backend.get_model_weights(model)
+    nb_params = backend.get_num_params(weights)
+    vector = [
+        torch.tensor([[0.3, -0.7]], dtype=torch.float32),
+        torch.tensor([0.5], dtype=torch.float32),
+    ]
+
+    inputs = torch.tensor([[1.0, 0.0]])
+    targets = torch.tensor([[1.0]])
+
+    def loss_fn(pred, target):
+        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+
+    assert hvp.shape == (nb_params,)
+    assert torch.all(torch.isfinite(hvp))
+    assert torch.linalg.norm(hvp) > 0
 
 def test_compute_hvp_batch(backend):
     """Test batched Hessian-vector product computation."""
@@ -818,6 +909,33 @@ def test_compute_hvp_batch(backend):
 
     assert hvp.shape == (nb_params,)
     assert torch.all(torch.isfinite(hvp))
+
+
+def test_compute_hvp_single_matches_hessian_vector_product(backend):
+    """Single-sample HVP should match explicit Hessian-vector multiplication."""
+    model = nn.Sequential(nn.Linear(2, 1))
+    weights = backend.get_model_weights(model)
+    nb_params = backend.get_num_params(weights)
+    vector = [
+        torch.tensor([[0.3, -0.7]], dtype=torch.float32),
+        torch.tensor([0.5], dtype=torch.float32),
+    ]
+
+    inputs = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
+    targets = torch.tensor([[1.0]], dtype=torch.float32)
+    dataset = [(inputs, targets)]
+
+    def loss_fn(pred, target):
+        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+
+    hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = torch.cat([v.reshape(-1) for v in vector])
+    vector_col = backend.reshape(vector_flat, (-1, 1))
+    hvp_from_hessian = backend.reshape(backend.matmul(hessian, vector_col), (-1,))
+
+    assert hvp.shape == (nb_params,)
+    assert torch.allclose(hvp, hvp_from_hessian, atol=1e-5, rtol=1e-5)
 
 def test_compute_output_jacobians(backend):
     """Test output Jacobian computations w.r.t inputs and weights."""
