@@ -65,6 +65,28 @@ def test_get_model_weights(backend, simple_model):
     assert weights[2].shape == (3, 2)  # Second dense weight
     assert weights[3].shape == (2,)    # Second dense bias
 
+    for weight in weights:
+        assert backend.get_dtype(weight) == backend.float32_dtype()
+        assert np.all(np.isfinite(backend.to_numpy(weight)))
+
+
+def test_normalize_weights_to_watch(backend, simple_model):
+    """normalize_weights_to_watch should unwrap Keras-style wrappers consistently."""
+    weights = backend.get_model_weights(simple_model)
+    wrapped_weights = [_WeightWrapper(weight) for weight in weights]
+
+    normalized = backend.normalize_weights_to_watch(wrapped_weights)
+    normalized_twice = backend.normalize_weights_to_watch(normalized)
+
+    assert len(normalized) == len(weights)
+    assert len(normalized_twice) == len(weights)
+
+    for raw_weight, first_pass, second_pass in zip(weights, normalized, normalized_twice):
+        assert first_pass.shape == raw_weight.shape
+        assert second_pass.shape == raw_weight.shape
+        assert almost_equal(backend.to_numpy(first_pass), backend.to_numpy(raw_weight))
+        assert almost_equal(backend.to_numpy(second_pass), backend.to_numpy(first_pass))
+
 def test_get_model_weights_specific_layers(backend, simple_model):
     """Test getting weights from specific layers."""
     layers = [simple_model.layers[0], simple_model.layers[1]]
@@ -87,6 +109,7 @@ def test_forward(backend, simple_model):
     output = backend.forward(simple_model, inputs)
 
     assert output.shape == (4, 2)
+    assert bool(tf.reduce_all(tf.math.is_finite(output)).numpy())
 
 def test_get_layers(backend, simple_model):
     """Test getting all layers."""
@@ -118,6 +141,8 @@ def test_compute_loss(backend, simple_model):
 
     # MSE without reduction returns (batch,)
     assert loss.shape == (4,)
+    assert bool(tf.reduce_all(tf.math.is_finite(loss)).numpy())
+    assert bool(tf.reduce_all(loss >= 0).numpy())
 
 def test_compute_loss_with_sample_weight(backend, simple_model):
     """Test loss computation with sample weights."""
@@ -157,6 +182,8 @@ def test_compute_jacobian(backend, simple_model):
 
     num_params = backend.get_num_params(weights)
     assert jacobian.shape == (batch_size, num_params)
+    assert bool(tf.reduce_all(tf.math.is_finite(jacobian)).numpy())
+    assert float(tf.linalg.norm(jacobian).numpy()) > 0.0
 
 
 def test_compute_gradient_raises_on_disconnected_graph(backend, simple_model):
@@ -199,6 +226,10 @@ def test_weight_wrappers_are_supported_for_gradients_and_jacobians(backend, simp
     assert jacobian.shape == (batch_size, num_params)
     assert outputs.shape == (batch_size, 2)
     assert len(jac_weights) == len(weights)
+    assert bool(tf.reduce_all(tf.math.is_finite(gradient)).numpy())
+    assert bool(tf.reduce_all(tf.math.is_finite(jacobian)).numpy())
+    assert bool(tf.reduce_all(tf.math.is_finite(outputs)).numpy())
+    assert all(bool(tf.reduce_all(tf.math.is_finite(jac)).numpy()) for jac in jac_weights)
 
 
 def test_concat(backend):
@@ -227,6 +258,7 @@ def test_reshape(backend):
 
     result = backend.reshape(a, (3, 2))
     assert result.shape == (3, 2)
+    assert bool(tf.reduce_all(tf.reshape(result, (-1,)) == tf.reshape(a, (-1,))).numpy())
 
 def test_map_fn_output_signature(backend):
     """Test map_fn with output signature and tuple elems."""
@@ -377,6 +409,8 @@ def test_get_weights_for_layer_range_single_layer(backend, simple_model):
     assert len(weights) == 2
     assert weights[0].shape == (5, 3)
     assert weights[1].shape == (3,)
+    assert np.all(np.isfinite(backend.to_numpy(weights[0])))
+    assert np.all(np.isfinite(backend.to_numpy(weights[1])))
 
 def test_get_weights_for_layer_range_by_name(backend, simple_model):
     """Test getting weights by layer name."""
@@ -384,6 +418,8 @@ def test_get_weights_for_layer_range_by_name(backend, simple_model):
 
     assert len(weights) == 2
     assert weights[0].shape == (5, 3)
+    assert np.all(np.isfinite(backend.to_numpy(weights[0])))
+    assert np.all(np.isfinite(backend.to_numpy(weights[1])))
 
 def test_get_weights_for_layer_range_multiple_layers(backend, simple_model):
     """Test getting weights for multiple layers."""
@@ -449,6 +485,7 @@ def test_influence_model_forward(simple_model):
     output = influence_model(inputs)
 
     assert output.shape == (4, 2)
+    assert bool(tf.reduce_all(tf.math.is_finite(output)).numpy())
 
 def test_influence_model_batch_loss(simple_model):
     """Test InfluenceModel batch loss computation."""
@@ -465,6 +502,7 @@ def test_influence_model_batch_loss(simple_model):
     loss = influence_model.batch_loss(dataset)
 
     assert loss.shape == (4,)
+    assert bool(tf.reduce_all(tf.math.is_finite(loss)).numpy())
 
 def test_influence_model_batch_jacobian(simple_model):
     """Test InfluenceModel batch Jacobian computation."""
@@ -480,6 +518,7 @@ def test_influence_model_batch_jacobian(simple_model):
     jacobian = influence_model.batch_jacobian(dataset)
 
     assert jacobian.shape == (4, influence_model.nb_params)
+    assert bool(tf.reduce_all(tf.math.is_finite(jacobian)).numpy())
 
 def test_influence_model_batch_gradient(simple_model):
     """Test InfluenceModel batch gradient computation."""
@@ -496,6 +535,7 @@ def test_influence_model_batch_gradient(simple_model):
 
     # 2 batches, each producing a gradient
     assert gradients.shape == (2, influence_model.nb_params)
+    assert bool(tf.reduce_all(tf.math.is_finite(gradients)).numpy())
 
 
 def test_loss_with_reduction_raises_error(simple_model):
@@ -581,6 +621,8 @@ def test_create_dataset_from_tensors(backend):
 
     assert element[0].shape == (1, 2)
     assert element[1].shape == (1, 2)
+    assert np.array_equal(element[0].numpy(), np.array([[1.0, 2.0]], dtype=np.float32))
+    assert np.array_equal(element[1].numpy(), np.array([[3.0, 4.0]], dtype=np.float32))
 
 def test_shuffle_dataset_and_size(backend):
     """Test shuffling and counting dataset elements."""
@@ -671,6 +713,9 @@ def test_compute_output_jacobians(backend):
     assert jac_inputs.shape == (2, 1, 2, 2)
     assert len(jac_weights) == len(weights)
     assert jac_weights[0].shape[:2] == (2, 1)
+    assert almost_equal(outputs, outputs_w)
+    assert bool(tf.reduce_all(tf.math.is_finite(jac_inputs)).numpy())
+    assert all(bool(tf.reduce_all(tf.math.is_finite(jac)).numpy()) for jac in jac_weights)
 
 def test_while_loop(backend):
     """Test while_loop helper with simple integer accumulation."""
