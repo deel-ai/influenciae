@@ -47,6 +47,13 @@ def backend():
     return TensorFlowBackend()
 
 
+@pytest.fixture(autouse=True)
+def _set_test_seed():
+    """Keep stochastic tests deterministic and reproducible."""
+    np.random.seed(1234)
+    tf.random.set_seed(1234)
+
+
 def test_framework_property(backend):
     """Test that framework property returns TENSORFLOW."""
     from deel.influenciae.common import Framework
@@ -819,6 +826,28 @@ def test_compute_hessian(backend):
 
     assert hessian.shape == (nb_params, nb_params)
     assert tf.reduce_all(tf.math.is_finite(hessian))
+    assert np.allclose(backend.to_numpy(hessian), backend.to_numpy(tf.transpose(hessian)), atol=1e-5, rtol=1e-5)
+
+
+def test_compute_hvp_single(backend):
+    """Test single-sample Hessian-vector product computation."""
+    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+    weights = backend.get_model_weights(model)
+    nb_params = backend.get_num_params(weights)
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    inputs = tf.constant([[1.0, 0.0]], dtype=tf.float32)
+    targets = tf.constant([[1.0]], dtype=tf.float32)
+    vector = [
+        tf.constant([[0.3], [-0.7]], dtype=tf.float32),
+        tf.constant([0.5], dtype=tf.float32),
+    ]
+
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+
+    assert hvp.shape == (nb_params,)
+    assert tf.reduce_all(tf.math.is_finite(hvp))
+    assert float(tf.linalg.norm(hvp).numpy()) > 0.0
 
 def test_compute_hvp_batch(backend):
     """Test batched Hessian-vector product computation."""
@@ -835,6 +864,31 @@ def test_compute_hvp_batch(backend):
 
     assert hvp.shape == (nb_params,)
     assert tf.reduce_all(tf.math.is_finite(hvp))
+
+
+def test_compute_hvp_single_matches_hessian_vector_product(backend):
+    """Single-sample HVP should match explicit Hessian-vector multiplication."""
+    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+    weights = backend.get_model_weights(model)
+    nb_params = backend.get_num_params(weights)
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    inputs = tf.constant([[1.0, 0.0]], dtype=tf.float32)
+    targets = tf.constant([[1.0]], dtype=tf.float32)
+    vector = [
+        tf.constant([[0.3], [-0.7]], dtype=tf.float32),
+        tf.constant([0.5], dtype=tf.float32),
+    ]
+
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(1)
+    hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = backend.concat([backend.reshape(v, (-1,)) for v in vector], axis=0)
+    vector_col = backend.reshape(vector_flat, (-1, 1))
+    hvp_from_hessian = backend.reshape(backend.matmul(hessian, vector_col), (-1,))
+
+    assert hvp.shape == (nb_params,)
+    assert np.allclose(backend.to_numpy(hvp), backend.to_numpy(hvp_from_hessian), atol=1e-5, rtol=1e-5)
 
 def test_compute_output_jacobians(backend):
     """Test output Jacobian computations w.r.t inputs and weights."""
