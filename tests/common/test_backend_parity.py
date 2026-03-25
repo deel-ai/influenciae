@@ -20,8 +20,11 @@ from ..utils_test import allclose
 
 pytestmark = pytest.mark.requires_both_backends
 
-
-almost_equal = allclose
+# Tolerance tiers used in parity checks:
+# - 1e-6..1e-5 for deterministic algebraic helpers and eig utilities.
+# - 1e-4 (default allclose epsilon) for basic tensor operations.
+# - 5e-3 for cross-backend gradient/Jacobian/HVP/Hessian parity after TF/PT
+#   parameter-layout remapping in float32.
 
 
 def _assert_float32_dtype(tf_backend, pt_backend, tf_tensor, pt_tensor):
@@ -224,7 +227,7 @@ def test_forward_pass_match():
     tf_output = tf_backend.forward(tf_model, tf_inputs).numpy()
     pt_output = pt_backend.forward(pt_model, pt_inputs).detach().numpy()
 
-    assert almost_equal(tf_output, pt_output), \
+    assert allclose(tf_output, pt_output), \
         f"Forward pass mismatch:\nTF: {tf_output}\nPT: {pt_output}"
 
 def test_loss_computation_match():
@@ -258,7 +261,7 @@ def test_loss_computation_match():
     if len(pt_loss.shape) > 1:
         pt_loss = pt_loss.mean(axis=-1)
 
-    assert almost_equal(tf_loss, pt_loss), \
+    assert allclose(tf_loss, pt_loss), \
         f"Loss mismatch:\nTF: {tf_loss}\nPT: {pt_loss}"
 
 def test_gradient_computation_match():
@@ -303,17 +306,21 @@ def test_gradient_computation_match():
     assert tf_grad.shape == pt_grad.shape, \
         f"Gradient shape mismatch: TF {tf_grad.shape} vs PT {pt_grad.shape}"
 
-    # Note: Exact gradient values may differ due to weight layout differences
-    # We primarily check stable parity invariants under different weight layouts.
+    # Compare in TF parameter order; PT kernels are laid out transposed.
     assert np.all(np.isfinite(tf_grad)), "TF gradient has non-finite values"
     assert np.all(np.isfinite(pt_grad)), "PT gradient has non-finite values"
     assert np.linalg.norm(tf_grad) > 0, "TF gradient is zero"
     assert np.linalg.norm(pt_grad) > 0, "PT gradient is zero"
-    assert almost_equal(np.linalg.norm(tf_grad), np.linalg.norm(pt_grad), epsilon=5e-3)
+    # First-order parity uses a moderate tolerance in float32.
+    assert allclose(np.linalg.norm(tf_grad), np.linalg.norm(pt_grad), epsilon=5e-3)
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_grad_tf_order = pt_grad[tf_to_pt]
+    assert allclose(tf_grad, pt_grad_tf_order, epsilon=5e-3)
 
     tf_abs_sorted = np.sort(np.abs(tf_grad))
     pt_abs_sorted = np.sort(np.abs(pt_grad))
-    assert almost_equal(tf_abs_sorted, pt_abs_sorted, epsilon=5e-3)
+    assert allclose(tf_abs_sorted, pt_abs_sorted, epsilon=5e-3)
 
 
 def test_influence_model_creation():
@@ -355,7 +362,7 @@ def test_influence_model_forward():
     tf_output = tf_influence(tf.constant(inputs)).numpy()
     pt_output = pt_influence(torch.from_numpy(inputs)).detach().numpy()
 
-    assert almost_equal(tf_output, pt_output), \
+    assert allclose(tf_output, pt_output), \
         f"InfluenceModel forward mismatch:\nTF: {tf_output}\nPT: {pt_output}"
 
 def test_influence_model_batch_loss():
@@ -387,8 +394,44 @@ def test_influence_model_batch_loss():
     tf_loss = tf_influence.batch_loss(tf_dataset).numpy()
     pt_loss = pt_influence.backend.to_numpy(pt_influence.batch_loss(pt_dataset))
 
-    assert almost_equal(tf_loss, pt_loss), \
+    assert allclose(tf_loss, pt_loss), \
         f"InfluenceModel batch_loss mismatch:\nTF: {tf_loss}\nPT: {pt_loss}"
+
+
+def test_influence_model_batch_jacobian_match():
+    """Test that InfluenceModel batch_jacobian matches across backends."""
+    from deel.influenciae.common import InfluenceModel
+
+    input_dim, hidden_dim, output_dim = 5, 3, 2
+    weights = generate_matching_weights(input_dim, hidden_dim, output_dim)
+    inputs, targets = generate_test_data(batch_size=4, input_dim=input_dim, output_dim=output_dim)
+
+    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
+    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
+
+    tf_loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    pt_loss_fn = nn.MSELoss(reduction='none')
+
+    def pt_loss_wrapper(pred, target):
+        return pt_loss_fn(pred, target).mean(dim=-1)
+
+    tf_influence = InfluenceModel(tf_model, loss_function=tf_loss_fn)
+    pt_influence = InfluenceModel(pt_model, loss_function=pt_loss_wrapper)
+
+    tf_dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+    pt_dataset = [
+        (torch.from_numpy(inputs[:2]), torch.from_numpy(targets[:2])),
+        (torch.from_numpy(inputs[2:]), torch.from_numpy(targets[2:])),
+    ]
+
+    tf_jacobian = tf_influence.backend.to_numpy(tf_influence.batch_jacobian(tf_dataset))
+    pt_jacobian = pt_influence.backend.to_numpy(pt_influence.batch_jacobian(pt_dataset))
+
+    assert tf_jacobian.shape == pt_jacobian.shape
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_influence.weights, pt_influence.weights)
+    pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+    assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
 
 def test_influence_model_layer_targeting():
     """Test that layer targeting works consistently."""
@@ -437,7 +480,7 @@ def test_concat():
     tf_result = tf_backend.concat([tf.constant(a), tf.constant(b)], axis=0).numpy()
     pt_result = pt_backend.concat([torch.from_numpy(a), torch.from_numpy(b)], axis=0).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_stack():
     """Test tensor stacking."""
@@ -452,7 +495,7 @@ def test_stack():
     tf_result = tf_backend.stack([tf.constant(a), tf.constant(b)], axis=0).numpy()
     pt_result = pt_backend.stack([torch.from_numpy(a), torch.from_numpy(b)], axis=0).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_reshape():
     """Test tensor reshape."""
@@ -466,7 +509,7 @@ def test_reshape():
     tf_result = tf_backend.reshape(tf.constant(a), (3, 2)).numpy()
     pt_result = pt_backend.reshape(torch.from_numpy(a), (3, 2)).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_reduce_sum():
     """Test reduce sum."""
@@ -484,7 +527,7 @@ def test_reduce_sum():
 
     tf_result_full = tf_result_full_tensor.numpy()
     pt_result_full = pt_result_full_tensor.numpy()
-    assert almost_equal(tf_result_full, pt_result_full)
+    assert allclose(tf_result_full, pt_result_full)
 
     # Axis reduction
     tf_result_axis_tensor = tf_backend.reduce_sum(tf.constant(a), axis=1)
@@ -493,7 +536,7 @@ def test_reduce_sum():
 
     tf_result_axis = tf_result_axis_tensor.numpy()
     pt_result_axis = pt_result_axis_tensor.numpy()
-    assert almost_equal(tf_result_axis, pt_result_axis)
+    assert allclose(tf_result_axis, pt_result_axis)
 
 
 def test_eye():
@@ -577,7 +620,7 @@ def test_to_numpy():
 
     assert isinstance(tf_result, np.ndarray)
     assert isinstance(pt_result, np.ndarray)
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_expand_dims():
     """Test expanding tensor dimensions."""
@@ -592,13 +635,13 @@ def test_expand_dims():
     tf_result = tf_backend.expand_dims(tf.constant(a), axis=0).numpy()
     pt_result = pt_backend.expand_dims(torch.from_numpy(a), axis=0).numpy()
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
     # Expand at axis 1
     tf_result = tf_backend.expand_dims(tf.constant(a), axis=1).numpy()
     pt_result = pt_backend.expand_dims(torch.from_numpy(a), axis=1).numpy()
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_squeeze():
     """Test squeezing tensor dimensions."""
@@ -613,13 +656,13 @@ def test_squeeze():
     tf_result = tf_backend.squeeze(tf.constant(a)).numpy()
     pt_result = pt_backend.squeeze(torch.from_numpy(a)).numpy()
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
     # Squeeze specific axis
     tf_result = tf_backend.squeeze(tf.constant(a), axis=0).numpy()
     pt_result = pt_backend.squeeze(torch.from_numpy(a), axis=0).numpy()
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_transpose():
     """Test tensor transpose."""
@@ -633,7 +676,7 @@ def test_transpose():
     tf_result = tf_backend.transpose(tf.constant(a)).numpy()
     pt_result = pt_backend.transpose(torch.from_numpy(a)).numpy()
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_matmul():
     """Test matrix multiplication."""
@@ -651,7 +694,7 @@ def test_matmul():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_multiply():
     """Test element-wise multiplication."""
@@ -669,7 +712,7 @@ def test_multiply():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_abs():
     """Test absolute value."""
@@ -686,7 +729,7 @@ def test_abs():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_argmax():
     """Test argmax operation."""
@@ -700,7 +743,7 @@ def test_argmax():
     # Argmax along axis 1
     tf_result = tf_backend.argmax(tf.constant(a), axis=1).numpy()
     pt_result = pt_backend.argmax(torch.from_numpy(a), axis=1).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_argmin():
     """Test argmin operation."""
@@ -714,7 +757,7 @@ def test_argmin():
     # Argmin along axis 1
     tf_result = tf_backend.argmin(tf.constant(a), axis=1).numpy()
     pt_result = pt_backend.argmin(torch.from_numpy(a), axis=1).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_reduce_mean():
     """Test reduce mean."""
@@ -732,7 +775,7 @@ def test_reduce_mean():
 
     tf_result_full = tf_result_full_tensor.numpy()
     pt_result_full = pt_result_full_tensor.numpy()
-    assert almost_equal(tf_result_full, pt_result_full)
+    assert allclose(tf_result_full, pt_result_full)
 
     # Axis reduction
     tf_result_axis_tensor = tf_backend.reduce_mean(tf.constant(a), axis=1)
@@ -741,7 +784,7 @@ def test_reduce_mean():
 
     tf_result_axis = tf_result_axis_tensor.numpy()
     pt_result_axis = pt_result_axis_tensor.numpy()
-    assert almost_equal(tf_result_axis, pt_result_axis)
+    assert allclose(tf_result_axis, pt_result_axis)
 
     # Axis reduction with keepdims
     tf_result_keepdims_tensor = tf_backend.reduce_mean(tf.constant(a), axis=1, keepdims=True)
@@ -751,7 +794,7 @@ def test_reduce_mean():
     tf_result_keepdims = tf_result_keepdims_tensor.numpy()
     pt_result_keepdims = pt_result_keepdims_tensor.numpy()
     assert tf_result_keepdims.shape == pt_result_keepdims.shape
-    assert almost_equal(tf_result_keepdims, pt_result_keepdims)
+    assert allclose(tf_result_keepdims, pt_result_keepdims)
 
 
 def test_zeros():
@@ -767,7 +810,7 @@ def test_zeros():
     pt_result = pt_backend.zeros(shape).numpy()
 
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_zeros_like():
     """Test creating zeros tensor with same shape as input."""
@@ -782,7 +825,7 @@ def test_zeros_like():
     pt_result = pt_backend.zeros_like(torch.from_numpy(a)).numpy()
 
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
     assert np.all(tf_result == 0)
     assert np.all(pt_result == 0)
 
@@ -801,7 +844,7 @@ def test_sqrt():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_maximum():
     """Test element-wise maximum."""
@@ -815,7 +858,7 @@ def test_maximum():
 
     tf_result = tf_backend.maximum(tf.constant(a), tf.constant(b)).numpy()
     pt_result = pt_backend.maximum(torch.from_numpy(a), torch.from_numpy(b)).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_norm():
     """Test norm computation."""
@@ -833,7 +876,7 @@ def test_norm():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
     # Norm along axis
     tf_result_axis_tensor = tf_backend.norm(tf.constant(a), axis=1)
@@ -842,7 +885,7 @@ def test_norm():
 
     tf_result_axis = tf_result_axis_tensor.numpy()
     pt_result_axis = pt_result_axis_tensor.numpy()
-    assert almost_equal(tf_result_axis, pt_result_axis)
+    assert allclose(tf_result_axis, pt_result_axis)
 
 def test_pinv():
     """Test pseudo-inverse computation."""
@@ -865,8 +908,8 @@ def test_pinv():
     tf_verify = np.matmul(np.matmul(a, tf_result), a)
     pt_verify = np.matmul(np.matmul(a, pt_result), a)
 
-    assert almost_equal(tf_verify, a, epsilon=1e-3)
-    assert almost_equal(pt_verify, a, epsilon=1e-3)
+    assert allclose(tf_verify, a, epsilon=1e-3)
+    assert allclose(pt_verify, a, epsilon=1e-3)
 
 def test_normalize():
     """Test normalization."""
@@ -885,9 +928,9 @@ def test_normalize():
     pt_result = pt_result_tensor.numpy()
 
     # Both should have unit norm
-    assert almost_equal(np.linalg.norm(tf_result), 1.0)
-    assert almost_equal(np.linalg.norm(pt_result), 1.0)
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(np.linalg.norm(tf_result), 1.0)
+    assert allclose(np.linalg.norm(pt_result), 1.0)
+    assert allclose(tf_result, pt_result)
 
 
 def test_arange():
@@ -899,7 +942,7 @@ def test_arange():
 
     tf_result = tf_backend.arange(0, 10).numpy()
     pt_result = pt_backend.arange(0, 10).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_tile():
     """Test tile operation."""
@@ -914,7 +957,7 @@ def test_tile():
     pt_result = pt_backend.tile(torch.from_numpy(a), (2, 3)).numpy()
 
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_repeat():
     """Test repeat operation."""
@@ -929,7 +972,7 @@ def test_repeat():
     pt_result = pt_backend.repeat(torch.from_numpy(a), 3, axis=0).numpy()
 
     assert tf_result.shape == pt_result.shape
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_sign():
     """Test sign operation."""
@@ -942,7 +985,7 @@ def test_sign():
 
     tf_result = tf_backend.sign(tf.constant(a)).numpy()
     pt_result = pt_backend.sign(torch.from_numpy(a)).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_pow():
     """Test power operation."""
@@ -955,7 +998,7 @@ def test_pow():
 
     tf_result = tf_backend.pow(tf.constant(a), 2).numpy()
     pt_result = pt_backend.pow(torch.from_numpy(a), 2).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_top_k():
     """Test top_k operation."""
@@ -975,7 +1018,7 @@ def test_top_k():
     pt_indices = pt_indices.numpy()
 
     # Values should match (sorted descending)
-    assert almost_equal(tf_values, pt_values)
+    assert allclose(tf_values, pt_values)
     assert np.array_equal(tf_indices, pt_indices)
 
 
@@ -1018,8 +1061,8 @@ def test_diag_part_eigh_tridiagonal_and_eig_real_parity():
     tf_eig_vecs = tf_backend.to_numpy(tf_eig_vecs)
     pt_eig_vecs = pt_backend.to_numpy(pt_eig_vecs)
 
-    assert almost_equal(tf_eig_vals, pt_eig_vals, epsilon=1e-5)
-    assert almost_equal(np.abs(tf_eig_vecs), np.abs(pt_eig_vecs), epsilon=1e-5)
+    assert allclose(tf_eig_vals, pt_eig_vals, epsilon=1e-5)
+    assert allclose(np.abs(tf_eig_vecs), np.abs(pt_eig_vecs), epsilon=1e-5)
 
     tf_vals_only, tf_vecs_none = tf_backend.eigh_tridiagonal(
         tf.constant(maindiag), tf.constant(superdiag), eigvals_only=True
@@ -1030,7 +1073,7 @@ def test_diag_part_eigh_tridiagonal_and_eig_real_parity():
 
     assert tf_vecs_none is None
     assert pt_vecs_none is None
-    assert almost_equal(tf_backend.to_numpy(tf_vals_only), pt_backend.to_numpy(pt_vals_only), epsilon=1e-5)
+    assert allclose(tf_backend.to_numpy(tf_vals_only), pt_backend.to_numpy(pt_vals_only), epsilon=1e-5)
 
     eig_input = np.array([[0.0, -1.0], [1.0, 0.0]], dtype=np.float32)
     tf_eigvals, _ = tf_backend.eig(tf.constant(eig_input))
@@ -1038,11 +1081,11 @@ def test_diag_part_eigh_tridiagonal_and_eig_real_parity():
 
     tf_real = tf_backend.real(tf_eigvals).numpy()
     pt_real = pt_backend.real(pt_eigvals).numpy()
-    assert almost_equal(np.sort(tf_real), np.sort(pt_real), epsilon=1e-6)
+    assert allclose(np.sort(tf_real), np.sort(pt_real), epsilon=1e-6)
 
     tf_eigvals_np = tf_backend.to_numpy(tf_eigvals)
     pt_eigvals_np = pt_backend.to_numpy(pt_eigvals)
-    assert almost_equal(
+    assert allclose(
         np.sort(np.abs(np.imag(tf_eigvals_np))),
         np.sort(np.abs(np.imag(pt_eigvals_np))),
         epsilon=1e-6,
@@ -1060,7 +1103,7 @@ def test_constant():
 
     tf_result = tf_backend.constant(value).numpy()
     pt_result = pt_backend.constant(value).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_convert_to_tensor():
     """Test conversion to tensor."""
@@ -1073,7 +1116,7 @@ def test_convert_to_tensor():
 
     tf_result = tf_backend.convert_to_tensor(a).numpy()
     pt_result = pt_backend.convert_to_tensor(a).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_cast():
     """Test casting tensors."""
@@ -1093,7 +1136,7 @@ def test_cast():
 
     tf_result = tf_result_tensor.numpy()
     pt_result = pt_result_tensor.numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 def test_reduce_prod():
     """Test reduce product."""
@@ -1107,12 +1150,12 @@ def test_reduce_prod():
     # Full reduction
     tf_result = tf_backend.reduce_prod(tf.constant(a)).numpy()
     pt_result = pt_backend.reduce_prod(torch.from_numpy(a)).numpy()
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
     # Axis reduction
     tf_result_axis = tf_backend.reduce_prod(tf.constant(a), axis=1).numpy()
     pt_result_axis = pt_backend.reduce_prod(torch.from_numpy(a), axis=1).numpy()
-    assert almost_equal(tf_result_axis, pt_result_axis)
+    assert allclose(tf_result_axis, pt_result_axis)
 
 
 def test_logical_and():
@@ -1200,7 +1243,12 @@ def test_jacobian_shape_match():
 
     tf_row_norms = np.linalg.norm(tf_jacobian, axis=1)
     pt_row_norms = np.linalg.norm(pt_jacobian, axis=1)
-    assert almost_equal(tf_row_norms, pt_row_norms, epsilon=5e-3)
+    # First-order parity uses a moderate tolerance in float32.
+    assert allclose(tf_row_norms, pt_row_norms, epsilon=5e-3)
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+    assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
 
 def test_jacobian_non_zero():
     """Test that Jacobians are non-zero."""
@@ -1236,9 +1284,54 @@ def test_jacobian_non_zero():
     assert np.linalg.norm(tf_jacobian) > 0, "TF Jacobian is zero"
     assert np.linalg.norm(pt_jacobian) > 0, "PT Jacobian is zero"
 
-    tf_abs_sorted = np.sort(np.abs(tf_jacobian.reshape(-1)))
-    pt_abs_sorted = np.sort(np.abs(pt_jacobian.reshape(-1)))
-    assert almost_equal(tf_abs_sorted, pt_abs_sorted, epsilon=5e-3)
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+    assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
+
+
+def test_output_jacobian_wrt_weights_match():
+    """Test output Jacobian wrt weights parity across backends."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_dim, hidden_dim, output_dim = 5, 3, 2
+    weights = generate_matching_weights(input_dim, hidden_dim, output_dim, seed=11)
+    inputs, _ = generate_test_data(batch_size=3, input_dim=input_dim, output_dim=output_dim, seed=19)
+
+    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
+    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    tf_outputs, tf_jacobians = tf_backend.compute_output_jacobian_wrt_weights(
+        tf_model, tf_weights, tf.constant(inputs)
+    )
+    pt_outputs, pt_jacobians = pt_backend.compute_output_jacobian_wrt_weights(
+        pt_model, pt_weights, torch.from_numpy(inputs)
+    )
+
+    assert allclose(tf_backend.to_numpy(tf_outputs), pt_backend.to_numpy(pt_outputs), epsilon=5e-3)
+    assert len(tf_jacobians) == len(pt_jacobians)
+
+    for tf_weight, pt_weight, tf_jacobian, pt_jacobian in zip(tf_weights, pt_weights, tf_jacobians, pt_jacobians):
+        tf_shape = tuple(int(dim) for dim in tf_weight.shape)
+        pt_shape = tuple(int(dim) for dim in pt_weight.shape)
+
+        tf_jacobian_np = tf_backend.to_numpy(tf_jacobian)
+        pt_jacobian_np = pt_backend.to_numpy(pt_jacobian)
+
+        if tf_shape == pt_shape:
+            pt_jacobian_tf_order = pt_jacobian_np
+        elif len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
+            pt_jacobian_tf_order = np.swapaxes(pt_jacobian_np, -1, -2)
+        else:
+            raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
+
+        assert tf_jacobian_np.shape == pt_jacobian_tf_order.shape
+        assert allclose(tf_jacobian_np, pt_jacobian_tf_order, epsilon=5e-3)
 
 
 def test_get_layers():
@@ -1314,7 +1407,7 @@ def test_map_fn_simple():
     tf_result = tf_backend.map_fn(double_fn, tf.constant(a)).numpy()
     pt_result = pt_backend.map_fn(double_fn, torch.from_numpy(a)).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 
 def test_copy():
@@ -1333,8 +1426,8 @@ def test_copy():
     pt_copy = pt_backend.copy(pt_original)
 
     # Copies should equal originals
-    assert almost_equal(tf_copy.numpy(), tf_original.numpy())
-    assert almost_equal(pt_copy.numpy(), pt_original.numpy())
+    assert allclose(tf_copy.numpy(), tf_original.numpy())
+    assert allclose(pt_copy.numpy(), pt_original.numpy())
 
 def test_clone_variable():
     """Test variable cloning."""
@@ -1357,8 +1450,8 @@ def test_clone_variable():
     pt_clone = pt_backend.clone_variable(pt_weights[0])
 
     # Clones should match originals
-    assert almost_equal(tf_clone.numpy(), tf_weights[0].numpy())
-    assert almost_equal(pt_clone.numpy(), pt_weights[0].detach().numpy())
+    assert allclose(tf_clone.numpy(), tf_weights[0].numpy())
+    assert allclose(pt_clone.numpy(), pt_weights[0].detach().numpy())
 
 
 def test_boolean_mask():
@@ -1374,7 +1467,7 @@ def test_boolean_mask():
     tf_result = tf_backend.boolean_mask(tf.constant(a), tf.constant(mask)).numpy()
     pt_result = pt_backend.boolean_mask(torch.from_numpy(a), torch.from_numpy(mask)).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 
 def test_tensor_shape():
@@ -1446,7 +1539,7 @@ def test_gather_along_axis_simple():
         torch.from_numpy(a), torch.from_numpy(indices).long(), axis=0
     ).numpy()
 
-    assert almost_equal(tf_result, pt_result)
+    assert allclose(tf_result, pt_result)
 
 
 def test_gather_along_axis_invalid_index_raises():
@@ -1539,7 +1632,7 @@ def test_create_sequential_from_layers():
     pt_output = pt_sequential(torch.from_numpy(inputs)).detach().numpy()
 
     assert tf_output.shape == pt_output.shape
-    assert almost_equal(tf_output, pt_output)
+    assert allclose(tf_output, pt_output)
 
 
 def test_hessian_computation_match():
@@ -1584,7 +1677,8 @@ def test_hessian_computation_match():
 
     assert np.allclose(tf_hessian, tf_hessian.T, atol=1e-5, rtol=1e-5)
     assert np.allclose(pt_hessian_tf_order, pt_hessian_tf_order.T, atol=1e-5, rtol=1e-5)
-    assert almost_equal(tf_hessian, pt_hessian_tf_order, epsilon=5e-2)
+    # Second-order parity remains stable at 5e-3 with aligned parameter order.
+    assert allclose(tf_hessian, pt_hessian_tf_order, epsilon=5e-3)
 
 
 def test_hvp_produces_output():
@@ -1650,6 +1744,11 @@ def test_hvp_produces_output():
     assert np.all(np.isfinite(pt_hvp)), "PT HVP has non-finite values"
     assert np.linalg.norm(pt_hvp) > 0, "PT HVP is zero"
 
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hvp_tf_order = pt_hvp[tf_to_pt]
+    # First-order parity uses a moderate tolerance in float32.
+    assert allclose(tf_hvp, pt_hvp_tf_order, epsilon=5e-3)
+
     tf_direction_flat = np.concatenate([direction.reshape(-1) for direction in reference_direction])
     pt_direction_flat = np.concatenate([direction.detach().numpy().reshape(-1) for direction in pt_v])
 
@@ -1658,7 +1757,60 @@ def test_hvp_produces_output():
 
     assert np.isfinite(tf_directional_curvature)
     assert np.isfinite(pt_directional_curvature)
-    assert almost_equal(tf_directional_curvature, pt_directional_curvature, epsilon=5e-2)
+    assert allclose(tf_directional_curvature, pt_directional_curvature, epsilon=5e-3)
+
+
+def test_hvp_batch_match():
+    """Batched HVP should match across backends after parameter-order remapping."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_dim, hidden_dim, output_dim = 3, 2, 1
+    weights = generate_matching_weights(input_dim, hidden_dim, output_dim, seed=101)
+    inputs, targets = generate_test_data(batch_size=2, input_dim=input_dim, output_dim=output_dim, seed=202)
+
+    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
+    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+    num_params = tf_backend.get_num_params(tf_weights)
+    assert pt_backend.get_num_params(pt_weights) == num_params
+
+    np.random.seed(303)
+    reference_direction = [np.random.randn(*tuple(weight.shape)).astype(np.float32) for weight in tf_weights]
+    tf_v = [tf.constant(direction) for direction in reference_direction]
+
+    pt_v = []
+    for direction, pt_weight in zip(reference_direction, pt_weights):
+        pt_shape = tuple(pt_weight.shape)
+        if direction.shape == pt_shape:
+            pt_v.append(torch.from_numpy(direction.copy()))
+            continue
+        if direction.ndim == 2 and pt_shape == (direction.shape[1], direction.shape[0]):
+            pt_v.append(torch.from_numpy(direction.T.copy()))
+            continue
+        raise AssertionError(f"Incompatible direction shape {direction.shape} for PT weight shape {pt_shape}")
+
+    tf_loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+
+    def pt_loss_fn(pred, target):
+        return nn.MSELoss(reduction='none')(pred, target).mean(dim=-1)
+
+    tf_hvp_batch = tf_backend.to_numpy(
+        tf_backend.compute_hvp_batch(tf_model, tf_weights, tf_loss_fn, tf_v, tf.constant(inputs), tf.constant(targets))
+    )
+    pt_hvp_batch = pt_backend.to_numpy(
+        pt_backend.compute_hvp_batch(
+            pt_model, pt_weights, pt_loss_fn, pt_v, torch.from_numpy(inputs), torch.from_numpy(targets)
+        )
+    )
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hvp_batch_tf_order = pt_hvp_batch[tf_to_pt]
+    assert allclose(tf_hvp_batch, pt_hvp_batch_tf_order, epsilon=5e-3)
 
 
 def test_split_model_invalid_layer_raises():
@@ -1715,7 +1867,7 @@ def test_hvp_linearity():
     assert tf_hvp_sum.shape == (num_params,)
 
     # H(v1+v2) should equal Hv1 + Hv2
-    assert almost_equal(tf_hvp_sum, tf_hvp1 + tf_hvp2, epsilon=1e-4), \
+    assert allclose(tf_hvp_sum, tf_hvp1 + tf_hvp2, epsilon=1e-4), \
         "TF HVP is not linear"
 
     # Test with PyTorch
@@ -1750,7 +1902,7 @@ def test_hvp_linearity():
     assert pt_hvp_sum.shape == (num_params,)
 
     # H(v1+v2) should equal Hv1 + Hv2
-    assert almost_equal(pt_hvp_sum, pt_hvp1 + pt_hvp2, epsilon=1e-4), \
+    assert allclose(pt_hvp_sum, pt_hvp1 + pt_hvp2, epsilon=1e-4), \
         "PT HVP is not linear"
 
 
