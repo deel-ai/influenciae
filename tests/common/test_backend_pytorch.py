@@ -56,6 +56,25 @@ def test_get_model_weights(backend, simple_model):
     assert weights[2].shape == (2, 3)  # Second linear weight
     assert weights[3].shape == (2,)    # Second linear bias
 
+    for weight in weights:
+        assert weight.dtype == torch.float32
+        assert torch.all(torch.isfinite(weight))
+
+
+def test_normalize_weights_to_watch(backend, simple_model):
+    """normalize_weights_to_watch should keep watched parameters unchanged."""
+    weights = backend.get_model_weights(simple_model)
+
+    normalized = backend.normalize_weights_to_watch(weights)
+    normalized_twice = backend.normalize_weights_to_watch(normalized)
+
+    assert len(normalized) == len(weights)
+    assert len(normalized_twice) == len(weights)
+
+    for original, first_pass, second_pass in zip(weights, normalized, normalized_twice):
+        assert first_pass is original
+        assert second_pass is original
+
 def test_get_model_weights_specific_layers(backend, simple_model):
     """Test getting weights from specific layers."""
     children = list(simple_model.children())
@@ -79,6 +98,7 @@ def test_forward(backend, simple_model):
     output = backend.forward(simple_model, inputs)
 
     assert output.shape == (4, 2)
+    assert torch.all(torch.isfinite(output))
 
 def test_get_layers(backend, simple_model):
     """Test getting all layers."""
@@ -108,6 +128,8 @@ def test_compute_loss(backend, simple_model):
 
     # MSE without reduction returns (batch, output_dim)
     assert loss.shape == (4, 2)
+    assert torch.all(torch.isfinite(loss))
+    assert torch.all(loss >= 0)
 
 def test_compute_loss_with_sample_weight(backend, simple_model):
     """Test loss computation with sample weights."""
@@ -151,6 +173,8 @@ def test_compute_jacobian(backend, simple_model):
 
     num_params = backend.get_num_params(weights)
     assert jacobian.shape == (batch_size, num_params)
+    assert torch.all(torch.isfinite(jacobian))
+    assert torch.linalg.norm(jacobian) > 0
 
 
 def test_compute_jacobian_fallback_preserves_dtype(backend, monkeypatch):
@@ -324,6 +348,7 @@ def test_reshape(backend):
 
     result = backend.reshape(a, (3, 2))
     assert result.shape == (3, 2)
+    assert torch.equal(result.reshape(-1), a.reshape(-1))
 
 def test_reduce_sum(backend):
     """Test reduce sum."""
@@ -420,6 +445,9 @@ def test_split_model(backend, simple_model):
     head_output = head(fe_output)
     assert head_output.shape == (4, 2)
 
+    original_output = simple_model(inputs)
+    assert torch.allclose(head_output, original_output)
+
 
 def test_find_last_weight_layer(backend, simple_model):
     """Test finding last weight layer."""
@@ -447,6 +475,21 @@ def test_get_layer_index_by_int(backend, simple_model):
     assert backend.get_layer_index(simple_model, 1) == 1
     assert backend.get_layer_index(simple_model, -1) == 2
 
+
+def test_find_layer_by_name(backend, simple_model):
+    """Test finding a layer by its named_children key."""
+    idx, layer = backend.find_layer_by_name(simple_model, '0')
+
+    assert isinstance(layer, nn.Linear)
+    assert layer is simple_model[0]
+    assert backend.get_layer_index(simple_model, '0') == idx
+
+
+def test_find_layer_by_name_not_found(backend, simple_model):
+    """Test finding non-existent layer raises error."""
+    with pytest.raises(ValueError):
+        backend.find_layer_by_name(simple_model, 'nonexistent')
+
 def test_get_weights_for_layer_range_single_layer(backend, simple_model):
     """Test getting weights for a single layer."""
     weights = backend.get_weights_for_layer_range(simple_model, start_layer=0)
@@ -455,6 +498,8 @@ def test_get_weights_for_layer_range_single_layer(backend, simple_model):
     assert len(weights) == 2
     assert weights[0].shape == (3, 5)
     assert weights[1].shape == (3,)
+    assert torch.all(torch.isfinite(weights[0]))
+    assert torch.all(torch.isfinite(weights[1]))
 
 def test_get_weights_for_layer_range_multiple_layers(backend, simple_model):
     """Test getting weights for multiple layers."""
@@ -471,6 +516,8 @@ def test_get_weights_for_layer_range_auto_detect(backend, simple_model):
     assert len(weights) == 2
     assert weights[0].shape == (2, 3)
     assert weights[1].shape == (2,)
+    assert torch.all(torch.isfinite(weights[0]))
+    assert torch.all(torch.isfinite(weights[1]))
 
 def test_get_weights_for_layer_range_invalid_range(backend, simple_model):
     """Test that invalid layer range raises error."""
@@ -511,6 +558,7 @@ def test_influence_model_forward(simple_model):
     output = influence_model(inputs)
 
     assert output.shape == (4, 2)
+    assert torch.all(torch.isfinite(output))
 
 def test_influence_model_batch_loss(simple_model):
     """Test InfluenceModel batch loss computation."""
@@ -530,6 +578,7 @@ def test_influence_model_batch_loss(simple_model):
     loss = influence_model.batch_loss(dataset)
 
     assert loss.shape == (4,)
+    assert torch.all(torch.isfinite(loss))
 
 
 def test_map_dataset_tuple_and_unpacked(backend):
@@ -728,6 +777,7 @@ def test_create_dataset_from_tensors(backend):
     tensor_dataset = backend.create_dataset_from_tensors(torch.tensor([1.0, 2.0]), batch_size=4)
     assert len(tensor_dataset) == 1
     assert tensor_dataset[0][0].shape == (1, 2)
+    assert torch.equal(tensor_dataset[0][0], torch.tensor([[1.0, 2.0]]))
 
     tuple_dataset = backend.create_dataset_from_tensors(
         (torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])),
@@ -735,6 +785,8 @@ def test_create_dataset_from_tensors(backend):
     )
     assert tuple_dataset[0][0].shape == (1, 2)
     assert tuple_dataset[0][1].shape == (1, 2)
+    assert torch.equal(tuple_dataset[0][0], torch.tensor([[1.0, 2.0]]))
+    assert torch.equal(tuple_dataset[0][1], torch.tensor([[3.0, 4.0]]))
 
 def test_shuffle_dataset_size_and_element_spec(backend):
     """Test shuffle, size and element spec helpers."""
@@ -829,6 +881,24 @@ def test_compute_output_jacobians(backend):
     assert jac_inputs.shape == (2, 1, 2)
     assert len(jac_weights) == len(weights)
     assert jac_weights[0].shape[:2] == (2, 1)
+    assert torch.all(torch.isfinite(outputs))
+    assert torch.all(torch.isfinite(outputs_w))
+    assert torch.all(torch.isfinite(jac_inputs))
+    assert torch.all(torch.isfinite(jac_weights[0]))
+    assert torch.all(torch.isfinite(jac_weights[1]))
+    assert torch.allclose(outputs, outputs_w)
+
+
+def test_map_fn_simple(backend):
+    """Test map_fn with both tensor and tuple inputs."""
+    elems = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    result = backend.map_fn(lambda x: x * 2.0, elems)
+    assert torch.equal(result, torch.tensor([[2.0, 4.0], [6.0, 8.0]]))
+
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    b = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    tuple_result = backend.map_fn(lambda pair: pair[0] + pair[1], (a, b))
+    assert torch.equal(tuple_result, torch.tensor([[6.0, 8.0], [10.0, 12.0]]))
 
 def test_while_loop(backend):
     """Test while_loop helper with simple integer accumulation."""
