@@ -19,9 +19,6 @@ from ..utils_test import allclose
 pytestmark = pytest.mark.tensorflow
 
 
-almost_equal = allclose
-
-
 class _WeightWrapper:
     """Minimal wrapper emulating Keras 3 variable containers."""
 
@@ -91,8 +88,8 @@ def test_normalize_weights_to_watch(backend, simple_model):
     for raw_weight, first_pass, second_pass in zip(weights, normalized, normalized_twice):
         assert first_pass.shape == raw_weight.shape
         assert second_pass.shape == raw_weight.shape
-        assert almost_equal(backend.to_numpy(first_pass), backend.to_numpy(raw_weight))
-        assert almost_equal(backend.to_numpy(second_pass), backend.to_numpy(first_pass))
+        assert allclose(backend.to_numpy(first_pass), backend.to_numpy(raw_weight))
+        assert allclose(backend.to_numpy(second_pass), backend.to_numpy(first_pass))
 
 def test_get_model_weights_specific_layers(backend, simple_model):
     """Test getting weights from specific layers."""
@@ -494,7 +491,7 @@ def test_split_model(backend, simple_model):
 
     # Combined should equal original model output
     original_output = simple_model(inputs)
-    assert almost_equal(head_output, original_output)
+    assert allclose(head_output, original_output)
 
 
 def test_split_model_by_name(backend, simple_model):
@@ -507,7 +504,7 @@ def test_split_model_by_name(backend, simple_model):
 
     assert fe_output.shape == (4, 3)
     assert head_output.shape == (4, 2)
-    assert almost_equal(head_output, simple_model(inputs))
+    assert allclose(head_output, simple_model(inputs))
 
 
 def test_find_last_weight_layer(backend, simple_model):
@@ -714,8 +711,8 @@ def test_map_dataset(backend):
     mapped = backend.map_dataset(dataset, lambda a, b: (a + 1.0, b + 2.0), device="CPU:0")
     first_x, first_y = next(iter(mapped))
 
-    assert almost_equal(first_x, tf.constant([[2.0], [3.0]]))
-    assert almost_equal(first_y, tf.constant([[7.0], [8.0]]))
+    assert allclose(first_x, tf.constant([[2.0], [3.0]]))
+    assert allclose(first_y, tf.constant([[7.0], [8.0]]))
 
 def test_cache_save_load_dataset(backend, tmp_path):
     """Test caching, saving and loading datasets."""
@@ -866,6 +863,26 @@ def test_compute_hvp_batch(backend):
     assert tf.reduce_all(tf.math.is_finite(hvp))
 
 
+def test_compute_hvp_batch_equals_sum_of_singles(backend):
+    """Batched HVP should equal the sum of per-sample HVPs."""
+    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+    weights = backend.get_model_weights(model)
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    vector = [tf.ones_like(weight) for weight in weights]
+
+    inputs = tf.constant([[1.0, 0.0], [0.5, -1.0]], dtype=tf.float32)
+    targets = tf.constant([[1.0], [0.0]], dtype=tf.float32)
+
+    hvp_batch = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+    hvp_single_terms = [
+        backend.compute_hvp_single(model, weights, loss_fn, vector, inputs[idx:idx + 1], targets[idx:idx + 1])
+        for idx in range(inputs.shape[0])
+    ]
+    hvp_single_sum = tf.reduce_sum(tf.stack(hvp_single_terms, axis=0), axis=0)
+
+    assert np.allclose(backend.to_numpy(hvp_batch), backend.to_numpy(hvp_single_sum), atol=1e-5, rtol=1e-5)
+
+
 def test_compute_hvp_single_matches_hessian_vector_product(backend):
     """Single-sample HVP should match explicit Hessian-vector multiplication."""
     model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
@@ -904,7 +921,7 @@ def test_compute_output_jacobians(backend):
     assert jac_inputs.shape == (2, 1, 2, 2)
     assert len(jac_weights) == len(weights)
     assert jac_weights[0].shape[:2] == (2, 1)
-    assert almost_equal(outputs, outputs_w)
+    assert allclose(outputs, outputs_w)
     assert bool(tf.reduce_all(tf.math.is_finite(jac_inputs)).numpy())
     assert all(bool(tf.reduce_all(tf.math.is_finite(jac)).numpy()) for jac in jac_weights)
 
