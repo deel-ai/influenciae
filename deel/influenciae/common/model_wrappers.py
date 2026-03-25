@@ -97,7 +97,7 @@ class BaseInfluenceModel:
             loss_function = self._get_default_loss_function()
         self.loss_function = loss_function
 
-        # Validate loss function reduction (TensorFlow specific)
+        # Validate loss function reduction
         self._validate_loss_function(loss_function)
 
         # Get weights to watch
@@ -132,7 +132,20 @@ class BaseInfluenceModel:
             loss_reduction = getattr(loss_function, 'reduction', None)
             if loss_reduction is not None and loss_reduction is not reduction.NONE:
                 raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
-        # For PyTorch, we could check loss_function.reduction == 'none' but it's less standardized
+            return
+
+        if self.backend.framework == Framework.PYTORCH:
+            loss_reduction = getattr(loss_function, 'reduction', None)
+            if loss_reduction is None:
+                return
+
+            if isinstance(loss_reduction, str):
+                normalized_reduction = loss_reduction.lower()
+            else:
+                normalized_reduction = str(loss_reduction).lower()
+
+            if normalized_reduction != 'none':
+                raise ValueError("The loss function must not have reduction (use reduction='none').")
 
     def __call__(self, inputs: Tensor) -> Tensor:
         """
