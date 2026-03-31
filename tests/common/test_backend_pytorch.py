@@ -6,11 +6,20 @@
 Tests for the PyTorch backend implementation.
 These tests verify the PyTorch-specific functionality works correctly.
 """
+from collections import OrderedDict
+
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+
+from ..utils_test import (
+    assert_allclose,
+    build_regression_tensors_torch,
+    ground_truth_grads_hessian_last_layer_torch,
+    make_linear_model_torch,
+)
 
 
 pytestmark = pytest.mark.pytorch
@@ -21,6 +30,36 @@ def _per_sample_mse_loss(pred, target):
     return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
 
 
+def _make_known_linear_case_torch():
+    """Build a tiny affine model with hand-computable outputs and losses."""
+    model = nn.Sequential(nn.Linear(2, 1))
+    with torch.no_grad():
+        model[0].weight.copy_(torch.tensor([[2.0, -1.0]], dtype=torch.float32))
+        model[0].bias.copy_(torch.tensor([0.5], dtype=torch.float32))
+
+    inputs = torch.tensor([[1.0, 2.0], [-1.0, 1.0]], dtype=torch.float32)
+    targets = torch.tensor([[0.0], [1.0]], dtype=torch.float32)
+    expected_output = torch.tensor([[0.5], [-2.5]], dtype=torch.float32)
+    expected_loss = torch.tensor([[0.25], [12.25]], dtype=torch.float32)
+    return model, inputs, targets, expected_output, expected_loss
+
+
+def _make_closed_form_last_layer_case_torch(backend, n_samples=3):
+    """Create a small linear regression case with closed-form last-layer derivatives."""
+    model = make_linear_model_torch(dtype=torch.float32)
+    weights = backend.get_weights_for_layer_range(model, start_layer=None)
+    inputs, targets = build_regression_tensors_torch(n_samples, seed=321, dtype=torch.float32)
+    grads_mat, hessian_stack = ground_truth_grads_hessian_last_layer_torch(
+        model,
+        inputs,
+        targets,
+        return_hessian_stack=True,
+    )
+    dataset = [(inputs, targets)]
+    loss_fn = nn.MSELoss(reduction='none')
+    return model, weights, inputs, targets, dataset, loss_fn, grads_mat, hessian_stack
+
+
 @pytest.fixture
 def simple_model():
     """Create a simple PyTorch model for testing."""
@@ -29,6 +68,16 @@ def simple_model():
         nn.ReLU(),
         nn.Linear(3, 2)
     )
+
+
+@pytest.fixture
+def named_simple_model():
+    """Create a simple PyTorch model with stable child names."""
+    return nn.Sequential(OrderedDict([
+        ('hidden', nn.Linear(5, 3)),
+        ('activation', nn.ReLU()),
+        ('output', nn.Linear(3, 2)),
+    ]))
 
 
 @pytest.fixture
@@ -99,13 +148,16 @@ def test_get_num_params(backend, simple_model):
     expected = 5 * 3 + 3 + 3 * 2 + 2
     assert num_params == expected
 
-def test_forward(backend, simple_model):
+def test_forward(backend):
     """Test forward pass."""
-    inputs = torch.randn(4, 5)
-    output = backend.forward(simple_model, inputs)
+    model, inputs, _, expected_output, _ = _make_known_linear_case_torch()
 
-    assert output.shape == (4, 2)
+    output = backend.forward(model, inputs)
+
+    assert output.shape == (2, 1)
     assert torch.all(torch.isfinite(output))
+    assert_allclose(output, model(inputs))
+    assert_allclose(output, expected_output)
 
 def test_get_layers(backend, simple_model):
     """Test getting all layers."""
@@ -125,58 +177,59 @@ def test_get_children(backend, simple_model):
     assert isinstance(children[2], nn.Linear)
 
 
-def test_compute_loss(backend, simple_model):
+def test_compute_loss(backend):
     """Test loss computation."""
-    inputs = torch.randn(4, 5)
-    targets = torch.randn(4, 2)
+    model, inputs, targets, _, expected_loss = _make_known_linear_case_torch()
     loss_fn = nn.MSELoss(reduction='none')
 
-    loss = backend.compute_loss(simple_model, loss_fn, inputs, targets)
+    loss = backend.compute_loss(model, loss_fn, inputs, targets)
+    expected = loss_fn(model(inputs), targets)
 
-    # MSE without reduction returns (batch, output_dim)
-    assert loss.shape == (4, 2)
+    assert loss.shape == (2, 1)
     assert torch.all(torch.isfinite(loss))
     assert torch.all(loss >= 0)
+    assert_allclose(loss, expected)
+    assert_allclose(loss, expected_loss)
 
-def test_compute_loss_with_sample_weight(backend, simple_model):
+def test_compute_loss_with_sample_weight(backend):
     """Test loss computation with sample weights."""
-    inputs = torch.randn(4, 5)
-    targets = torch.randn(4, 2)
-    sample_weight = torch.tensor([1.0, 2.0, 0.5, 1.5])
+    model, inputs, targets, _, expected_loss = _make_known_linear_case_torch()
+    sample_weight = torch.tensor([1.0, 2.0], dtype=torch.float32)
     loss_fn = nn.MSELoss(reduction='none')
 
-    loss_unweighted = backend.compute_loss(simple_model, loss_fn, inputs, targets)
-    loss_weighted = backend.compute_loss(simple_model, loss_fn, inputs, targets, sample_weight.unsqueeze(-1))
+    loss_unweighted = backend.compute_loss(model, loss_fn, inputs, targets)
+    loss_weighted = backend.compute_loss(model, loss_fn, inputs, targets, sample_weight.unsqueeze(-1))
+    expected_weighted = expected_loss * sample_weight.unsqueeze(-1)
 
-    # Weighted loss should be different
     assert not torch.allclose(loss_unweighted, loss_weighted)
+    assert_allclose(loss_unweighted, expected_loss)
+    assert_allclose(loss_weighted, expected_weighted)
 
-def test_compute_gradient(backend, simple_model):
+def test_compute_gradient(backend):
     """Test gradient computation."""
-    inputs = torch.randn(4, 5)
-    targets = torch.randn(4, 2)
-    weights = backend.get_model_weights(simple_model)
+    model, weights, inputs, targets, _, loss_fn, grads_mat, _ = _make_closed_form_last_layer_case_torch(backend)
 
-    gradient = backend.compute_gradient(simple_model, weights, _per_sample_mse_loss, inputs, targets)
+    gradient = backend.compute_gradient(model, weights, loss_fn, inputs, targets)
+    expected_gradient = grads_mat.sum(dim=1)
 
     num_params = backend.get_num_params(weights)
     assert gradient.shape == (num_params,)
     assert torch.all(torch.isfinite(gradient))
-    assert torch.linalg.norm(gradient) > 0  # Gradient should be non-zero
+    assert torch.linalg.norm(gradient) > 0
+    assert_allclose(gradient, expected_gradient)
 
-def test_compute_jacobian(backend, simple_model):
+def test_compute_jacobian(backend):
     """Test Jacobian computation."""
-    batch_size = 3
-    inputs = torch.randn(batch_size, 5)
-    targets = torch.randn(batch_size, 2)
-    weights = backend.get_model_weights(simple_model)
+    model, weights, inputs, targets, _, loss_fn, grads_mat, _ = _make_closed_form_last_layer_case_torch(backend)
 
-    jacobian = backend.compute_jacobian(simple_model, weights, _per_sample_mse_loss, inputs, targets)
+    jacobian = backend.compute_jacobian(model, weights, loss_fn, inputs, targets)
+    expected_jacobian = grads_mat.T
 
     num_params = backend.get_num_params(weights)
-    assert jacobian.shape == (batch_size, num_params)
+    assert jacobian.shape == (inputs.shape[0], num_params)
     assert torch.all(torch.isfinite(jacobian))
     assert torch.linalg.norm(jacobian) > 0
+    assert_allclose(jacobian, expected_jacobian)
 
 
 def test_compute_jacobian_vmap_matches_loop(backend, simple_model):
@@ -440,9 +493,20 @@ def test_find_layer_by_name(backend, simple_model):
     """Test finding a layer by its named_children key."""
     idx, layer = backend.find_layer_by_name(simple_model, '0')
 
+    assert idx == 0
     assert isinstance(layer, nn.Linear)
     assert layer is simple_model[0]
     assert backend.get_layer_index(simple_model, '0') == idx
+
+
+def test_find_layer_by_name_with_named_children(backend, named_simple_model):
+    """String layer selection should use direct child names and indices."""
+    idx, layer = backend.find_layer_by_name(named_simple_model, 'output')
+
+    assert idx == 2
+    assert isinstance(layer, nn.Linear)
+    assert layer is named_simple_model.output
+    assert backend.get_layer_index(named_simple_model, 'output') == idx
 
 
 def test_find_layer_by_name_not_found(backend, simple_model):
@@ -460,6 +524,17 @@ def test_get_weights_for_layer_range_single_layer(backend, simple_model):
     assert weights[1].shape == (3,)
     assert torch.all(torch.isfinite(weights[0]))
     assert torch.all(torch.isfinite(weights[1]))
+
+
+def test_get_weights_for_layer_range_by_name(backend, named_simple_model):
+    """Test getting weights for a named layer."""
+    weights = backend.get_weights_for_layer_range(named_simple_model, start_layer='output')
+
+    assert len(weights) == 2
+    assert weights[0].shape == (2, 3)
+    assert weights[1].shape == (2,)
+    assert weights[0] is named_simple_model.output.weight
+    assert weights[1] is named_simple_model.output.bias
 
 def test_get_weights_for_layer_range_multiple_layers(backend, simple_model):
     """Test getting weights for multiple layers."""
@@ -507,6 +582,19 @@ def test_influence_model_with_start_layer(simple_model):
     expected_params = 5 * 3 + 3
     assert influence_model.nb_params == expected_params
 
+
+def test_influence_model_with_layer_name(named_simple_model):
+    """Test InfluenceModel with a named PyTorch layer."""
+    from deel.influenciae.common import InfluenceModel
+
+    loss_fn = nn.MSELoss(reduction='none')
+    influence_model = InfluenceModel(named_simple_model, start_layer='output', loss_function=loss_fn)
+
+    expected_params = 3 * 2 + 2
+    assert influence_model.nb_params == expected_params
+    assert influence_model.weights[0] is named_simple_model.output.weight
+    assert influence_model.weights[1] is named_simple_model.output.bias
+
 def test_influence_model_forward(simple_model):
     """Test InfluenceModel forward pass."""
     from deel.influenciae.common import InfluenceModel
@@ -519,6 +607,7 @@ def test_influence_model_forward(simple_model):
 
     assert output.shape == (4, 2)
     assert torch.all(torch.isfinite(output))
+    assert_allclose(output, simple_model(inputs))
 
 def test_influence_model_batch_loss(simple_model):
     """Test InfluenceModel batch loss computation."""
@@ -536,9 +625,14 @@ def test_influence_model_batch_loss(simple_model):
     ]
 
     loss = influence_model.batch_loss(dataset)
+    expected_loss = torch.cat(
+        [loss_fn(simple_model(batch_inputs), batch_targets) for batch_inputs, batch_targets in dataset],
+        dim=0,
+    )
 
     assert loss.shape == (4,)
     assert torch.all(torch.isfinite(loss))
+    assert_allclose(loss, expected_loss)
 
 
 def test_influence_model_batch_jacobian(simple_model):
@@ -556,9 +650,23 @@ def test_influence_model_batch_jacobian(simple_model):
     ]
 
     jacobian = influence_model.batch_jacobian(dataset)
+    expected_jacobian = torch.cat(
+        [
+            influence_model.backend.compute_jacobian(
+                simple_model,
+                influence_model.weights,
+                loss_fn,
+                batch_inputs,
+                batch_targets,
+            )
+            for batch_inputs, batch_targets in dataset
+        ],
+        dim=0,
+    )
 
     assert jacobian.shape == (4, influence_model.nb_params)
     assert torch.all(torch.isfinite(jacobian))
+    assert_allclose(jacobian, expected_jacobian)
 
 
 def test_influence_model_batch_gradient(simple_model):
@@ -576,9 +684,23 @@ def test_influence_model_batch_gradient(simple_model):
     ]
 
     gradients = influence_model.batch_gradient(dataset)
+    expected_gradients = torch.stack(
+        [
+            influence_model.backend.compute_gradient(
+                simple_model,
+                influence_model.weights,
+                loss_fn,
+                batch_inputs,
+                batch_targets,
+            )
+            for batch_inputs, batch_targets in dataset
+        ],
+        dim=0,
+    )
 
     assert gradients.shape == (2, influence_model.nb_params)
     assert torch.all(torch.isfinite(gradients))
+    assert_allclose(gradients, expected_gradients)
 
 
 def test_loss_with_reduction_raises_error(simple_model):
@@ -851,64 +973,67 @@ def test_assign_variable(backend, simple_model):
     assert torch.equal(variable, torch.zeros_like(variable))
 
 def test_compute_hessian(backend):
-    """Test Hessian computation shape and finiteness."""
-    model = nn.Sequential(nn.Linear(2, 1))
-    weights = backend.get_model_weights(model)
+    """Test Hessian computation against the closed-form last-layer Hessian."""
+    model, weights, _, _, dataset, loss_fn, _, hessian_stack = _make_closed_form_last_layer_case_torch(backend)
     nb_params = backend.get_num_params(weights)
 
-    inputs = torch.tensor([[1.0, 0.0], [0.5, -1.0]])
-    targets = torch.tensor([[1.0], [0.0]])
-    dataset = [(inputs, targets)]
-
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
-
     hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+    expected_hessian = hessian_stack.mean(dim=0)
 
     assert hessian.shape == (nb_params, nb_params)
     assert torch.all(torch.isfinite(hessian))
     assert torch.allclose(hessian, hessian.T, atol=1e-5, rtol=1e-5)
+    assert_allclose(hessian, expected_hessian)
 
 
 def test_compute_hvp_single(backend):
     """Test single-sample Hessian-vector product computation."""
-    model = nn.Sequential(nn.Linear(2, 1))
-    weights = backend.get_model_weights(model)
+    model, weights, inputs, targets, _, loss_fn, _, hessian_stack = _make_closed_form_last_layer_case_torch(
+        backend,
+        n_samples=1,
+    )
     nb_params = backend.get_num_params(weights)
-    vector = [
-        torch.tensor([[0.3, -0.7]], dtype=torch.float32),
-        torch.tensor([0.5], dtype=torch.float32),
-    ]
-
-    inputs = torch.tensor([[1.0, 0.0]])
-    targets = torch.tensor([[1.0]])
-
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+    vector = [torch.tensor([[0.3, -0.7]], dtype=torch.float32)]
 
     hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = torch.cat([value.reshape(-1) for value in vector])
+    expected_hvp = hessian_stack[0] @ vector_flat
 
     assert hvp.shape == (nb_params,)
     assert torch.all(torch.isfinite(hvp))
     assert torch.linalg.norm(hvp) > 0
+    assert_allclose(hvp, expected_hvp)
 
 def test_compute_hvp_batch(backend):
     """Test batched Hessian-vector product computation."""
-    model = nn.Sequential(nn.Linear(2, 1))
-    weights = backend.get_model_weights(model)
+    model, weights, inputs, targets, _, loss_fn, _, hessian_stack = _make_closed_form_last_layer_case_torch(backend)
     nb_params = backend.get_num_params(weights)
-    vector = [torch.ones_like(w) for w in weights]
-
-    inputs = torch.tensor([[1.0, 0.0], [0.5, -1.0]])
-    targets = torch.tensor([[1.0], [0.0]])
-
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
+    vector = [torch.tensor([[0.3, -0.7]], dtype=torch.float32)]
 
     hvp = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = torch.cat([value.reshape(-1) for value in vector])
+    expected_hvp = torch.einsum('bij,j->bi', hessian_stack, vector_flat).sum(dim=0)
 
     assert hvp.shape == (nb_params,)
     assert torch.all(torch.isfinite(hvp))
+    assert_allclose(hvp, expected_hvp)
+
+
+def test_compute_hvp_single_is_linear_in_direction(backend):
+    """Single-sample HVP should be linear in the direction vector."""
+    model, weights, inputs, targets, _, loss_fn, _, _ = _make_closed_form_last_layer_case_torch(
+        backend,
+        n_samples=1,
+    )
+    v1 = [torch.tensor([[0.3, -0.7]], dtype=torch.float32)]
+    v2 = [torch.tensor([[-0.2, 0.4]], dtype=torch.float32)]
+    v_sum = [left + right for left, right in zip(v1, v2)]
+
+    hvp_v1 = backend.compute_hvp_single(model, weights, loss_fn, v1, inputs, targets)
+    hvp_v2 = backend.compute_hvp_single(model, weights, loss_fn, v2, inputs, targets)
+    hvp_v_sum = backend.compute_hvp_single(model, weights, loss_fn, v_sum, inputs, targets)
+
+    assert_allclose(hvp_v_sum, hvp_v1 + hvp_v2)
 
 
 def test_compute_hvp_batch_equals_sum_of_singles(backend):
