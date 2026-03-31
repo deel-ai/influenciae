@@ -506,14 +506,14 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         return tensor / norm
 
     def find_layer_by_name(self, model: nn.Module, layer_name: str) -> Tuple[int, nn.Module]:
-        """Find a layer by name and return its index and the layer."""
-        named_modules = list(model.named_modules())
-        for idx, (name, module) in enumerate(named_modules):
+        """Find a direct child layer by name and return its child index and module."""
+        named_children = list(model.named_children())
+        for idx, (name, module) in enumerate(named_children):
             if name == layer_name:
                 return idx, module
         raise ValueError(
             f'No such layer: {layer_name}. Existing layers are: '
-            f'{[name for name, _ in named_modules if name]}.'
+            f'{[name for name, _ in named_children]}.'
         )
 
     def get_layers(self, model: nn.Module) -> List[nn.Module]:
