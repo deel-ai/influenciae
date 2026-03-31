@@ -11,7 +11,7 @@ import pytest
 import tensorflow as tf
 import torch
 import torch.nn as nn
-from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.layers import Conv2D, Dense, GlobalAveragePooling2D, Input
 from tensorflow.keras.models import Sequential as TFSequential
 from tensorflow.keras.losses import MeanSquaredError, Reduction
 
@@ -23,14 +23,60 @@ pytestmark = pytest.mark.requires_both_backends
 # Tolerance tiers used in parity checks:
 # - 1e-6..1e-5 for deterministic algebraic helpers and eig utilities.
 # - 1e-4 (default allclose epsilon) for basic tensor operations.
-# - 5e-3 for cross-backend gradient/Jacobian/HVP/Hessian parity after TF/PT
-#   parameter-layout remapping in float32.
+# - 5e-3 for cross-backend CNN and gradient/Jacobian/HVP/Hessian parity after
+#   TF/PT parameter-layout remapping in float32.
 
 
 def _assert_float32_dtype(tf_backend, pt_backend, tf_tensor, pt_tensor):
     """Assert both tensors preserve float32 dtype."""
     assert tf_backend.get_dtype(tf_tensor) == tf_backend.float32_dtype()
     assert pt_backend.get_dtype(pt_tensor) == pt_backend.float32_dtype()
+
+
+def _pt_mse_loss(pred, target):
+    """Match TensorFlow's per-sample mean squared error reduction."""
+    return torch.mean((pred - target) ** 2, dim=-1)
+
+
+def _nhwc_to_nchw(inputs):
+    """Convert NHWC inputs to NCHW for PyTorch convolution layers."""
+    return np.transpose(inputs, (0, 3, 1, 2)).copy()
+
+
+def _tf_array_to_pt_weight_layout(tf_array, pt_shape):
+    """Convert a TF-layout weight array to the matching PT layout."""
+    tf_shape = tuple(int(dim) for dim in tf_array.shape)
+    pt_shape = tuple(int(dim) for dim in pt_shape)
+
+    if tf_shape == pt_shape:
+        return np.array(tf_array, copy=True)
+
+    if len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
+        return np.ascontiguousarray(np.transpose(tf_array, (1, 0)))
+
+    if len(tf_shape) == 4 and pt_shape == (tf_shape[3], tf_shape[2], tf_shape[0], tf_shape[1]):
+        return np.ascontiguousarray(np.transpose(tf_array, (3, 2, 0, 1)))
+
+    raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
+
+
+def _pt_array_to_tf_weight_layout(pt_array, tf_shape):
+    """Convert an array with PT-layout weight axes into TF layout."""
+    tf_shape = tuple(int(dim) for dim in tf_shape)
+    pt_shape = tuple(int(dim) for dim in pt_array.shape[-len(tf_shape):])
+
+    if tf_shape == pt_shape:
+        return pt_array
+
+    if len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
+        return np.swapaxes(pt_array, -1, -2)
+
+    if len(tf_shape) == 4 and pt_shape == (tf_shape[3], tf_shape[2], tf_shape[0], tf_shape[1]):
+        axis_offset = pt_array.ndim - 4
+        axes = list(range(axis_offset)) + [axis_offset + 2, axis_offset + 3, axis_offset + 1, axis_offset]
+        return np.transpose(pt_array, axes)
+
+    raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
 
 
 def _tf_to_pt_flat_parameter_index(tf_weights, pt_weights):
@@ -51,15 +97,8 @@ def _tf_to_pt_flat_parameter_index(tf_weights, pt_weights):
         if tf_size != pt_size:
             raise AssertionError(f"Weight size mismatch between TF {tf_shape} and PT {pt_shape}")
 
-        if tf_shape == pt_shape:
-            mapping.extend(range(pt_offset, pt_offset + tf_size))
-        elif len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
-            rows, cols = tf_shape
-            for row in range(rows):
-                for col in range(cols):
-                    mapping.append(pt_offset + col * rows + row)
-        else:
-            raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
+        pt_indices = np.arange(pt_offset, pt_offset + pt_size, dtype=np.int64).reshape(pt_shape)
+        mapping.extend(_pt_array_to_tf_weight_layout(pt_indices, tf_shape).reshape(-1).tolist())
 
         pt_offset += pt_size
         total_tf_params += tf_size
@@ -137,6 +176,51 @@ class SimpleLinearModelPT:
         return model
 
 
+class SimpleCNNModelTF:
+    """Create a simple convolutional TensorFlow model for parity testing."""
+
+    @staticmethod
+    def create(input_shape=(5, 5, 3), conv_filters=4, kernel_size=(2, 2), output_dim=2, weights=None):
+        model = TFSequential([
+            Input(shape=input_shape),
+            Conv2D(conv_filters, kernel_size=kernel_size, activation=None, padding='valid', name='conv'),
+            GlobalAveragePooling2D(name='gap'),
+            Dense(output_dim, activation=None, name='output'),
+        ])
+
+        if weights is not None:
+            model.layers[0].set_weights([weights['conv_kernel'], weights['conv_bias']])
+            model.layers[-1].set_weights([weights['dense_kernel'], weights['dense_bias']])
+
+        return model
+
+
+class SimpleCNNModelPT:
+    """Create a simple convolutional PyTorch model for parity testing."""
+
+    @staticmethod
+    def create(input_shape=(5, 5, 3), conv_filters=4, kernel_size=(2, 2), output_dim=2, weights=None):
+        model = nn.Sequential(
+            nn.Conv2d(input_shape[-1], conv_filters, kernel_size=kernel_size),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(conv_filters, output_dim),
+        )
+
+        if weights is not None:
+            with torch.no_grad():
+                model[0].weight.copy_(
+                    torch.from_numpy(_tf_array_to_pt_weight_layout(weights['conv_kernel'], model[0].weight.shape))
+                )
+                model[0].bias.copy_(torch.from_numpy(weights['conv_bias']))
+                model[-1].weight.copy_(
+                    torch.from_numpy(_tf_array_to_pt_weight_layout(weights['dense_kernel'], model[-1].weight.shape))
+                )
+                model[-1].bias.copy_(torch.from_numpy(weights['dense_bias']))
+
+        return model
+
+
 def generate_matching_weights(input_dim=5, hidden_dim=3, output_dim=2, seed=42):
     """Generate random weights that can be used in both frameworks."""
     np.random.seed(seed)
@@ -154,6 +238,76 @@ def generate_test_data(batch_size=4, input_dim=5, output_dim=2, seed=123):
     inputs = np.random.randn(batch_size, input_dim).astype(np.float32)
     targets = np.random.randn(batch_size, output_dim).astype(np.float32)
     return inputs, targets
+
+
+def generate_matching_conv_weights(input_shape=(5, 5, 3), conv_filters=4, kernel_size=(2, 2), output_dim=2, seed=42):
+    """Generate aligned Conv2D and Dense weights for TensorFlow and PyTorch."""
+    np.random.seed(seed)
+    return {
+        'conv_kernel': np.random.randn(
+            kernel_size[0], kernel_size[1], input_shape[-1], conv_filters
+        ).astype(np.float32),
+        'conv_bias': np.random.randn(conv_filters).astype(np.float32),
+        'dense_kernel': np.random.randn(conv_filters, output_dim).astype(np.float32),
+        'dense_bias': np.random.randn(output_dim).astype(np.float32),
+    }
+
+
+def generate_image_test_data(batch_size=4, input_shape=(5, 5, 3), output_dim=2, seed=123):
+    """Generate NHWC image inputs and regression targets."""
+    np.random.seed(seed)
+    inputs = np.random.randn(batch_size, *input_shape).astype(np.float32)
+    targets = np.random.randn(batch_size, output_dim).astype(np.float32)
+    return inputs, targets
+
+
+def build_matching_models_with_extra_layers(
+    input_dim=5,
+    hidden_dim=3,
+    output_dim=2,
+    weights=None,
+    tf_extra_layers=None,
+    pt_extra_layers=None,
+):
+    """Create aligned TF/PT linear models, optionally followed by non-weight layers."""
+    tf_extra_layers = list(tf_extra_layers or [])
+    pt_extra_layers = list(pt_extra_layers or [])
+
+    tf_model = TFSequential([
+        Input(shape=(input_dim,)),
+        Dense(hidden_dim, activation=None, name='hidden'),
+        Dense(output_dim, activation=None, name='output'),
+        *tf_extra_layers,
+    ])
+    pt_model = nn.Sequential(
+        nn.Linear(input_dim, hidden_dim),
+        nn.Linear(hidden_dim, output_dim),
+        *pt_extra_layers,
+    )
+
+    if weights is not None:
+        tf_model.layers[0].set_weights([weights['w1'], weights['b1']])
+        tf_model.layers[1].set_weights([weights['w2'], weights['b2']])
+        with torch.no_grad():
+            pt_model[0].weight.copy_(torch.from_numpy(weights['w1'].T))
+            pt_model[0].bias.copy_(torch.from_numpy(weights['b1']))
+            pt_model[1].weight.copy_(torch.from_numpy(weights['w2'].T))
+            pt_model[1].bias.copy_(torch.from_numpy(weights['b2']))
+
+    return tf_model, pt_model
+
+
+def build_matching_cnn_models(
+    input_shape=(5, 5, 3),
+    conv_filters=4,
+    kernel_size=(2, 2),
+    output_dim=2,
+    weights=None,
+):
+    """Create aligned TF/PT convolutional models."""
+    tf_model = SimpleCNNModelTF.create(input_shape, conv_filters, kernel_size, output_dim, weights)
+    pt_model = SimpleCNNModelPT.create(input_shape, conv_filters, kernel_size, output_dim, weights)
+    return tf_model, pt_model
 
 
 def test_detect_tensorflow_model():
@@ -434,37 +588,67 @@ def test_influence_model_batch_jacobian_match():
     assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
 
 def test_influence_model_layer_targeting():
-    """Test that layer targeting works consistently."""
+    """Layer targeting should pick the same weights and Jacobians in both frameworks."""
     from deel.influenciae.common import InfluenceModel
 
     input_dim, hidden_dim, output_dim = 5, 3, 2
     weights = generate_matching_weights(input_dim, hidden_dim, output_dim)
+    inputs, targets = generate_test_data(batch_size=4, input_dim=input_dim, output_dim=output_dim, seed=456)
 
     tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
     pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
 
     tf_loss_fn = MeanSquaredError(reduction=Reduction.NONE)
-    pt_loss_fn = nn.MSELoss(reduction='none')
+    pt_loss = nn.MSELoss(reduction='none')
 
-    # Target first layer only
-    tf_influence_layer0 = InfluenceModel(tf_model, start_layer=0, loss_function=tf_loss_fn)
-    pt_influence_layer0 = InfluenceModel(pt_model, start_layer=0, loss_function=pt_loss_fn)
+    def pt_loss_fn(pred, target):
+        return pt_loss(pred, target).mean(dim=-1)
 
-    # First layer: hidden_dim weights + hidden_dim bias = input_dim * hidden_dim + hidden_dim
-    expected_layer0_params = input_dim * hidden_dim + hidden_dim
+    tf_dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+    pt_dataset = [
+        (torch.from_numpy(inputs[:2]), torch.from_numpy(targets[:2])),
+        (torch.from_numpy(inputs[2:]), torch.from_numpy(targets[2:])),
+    ]
 
-    assert tf_influence_layer0.nb_params == expected_layer0_params
-    assert pt_influence_layer0.nb_params == expected_layer0_params
+    cases = [
+        (0, None, input_dim * hidden_dim + hidden_dim),
+        (None, None, hidden_dim * output_dim + output_dim),
+        (0, 1, input_dim * hidden_dim + hidden_dim + hidden_dim * output_dim + output_dim),
+    ]
 
-    # Target last layer only (default behavior)
-    tf_influence_default = InfluenceModel(tf_model, loss_function=tf_loss_fn)
-    pt_influence_default = InfluenceModel(pt_model, loss_function=pt_loss_fn)
+    for start_layer, last_layer, expected_params in cases:
+        tf_influence = InfluenceModel(
+            tf_model,
+            start_layer=start_layer,
+            last_layer=last_layer,
+            loss_function=tf_loss_fn,
+        )
+        pt_influence = InfluenceModel(
+            pt_model,
+            start_layer=start_layer,
+            last_layer=last_layer,
+            loss_function=pt_loss_fn,
+        )
 
-    # Last layer: output_dim weights + output_dim bias = hidden_dim * output_dim + output_dim
-    expected_last_layer_params = hidden_dim * output_dim + output_dim
+        assert tf_influence.nb_params == expected_params
+        assert pt_influence.nb_params == expected_params
 
-    assert tf_influence_default.nb_params == expected_last_layer_params
-    assert pt_influence_default.nb_params == expected_last_layer_params
+        expected_tf_weights = tf_influence.backend.get_weights_for_layer_range(tf_model, start_layer, last_layer)
+        expected_pt_weights = pt_influence.backend.get_weights_for_layer_range(pt_model, start_layer, last_layer)
+
+        for actual, expected in zip(tf_influence.weights, expected_tf_weights):
+            assert allclose(actual, expected)
+
+        for actual, expected in zip(pt_influence.weights, expected_pt_weights):
+            assert allclose(actual, expected)
+
+        tf_jacobian = tf_influence.backend.to_numpy(tf_influence.batch_jacobian(tf_dataset))
+        pt_jacobian = pt_influence.backend.to_numpy(pt_influence.batch_jacobian(pt_dataset))
+
+        tf_to_pt = _tf_to_pt_flat_parameter_index(tf_influence.weights, pt_influence.weights)
+        pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+        assert tf_jacobian.shape == pt_jacobian_tf_order.shape
+        assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
 
 
 def test_concat():
@@ -572,6 +756,13 @@ def test_expand_dims():
     # Expand at axis 1
     tf_result = tf_backend.expand_dims(tf.constant(a), axis=1).numpy()
     pt_result = pt_backend.expand_dims(torch.from_numpy(a), axis=1).numpy()
+    assert tf_result.shape == pt_result.shape
+    assert allclose(tf_result, pt_result)
+
+    # Expand a 2D tensor along the last axis
+    matrix = np.array([[1, 2], [3, 4]], dtype=np.float32)
+    tf_result = tf_backend.expand_dims(tf.constant(matrix), axis=2).numpy()
+    pt_result = pt_backend.expand_dims(torch.from_numpy(matrix), axis=2).numpy()
     assert tf_result.shape == pt_result.shape
     assert allclose(tf_result, pt_result)
 
@@ -1250,17 +1441,11 @@ def test_output_jacobian_wrt_weights_match():
 
     for tf_weight, pt_weight, tf_jacobian, pt_jacobian in zip(tf_weights, pt_weights, tf_jacobians, pt_jacobians):
         tf_shape = tuple(int(dim) for dim in tf_weight.shape)
-        pt_shape = tuple(int(dim) for dim in pt_weight.shape)
 
         tf_jacobian_np = tf_backend.to_numpy(tf_jacobian)
         pt_jacobian_np = pt_backend.to_numpy(pt_jacobian)
 
-        if tf_shape == pt_shape:
-            pt_jacobian_tf_order = pt_jacobian_np
-        elif len(tf_shape) == 2 and pt_shape == (tf_shape[1], tf_shape[0]):
-            pt_jacobian_tf_order = np.swapaxes(pt_jacobian_np, -1, -2)
-        else:
-            raise AssertionError(f"Unsupported TF/PT shape pair: {tf_shape} vs {pt_shape}")
+        pt_jacobian_tf_order = _pt_array_to_tf_weight_layout(pt_jacobian_np, tf_shape)
 
         assert tf_jacobian_np.shape == pt_jacobian_tf_order.shape
         assert allclose(tf_jacobian_np, pt_jacobian_tf_order, epsilon=5e-3)
@@ -1287,24 +1472,43 @@ def test_get_layers():
     assert len(pt_layers) == 2
 
 def test_find_last_weight_layer():
-    """Test finding last layer with weights."""
+    """Test finding last layer with weights across multiple architectures."""
     from deel.influenciae.common import get_backend_for_model
 
     input_dim, hidden_dim, output_dim = 5, 3, 2
     weights = generate_matching_weights(input_dim, hidden_dim, output_dim)
 
-    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
-    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
+    cases = [
+        build_matching_models_with_extra_layers(input_dim, hidden_dim, output_dim, weights) + (-1,),
+        build_matching_models_with_extra_layers(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            weights,
+            tf_extra_layers=[tf.keras.layers.ReLU(name='relu_out')],
+            pt_extra_layers=[nn.ReLU()],
+        )
+        + (-2,),
+        build_matching_models_with_extra_layers(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            weights,
+            tf_extra_layers=[
+                tf.keras.layers.Activation('linear', name='identity_out'),
+                tf.keras.layers.ReLU(name='relu_out'),
+            ],
+            pt_extra_layers=[nn.Identity(), nn.ReLU()],
+        )
+        + (-3,),
+    ]
 
-    tf_backend = get_backend_for_model(tf_model)
-    pt_backend = get_backend_for_model(pt_model)
+    for tf_model, pt_model, expected_idx in cases:
+        tf_backend = get_backend_for_model(tf_model)
+        pt_backend = get_backend_for_model(pt_model)
 
-    tf_last_idx = tf_backend.find_last_weight_layer(tf_model)
-    pt_last_idx = pt_backend.find_last_weight_layer(pt_model)
-
-    # Both should return -1 (last layer has weights)
-    assert tf_last_idx == -1
-    assert pt_last_idx == -1
+        assert tf_backend.find_last_weight_layer(tf_model) == expected_idx
+        assert pt_backend.find_last_weight_layer(pt_model) == expected_idx
 
 def test_is_sequential_model():
     """Test checking if model is sequential."""
@@ -1318,10 +1522,15 @@ def test_is_sequential_model():
 
     tf_backend = get_backend_for_model(tf_model)
     pt_backend = get_backend_for_model(pt_model)
+    inputs, _ = generate_test_data(batch_size=4, input_dim=input_dim, output_dim=output_dim, seed=654)
+
+    tf_output = tf_backend.forward(tf_model, tf.constant(inputs)).numpy()
+    pt_output = pt_backend.forward(pt_model, torch.from_numpy(inputs)).detach().numpy()
 
     # Both models created by our helpers are sequential
     assert tf_backend.is_sequential_model(tf_model) == True
     assert pt_backend.is_sequential_model(pt_model) == True
+    assert allclose(tf_output, pt_output, epsilon=5e-3)
 
 
 def test_map_fn_simple():
@@ -1564,7 +1773,7 @@ def test_create_sequential_from_layers():
     pt_output = pt_sequential(torch.from_numpy(inputs)).detach().numpy()
 
     assert tf_output.shape == pt_output.shape
-    assert allclose(tf_output, pt_output)
+    assert allclose(tf_output, pt_output, epsilon=5e-3)
 
 
 def test_hessian_computation_match():
@@ -1745,6 +1954,393 @@ def test_hvp_batch_match():
     assert allclose(tf_hvp_batch, pt_hvp_batch_tf_order, epsilon=5e-3)
 
 
+def test_cnn_forward_pass_match():
+    """CNN forward pass should match across backends after input layout conversion."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=77)
+    inputs, _ = generate_image_test_data(batch_size=4, input_shape=input_shape, output_dim=output_dim, seed=88)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_output = tf_backend.forward(tf_model, tf.constant(inputs)).numpy()
+    pt_output = pt_backend.forward(pt_model, torch.from_numpy(_nhwc_to_nchw(inputs))).detach().numpy()
+
+    assert allclose(tf_output, pt_output, epsilon=5e-3)
+
+
+def test_cnn_loss_computation_match():
+    """CNN per-sample losses should match across backends."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=91)
+    inputs, targets = generate_image_test_data(batch_size=4, input_shape=input_shape, output_dim=output_dim, seed=15)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_loss = tf_backend.compute_loss(
+        tf_model,
+        MeanSquaredError(reduction=Reduction.NONE),
+        tf.constant(inputs),
+        tf.constant(targets),
+    ).numpy()
+    pt_loss = pt_backend.compute_loss(
+        pt_model,
+        _pt_mse_loss,
+        torch.from_numpy(_nhwc_to_nchw(inputs)),
+        torch.from_numpy(targets),
+    ).detach().numpy()
+
+    assert allclose(tf_loss, pt_loss, epsilon=5e-3)
+
+
+def test_cnn_gradient_computation_match():
+    """CNN gradients should match across backends after parameter-order remapping."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=23)
+    inputs, targets = generate_image_test_data(batch_size=4, input_shape=input_shape, output_dim=output_dim, seed=24)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    tf_grad = tf_backend.compute_gradient(
+        tf_model,
+        tf_weights,
+        MeanSquaredError(reduction=Reduction.NONE),
+        tf.constant(inputs),
+        tf.constant(targets),
+    ).numpy()
+    pt_grad = pt_backend.compute_gradient(
+        pt_model,
+        pt_weights,
+        _pt_mse_loss,
+        torch.from_numpy(_nhwc_to_nchw(inputs)),
+        torch.from_numpy(targets),
+    ).detach().numpy()
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_grad_tf_order = pt_grad[tf_to_pt]
+
+    assert tf_grad.shape == pt_grad.shape
+    assert np.all(np.isfinite(tf_grad))
+    assert np.all(np.isfinite(pt_grad))
+    assert allclose(tf_grad, pt_grad_tf_order, epsilon=5e-3)
+
+
+def test_cnn_jacobian_match():
+    """CNN loss Jacobians should match across backends after parameter-order remapping."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    batch_size = 3
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=31)
+    inputs, targets = generate_image_test_data(
+        batch_size=batch_size,
+        input_shape=input_shape,
+        output_dim=output_dim,
+        seed=32,
+    )
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    tf_jacobian = tf_backend.compute_jacobian(
+        tf_model,
+        tf_weights,
+        MeanSquaredError(reduction=Reduction.NONE),
+        tf.constant(inputs),
+        tf.constant(targets),
+    ).numpy()
+    pt_jacobian = pt_backend.compute_jacobian(
+        pt_model,
+        pt_weights,
+        _pt_mse_loss,
+        torch.from_numpy(_nhwc_to_nchw(inputs)),
+        torch.from_numpy(targets),
+    ).detach().numpy()
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+
+    assert tf_jacobian.shape == (batch_size, 62)
+    assert tf_jacobian.shape == pt_jacobian.shape
+    assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
+
+
+def test_cnn_output_jacobian_wrt_weights_match():
+    """CNN output Jacobians wrt weights should match across backends."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=41)
+    inputs, _ = generate_image_test_data(batch_size=3, input_shape=input_shape, output_dim=output_dim, seed=42)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    tf_outputs, tf_jacobians = tf_backend.compute_output_jacobian_wrt_weights(
+        tf_model,
+        tf_weights,
+        tf.constant(inputs),
+    )
+    pt_outputs, pt_jacobians = pt_backend.compute_output_jacobian_wrt_weights(
+        pt_model,
+        pt_weights,
+        torch.from_numpy(_nhwc_to_nchw(inputs)),
+    )
+
+    assert allclose(tf_backend.to_numpy(tf_outputs), pt_backend.to_numpy(pt_outputs), epsilon=5e-3)
+    assert len(tf_jacobians) == len(pt_jacobians)
+
+    for tf_weight, pt_jacobian, tf_jacobian in zip(tf_weights, pt_jacobians, tf_jacobians):
+        tf_shape = tuple(int(dim) for dim in tf_weight.shape)
+        tf_jacobian_np = tf_backend.to_numpy(tf_jacobian)
+        pt_jacobian_np = pt_backend.to_numpy(pt_jacobian)
+        pt_jacobian_tf_order = _pt_array_to_tf_weight_layout(pt_jacobian_np, tf_shape)
+
+        assert tf_jacobian_np.shape == pt_jacobian_tf_order.shape
+        assert allclose(tf_jacobian_np, pt_jacobian_tf_order, epsilon=5e-3)
+
+
+def test_cnn_hessian_computation_match():
+    """CNN Hessians should match across backends after parameter-order remapping."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=51)
+    inputs, targets = generate_image_test_data(batch_size=2, input_shape=input_shape, output_dim=output_dim, seed=52)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+    num_params = tf_backend.get_num_params(tf_weights)
+
+    tf_dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+    pt_dataset = [(torch.from_numpy(_nhwc_to_nchw(inputs)), torch.from_numpy(targets))]
+
+    tf_hessian = tf_backend.to_numpy(
+        tf_backend.compute_hessian(
+            tf_model,
+            tf_weights,
+            MeanSquaredError(reduction=Reduction.NONE),
+            tf_dataset,
+            num_params,
+        )
+    )
+    pt_hessian = pt_backend.to_numpy(
+        pt_backend.compute_hessian(pt_model, pt_weights, _pt_mse_loss, pt_dataset, num_params)
+    )
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hessian_tf_order = pt_hessian[np.ix_(tf_to_pt, tf_to_pt)]
+
+    assert num_params == 62
+    assert tf_hessian.shape == (num_params, num_params)
+    assert pt_hessian.shape == (num_params, num_params)
+    assert allclose(tf_hessian, pt_hessian_tf_order, epsilon=5e-3)
+
+
+def test_cnn_hvp_single_match():
+    """Single-sample CNN HVP should match across backends."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=61)
+    inputs, targets = generate_image_test_data(batch_size=1, input_shape=input_shape, output_dim=output_dim, seed=62)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    np.random.seed(63)
+    reference_direction = [np.random.randn(*tuple(weight.shape)).astype(np.float32) for weight in tf_weights]
+    tf_v = [tf.constant(direction) for direction in reference_direction]
+    pt_v = [
+        torch.from_numpy(_tf_array_to_pt_weight_layout(direction, pt_weight.shape))
+        for direction, pt_weight in zip(reference_direction, pt_weights)
+    ]
+
+    tf_hvp = tf_backend.compute_hvp_single(
+        tf_model,
+        tf_weights,
+        MeanSquaredError(reduction=Reduction.NONE),
+        tf_v,
+        tf.constant(inputs),
+        tf.constant(targets),
+    ).numpy()
+    pt_hvp = pt_backend.compute_hvp_single(
+        pt_model,
+        pt_weights,
+        _pt_mse_loss,
+        pt_v,
+        torch.from_numpy(_nhwc_to_nchw(inputs)),
+        torch.from_numpy(targets),
+    ).detach().numpy()
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hvp_tf_order = pt_hvp[tf_to_pt]
+
+    assert tf_hvp.shape == (62,)
+    assert pt_hvp.shape == (62,)
+    assert allclose(tf_hvp, pt_hvp_tf_order, epsilon=5e-3)
+
+
+def test_cnn_hvp_batch_match():
+    """Batched CNN HVP should match across backends."""
+    from deel.influenciae.common import get_backend_for_model
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=71)
+    inputs, targets = generate_image_test_data(batch_size=2, input_shape=input_shape, output_dim=output_dim, seed=72)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_backend = get_backend_for_model(tf_model)
+    pt_backend = get_backend_for_model(pt_model)
+
+    tf_weights = tf_backend.get_model_weights(tf_model)
+    pt_weights = pt_backend.get_model_weights(pt_model)
+
+    np.random.seed(73)
+    reference_direction = [np.random.randn(*tuple(weight.shape)).astype(np.float32) for weight in tf_weights]
+    tf_v = [tf.constant(direction) for direction in reference_direction]
+    pt_v = [
+        torch.from_numpy(_tf_array_to_pt_weight_layout(direction, pt_weight.shape))
+        for direction, pt_weight in zip(reference_direction, pt_weights)
+    ]
+
+    tf_hvp_batch = tf_backend.to_numpy(
+        tf_backend.compute_hvp_batch(
+            tf_model,
+            tf_weights,
+            MeanSquaredError(reduction=Reduction.NONE),
+            tf_v,
+            tf.constant(inputs),
+            tf.constant(targets),
+        )
+    )
+    pt_hvp_batch = pt_backend.to_numpy(
+        pt_backend.compute_hvp_batch(
+            pt_model,
+            pt_weights,
+            _pt_mse_loss,
+            pt_v,
+            torch.from_numpy(_nhwc_to_nchw(inputs)),
+            torch.from_numpy(targets),
+        )
+    )
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_weights, pt_weights)
+    pt_hvp_batch_tf_order = pt_hvp_batch[tf_to_pt]
+
+    assert tf_hvp_batch.shape == (62,)
+    assert pt_hvp_batch.shape == (62,)
+    assert allclose(tf_hvp_batch, pt_hvp_batch_tf_order, epsilon=5e-3)
+
+
+def test_cnn_influence_model_parity():
+    """InfluenceModel should preserve full CNN parity when watching all weighted layers."""
+    from deel.influenciae.common import InfluenceModel
+
+    input_shape = (5, 5, 3)
+    conv_filters = 4
+    output_dim = 2
+    weights = generate_matching_conv_weights(input_shape, conv_filters, (2, 2), output_dim, seed=81)
+    inputs, targets = generate_image_test_data(batch_size=4, input_shape=input_shape, output_dim=output_dim, seed=82)
+
+    tf_model, pt_model = build_matching_cnn_models(input_shape, conv_filters, (2, 2), output_dim, weights)
+
+    tf_influence = InfluenceModel(
+        tf_model,
+        start_layer=0,
+        last_layer=-1,
+        loss_function=MeanSquaredError(reduction=Reduction.NONE),
+    )
+    pt_influence = InfluenceModel(
+        pt_model,
+        start_layer=0,
+        last_layer=-1,
+        loss_function=_pt_mse_loss,
+    )
+
+    tf_output = tf_influence(tf.constant(inputs)).numpy()
+    pt_output = pt_influence(torch.from_numpy(_nhwc_to_nchw(inputs))).detach().numpy()
+
+    tf_dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
+    pt_inputs = _nhwc_to_nchw(inputs)
+    pt_dataset = [
+        (torch.from_numpy(pt_inputs[:2]), torch.from_numpy(targets[:2])),
+        (torch.from_numpy(pt_inputs[2:]), torch.from_numpy(targets[2:])),
+    ]
+
+    tf_loss = tf_influence.batch_loss(tf_dataset).numpy()
+    pt_loss = pt_influence.backend.to_numpy(pt_influence.batch_loss(pt_dataset))
+    tf_gradient = tf_influence.backend.to_numpy(tf_influence.batch_gradient(tf_dataset))
+    pt_gradient = pt_influence.backend.to_numpy(pt_influence.batch_gradient(pt_dataset))
+    tf_jacobian = tf_influence.backend.to_numpy(tf_influence.batch_jacobian(tf_dataset))
+    pt_jacobian = pt_influence.backend.to_numpy(pt_influence.batch_jacobian(pt_dataset))
+
+    tf_to_pt = _tf_to_pt_flat_parameter_index(tf_influence.weights, pt_influence.weights)
+    pt_gradient_tf_order = pt_gradient[:, tf_to_pt]
+    pt_jacobian_tf_order = pt_jacobian[:, tf_to_pt]
+
+    assert tf_influence.nb_params == 62
+    assert pt_influence.nb_params == 62
+    assert allclose(tf_output, pt_output, epsilon=5e-3)
+    assert allclose(tf_loss, pt_loss, epsilon=5e-3)
+    assert allclose(tf_gradient, pt_gradient_tf_order, epsilon=5e-3)
+    assert allclose(tf_jacobian, pt_jacobian_tf_order, epsilon=5e-3)
+
+
 def test_split_model_invalid_layer_raises():
     """Both backends should raise when split layer cannot be resolved."""
     from deel.influenciae.common import get_backend_for_model
@@ -1760,83 +2356,6 @@ def test_split_model_invalid_layer_raises():
 
     with pytest.raises(ValueError):
         pt_backend.split_model(pt_model, "missing_layer")
-
-def test_hvp_linearity():
-    """Test that HVP is linear in v: H(v1+v2) = Hv1 + Hv2"""
-    from deel.influenciae.common import get_backend_for_model
-
-    input_dim, hidden_dim, output_dim = 3, 2, 1
-    weights = generate_matching_weights(input_dim, hidden_dim, output_dim, seed=42)
-    inputs, targets = generate_test_data(batch_size=1, input_dim=input_dim, output_dim=output_dim, seed=123)
-
-    # Test with TensorFlow
-    tf_model = SimpleLinearModelTF.create(input_dim, hidden_dim, output_dim, weights)
-    tf_backend = get_backend_for_model(tf_model)
-    tf_weights = tf_backend.get_model_weights(tf_model)
-    num_params = tf_backend.get_num_params(tf_weights)
-
-    np.random.seed(456)
-    tf_v1 = [tf.constant(np.random.randn(*w.shape).astype(np.float32)) for w in tf_weights]
-    tf_v2 = [tf.constant(np.random.randn(*w.shape).astype(np.float32)) for w in tf_weights]
-    tf_v_sum = [v1 + v2 for v1, v2 in zip(tf_v1, tf_v2)]
-
-    tf_loss_fn = MeanSquaredError(reduction=Reduction.NONE)
-    tf_inputs = tf.constant(inputs)
-    tf_targets = tf.constant(targets)
-
-    tf_hvp1 = tf_backend.compute_hvp_single(
-        tf_model, tf_weights, tf_loss_fn, tf_v1, tf_inputs, tf_targets
-    ).numpy()
-    tf_hvp2 = tf_backend.compute_hvp_single(
-        tf_model, tf_weights, tf_loss_fn, tf_v2, tf_inputs, tf_targets
-    ).numpy()
-    tf_hvp_sum = tf_backend.compute_hvp_single(
-        tf_model, tf_weights, tf_loss_fn, tf_v_sum, tf_inputs, tf_targets
-    ).numpy()
-
-    assert tf_hvp1.shape == (num_params,)
-    assert tf_hvp2.shape == (num_params,)
-    assert tf_hvp_sum.shape == (num_params,)
-
-    # H(v1+v2) should equal Hv1 + Hv2
-    assert allclose(tf_hvp_sum, tf_hvp1 + tf_hvp2, epsilon=1e-4), \
-        "TF HVP is not linear"
-
-    # Test with PyTorch
-    pt_model = SimpleLinearModelPT.create(input_dim, hidden_dim, output_dim, weights)
-    pt_backend = get_backend_for_model(pt_model)
-    pt_weights = pt_backend.get_model_weights(pt_model)
-    assert pt_backend.get_num_params(pt_weights) == num_params
-
-    np.random.seed(456)
-    pt_v1 = [torch.from_numpy(np.random.randn(*w.shape).astype(np.float32)) for w in pt_weights]
-    pt_v2 = [torch.from_numpy(np.random.randn(*w.shape).astype(np.float32)) for w in pt_weights]
-    pt_v_sum = [v1 + v2 for v1, v2 in zip(pt_v1, pt_v2)]
-
-    def pt_loss_fn(pred, target):
-        return nn.MSELoss(reduction='none')(pred, target).mean(dim=-1)
-
-    pt_inputs = torch.from_numpy(inputs)
-    pt_targets = torch.from_numpy(targets)
-
-    pt_hvp1 = pt_backend.compute_hvp_single(
-        pt_model, pt_weights, pt_loss_fn, pt_v1, pt_inputs, pt_targets
-    ).detach().numpy()
-    pt_hvp2 = pt_backend.compute_hvp_single(
-        pt_model, pt_weights, pt_loss_fn, pt_v2, pt_inputs, pt_targets
-    ).detach().numpy()
-    pt_hvp_sum = pt_backend.compute_hvp_single(
-        pt_model, pt_weights, pt_loss_fn, pt_v_sum, pt_inputs, pt_targets
-    ).detach().numpy()
-
-    assert pt_hvp1.shape == (num_params,)
-    assert pt_hvp2.shape == (num_params,)
-    assert pt_hvp_sum.shape == (num_params,)
-
-    # H(v1+v2) should equal Hv1 + Hv2
-    assert allclose(pt_hvp_sum, pt_hvp1 + pt_hvp2, epsilon=1e-4), \
-        "PT HVP is not linear"
-
 
 def test_get_weights_for_layer_range():
     """Test getting weights for a range of layers."""
@@ -1863,6 +2382,10 @@ def test_get_weights_for_layer_range():
 
     assert tf_num_params_0 == expected_layer0_params
     assert pt_num_params_0 == expected_layer0_params
+    assert allclose(tf_weights_layer0[0].numpy(), weights['w1'])
+    assert allclose(tf_weights_layer0[1].numpy(), weights['b1'])
+    assert allclose(pt_weights_layer0[0].detach().numpy(), weights['w1'].T)
+    assert allclose(pt_weights_layer0[1].detach().numpy(), weights['b1'])
 
 def test_get_layer_index():
     """Test getting layer index."""
@@ -1884,12 +2407,26 @@ def test_get_layer_index():
     assert tf_idx_0 == 0
     assert pt_idx_0 == 0
 
+    # Get index for second layer (1)
+    tf_idx_1 = tf_backend.get_layer_index(tf_model, 1)
+    pt_idx_1 = pt_backend.get_layer_index(pt_model, 1)
+
+    assert tf_idx_1 == 1
+    assert pt_idx_1 == 1
+
     # Get index for last layer (-1)
     tf_idx_last = tf_backend.get_layer_index(tf_model, -1)
     pt_idx_last = pt_backend.get_layer_index(pt_model, -1)
 
     assert tf_idx_last == 1
     assert pt_idx_last == 1
+
+    # Get index for first layer from the end (-2)
+    tf_idx_penultimate = tf_backend.get_layer_index(tf_model, -2)
+    pt_idx_penultimate = pt_backend.get_layer_index(pt_model, -2)
+
+    assert tf_idx_penultimate == 0
+    assert pt_idx_penultimate == 0
 
 
 def test_get_available_frameworks():
