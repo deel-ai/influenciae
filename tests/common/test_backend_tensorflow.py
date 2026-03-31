@@ -9,11 +9,11 @@ These tests verify the TensorFlow-specific functionality works correctly.
 import numpy as np
 import pytest
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, Input, Flatten, ReLU
+from tensorflow.keras.layers import BatchNormalization, Dense, Input, Flatten, ReLU
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import MeanSquaredError, CategoricalCrossentropy, Reduction
 
-from ..utils_test import allclose
+from ..utils_test import assert_allclose, allclose, hessian_ground_truth, jacobian_ground_truth
 
 
 pytestmark = pytest.mark.tensorflow
@@ -24,6 +24,65 @@ class _WeightWrapper:
 
     def __init__(self, value):
         self.value = value
+
+
+def _make_known_linear_case_tf():
+    """Build a tiny affine Keras model with hand-computable outputs and losses."""
+    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
+    model.layers[0].set_weights(
+        [
+            np.array([[2.0], [-1.0]], dtype=np.float32),
+            np.array([0.5], dtype=np.float32),
+        ]
+    )
+
+    inputs = tf.constant([[1.0, 2.0], [-1.0, 1.0]], dtype=tf.float32)
+    targets = tf.constant([[0.0], [1.0]], dtype=tf.float32)
+    expected_output = tf.constant([[0.5], [-2.5]], dtype=tf.float32)
+    expected_loss = tf.constant([0.25, 12.25], dtype=tf.float32)
+    return model, inputs, targets, expected_output, expected_loss
+
+
+def _make_closed_form_last_layer_case_tf(backend):
+    """Create a small linear regression case with closed-form last-layer derivatives."""
+    model = Sequential([
+        Input(shape=(1, 3)),
+        Dense(2, use_bias=False, name='hidden'),
+        Dense(1, use_bias=False, name='output'),
+    ])
+    model.layers[0].set_weights(
+        [
+            np.array(
+                [
+                    [0.2, -0.4],
+                    [0.5, 0.1],
+                    [-0.3, 0.7],
+                ],
+                dtype=np.float32,
+            )
+        ]
+    )
+    model.layers[1].set_weights([np.array([[1.2], [-0.6]], dtype=np.float32)])
+
+    weights = backend.get_weights_for_layer_range(model, start_layer=None)
+    inputs = tf.constant(
+        [
+            [[1.0, -2.0, 0.5]],
+            [[-0.5, 1.5, 2.0]],
+            [[0.0, 1.0, -1.0]],
+        ],
+        dtype=tf.float32,
+    )
+    targets = tf.constant([[0.3], [-1.2], [0.5]], dtype=tf.float32)
+    kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in model.layers], axis=0), (-1,))
+    jacobian = tf.stack(
+        [tf.reshape(jacobian_ground_truth(inp[0], kernel, target), (-1,)) for inp, target in zip(inputs, targets)],
+        axis=0,
+    )
+    hessian = tf.stack([hessian_ground_truth(tf.squeeze(inp), kernel) for inp in inputs], axis=0)
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(inputs.shape[0])
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    return model, weights, inputs, targets, dataset, loss_fn, jacobian, hessian
 
 
 @pytest.fixture
@@ -107,13 +166,15 @@ def test_get_num_params(backend, simple_model):
     expected = 5 * 3 + 3 + 3 * 2 + 2
     assert num_params == expected
 
-def test_forward(backend, simple_model):
+def test_forward(backend):
     """Test forward pass."""
-    inputs = tf.random.normal((4, 5))
-    output = backend.forward(simple_model, inputs)
+    model, inputs, _, expected_output, _ = _make_known_linear_case_tf()
+    output = backend.forward(model, inputs)
 
-    assert output.shape == (4, 2)
+    assert output.shape == (2, 1)
     assert bool(tf.reduce_all(tf.math.is_finite(output)).numpy())
+    assert_allclose(output, model(inputs))
+    assert_allclose(output, expected_output)
 
 def test_get_layers(backend, simple_model):
     """Test getting all layers."""
@@ -135,59 +196,57 @@ def test_find_layer_by_name_not_found(backend, simple_model):
         backend.find_layer_by_name(simple_model, 'nonexistent')
 
 
-def test_compute_loss(backend, simple_model):
+def test_compute_loss(backend):
     """Test loss computation."""
-    inputs = tf.random.normal((4, 5))
-    targets = tf.random.normal((4, 2))
+    model, inputs, targets, _, expected_loss = _make_known_linear_case_tf()
     loss_fn = MeanSquaredError(reduction=Reduction.NONE)
 
-    loss = backend.compute_loss(simple_model, loss_fn, inputs, targets)
+    loss = backend.compute_loss(model, loss_fn, inputs, targets)
+    expected = loss_fn(targets, model(inputs))
 
-    # MSE without reduction returns (batch,)
-    assert loss.shape == (4,)
+    assert loss.shape == (2,)
     assert bool(tf.reduce_all(tf.math.is_finite(loss)).numpy())
     assert bool(tf.reduce_all(loss >= 0).numpy())
+    assert_allclose(loss, expected)
+    assert_allclose(loss, expected_loss)
 
-def test_compute_loss_with_sample_weight(backend, simple_model):
+def test_compute_loss_with_sample_weight(backend):
     """Test loss computation with sample weights."""
-    inputs = tf.random.normal((4, 5))
-    targets = tf.random.normal((4, 2))
-    sample_weight = tf.constant([1.0, 2.0, 0.5, 1.5])
+    model, inputs, targets, _, expected_loss = _make_known_linear_case_tf()
+    sample_weight = tf.constant([1.0, 2.0], dtype=tf.float32)
     loss_fn = MeanSquaredError(reduction=Reduction.NONE)
 
-    loss_unweighted = backend.compute_loss(simple_model, loss_fn, inputs, targets)
-    loss_weighted = backend.compute_loss(simple_model, loss_fn, inputs, targets, sample_weight)
+    loss_unweighted = backend.compute_loss(model, loss_fn, inputs, targets)
+    loss_weighted = backend.compute_loss(model, loss_fn, inputs, targets, sample_weight)
+    expected_weighted = expected_loss * sample_weight
 
-    # Weighted loss should be different
     assert not np.allclose(loss_unweighted.numpy(), loss_weighted.numpy())
+    assert_allclose(loss_unweighted, expected_loss)
+    assert_allclose(loss_weighted, expected_weighted)
 
-def test_compute_gradient(backend, simple_model):
+def test_compute_gradient(backend):
     """Test gradient computation."""
-    inputs = tf.random.normal((4, 5))
-    targets = tf.random.normal((4, 2))
-    weights = backend.get_model_weights(simple_model)
-    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    model, weights, inputs, targets, _, loss_fn, jacobian, _ = _make_closed_form_last_layer_case_tf(backend)
 
-    gradient = backend.compute_gradient(simple_model, weights, loss_fn, inputs, targets)
+    gradient = backend.compute_gradient(model, weights, loss_fn, inputs, targets)
+    expected_gradient = tf.reduce_sum(jacobian, axis=0)
 
     num_params = backend.get_num_params(weights)
     assert gradient.shape == (num_params,)
     assert tf.linalg.norm(gradient) > 0  # Gradient should be non-zero
+    assert_allclose(gradient, expected_gradient)
 
-def test_compute_jacobian(backend, simple_model):
+def test_compute_jacobian(backend):
     """Test Jacobian computation."""
-    batch_size = 3
-    inputs = tf.random.normal((batch_size, 5))
-    targets = tf.random.normal((batch_size, 2))
-    weights = backend.get_model_weights(simple_model)
-    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    model, weights, inputs, targets, _, loss_fn, expected_jacobian, _ = _make_closed_form_last_layer_case_tf(backend)
 
-    jacobian = backend.compute_jacobian(simple_model, weights, loss_fn, inputs, targets)
+    jacobian = backend.compute_jacobian(model, weights, loss_fn, inputs, targets)
 
     num_params = backend.get_num_params(weights)
-    assert jacobian.shape == (batch_size, num_params)
+    assert jacobian.shape == (inputs.shape[0], num_params)
     assert bool(tf.reduce_all(tf.math.is_finite(jacobian)).numpy())
     assert float(tf.linalg.norm(jacobian).numpy()) > 0.0
+    assert_allclose(jacobian, expected_jacobian)
 
 
 def test_compute_gradient_raises_on_disconnected_graph(backend, simple_model):
@@ -432,12 +491,26 @@ def test_get_weights_for_layer_range_multiple_layers(backend, simple_model):
     # Both Dense layers
     assert len(weights) == 4
 
-def test_get_weights_for_layer_range_auto_detect(backend, simple_model):
+def test_get_weights_for_layer_range_auto_detect(backend):
     """Test auto-detecting the last weight layer."""
-    weights = backend.get_weights_for_layer_range(simple_model, start_layer=None)
+    model = Sequential([
+        Input(shape=(5,)),
+        Dense(4, activation='relu', name='hidden'),
+        Dense(3, name='projection'),
+        BatchNormalization(name='norm'),
+        ReLU(name='relu_out'),
+    ])
+    model(tf.zeros((1, 5), dtype=tf.float32))
 
-    # Should get second-to-last Dense layer (before logits)
+    weights = backend.get_weights_for_layer_range(model, start_layer=None)
+    expected_weights = backend.get_model_weights(model, [model.get_layer('norm')])
+
     assert len(weights) == 2
+    assert len(expected_weights) == 2
+    assert weights[0].shape == (3,)
+    assert weights[1].shape == (3,)
+    assert_allclose(weights[0], expected_weights[0])
+    assert_allclose(weights[1], expected_weights[1])
 
 def test_get_weights_for_layer_range_invalid_range(backend, simple_model):
     """Test that invalid layer range raises error."""
@@ -490,6 +563,7 @@ def test_influence_model_forward(simple_model):
 
     assert output.shape == (4, 2)
     assert bool(tf.reduce_all(tf.math.is_finite(output)).numpy())
+    assert_allclose(output, simple_model(inputs))
 
 def test_influence_model_batch_loss(simple_model):
     """Test InfluenceModel batch loss computation."""
@@ -504,9 +578,14 @@ def test_influence_model_batch_loss(simple_model):
     dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
 
     loss = influence_model.batch_loss(dataset)
+    expected_loss = tf.concat(
+        [loss_fn(batch_targets, simple_model(batch_inputs)) for batch_inputs, batch_targets in dataset],
+        axis=0,
+    )
 
     assert loss.shape == (4,)
     assert bool(tf.reduce_all(tf.math.is_finite(loss)).numpy())
+    assert_allclose(loss, expected_loss)
 
 def test_influence_model_batch_jacobian(simple_model):
     """Test InfluenceModel batch Jacobian computation."""
@@ -520,9 +599,23 @@ def test_influence_model_batch_jacobian(simple_model):
     dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
 
     jacobian = influence_model.batch_jacobian(dataset)
+    expected_jacobian = tf.concat(
+        [
+            influence_model.backend.compute_jacobian(
+                simple_model,
+                influence_model.weights,
+                loss_fn,
+                batch_inputs,
+                batch_targets,
+            )
+            for batch_inputs, batch_targets in dataset
+        ],
+        axis=0,
+    )
 
     assert jacobian.shape == (4, influence_model.nb_params)
     assert bool(tf.reduce_all(tf.math.is_finite(jacobian)).numpy())
+    assert_allclose(jacobian, expected_jacobian)
 
 def test_influence_model_batch_gradient(simple_model):
     """Test InfluenceModel batch gradient computation."""
@@ -536,10 +629,24 @@ def test_influence_model_batch_gradient(simple_model):
     dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
 
     gradients = influence_model.batch_gradient(dataset)
+    expected_gradients = tf.stack(
+        [
+            influence_model.backend.compute_gradient(
+                simple_model,
+                influence_model.weights,
+                loss_fn,
+                batch_inputs,
+                batch_targets,
+            )
+            for batch_inputs, batch_targets in dataset
+        ],
+        axis=0,
+    )
 
     # 2 batches, each producing a gradient
     assert gradients.shape == (2, influence_model.nb_params)
     assert bool(tf.reduce_all(tf.math.is_finite(gradients)).numpy())
+    assert_allclose(gradients, expected_gradients)
 
 
 def test_loss_with_reduction_raises_error(simple_model):
@@ -672,58 +779,61 @@ def test_assign_variable(backend, simple_model):
     assert tf.reduce_all(variable == 0.0)
 
 def test_compute_hessian(backend):
-    """Test Hessian computation shape and finiteness."""
-    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
-    weights = backend.get_model_weights(model)
+    """Test Hessian computation against the closed-form last-layer Hessian."""
+    model, weights, _, _, dataset, loss_fn, _, expected_hessian_stack = _make_closed_form_last_layer_case_tf(backend)
     nb_params = backend.get_num_params(weights)
-    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
-
-    inputs = tf.constant([[1.0, 0.0], [0.5, -1.0]], dtype=tf.float32)
-    targets = tf.constant([[1.0], [0.0]], dtype=tf.float32)
-    dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(2)
 
     hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+    expected_hessian = tf.reduce_mean(expected_hessian_stack, axis=0)
 
     assert hessian.shape == (nb_params, nb_params)
     assert tf.reduce_all(tf.math.is_finite(hessian))
     assert np.allclose(backend.to_numpy(hessian), backend.to_numpy(tf.transpose(hessian)), atol=1e-5, rtol=1e-5)
+    assert_allclose(hessian, expected_hessian)
 
 
 def test_compute_hvp_single(backend):
     """Test single-sample Hessian-vector product computation."""
-    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
-    weights = backend.get_model_weights(model)
+    model, weights, inputs, targets, _, loss_fn, _, hessian = _make_closed_form_last_layer_case_tf(backend)
     nb_params = backend.get_num_params(weights)
-    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    vector = [tf.constant([[0.3], [-0.7]], dtype=tf.float32)]
 
-    inputs = tf.constant([[1.0, 0.0]], dtype=tf.float32)
-    targets = tf.constant([[1.0]], dtype=tf.float32)
-    vector = [
-        tf.constant([[0.3], [-0.7]], dtype=tf.float32),
-        tf.constant([0.5], dtype=tf.float32),
-    ]
-
-    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs[:1], targets[:1])
+    vector_flat = tf.reshape(vector[0], (-1,))
+    expected_hvp = tf.linalg.matvec(hessian[0], vector_flat)
 
     assert hvp.shape == (nb_params,)
     assert tf.reduce_all(tf.math.is_finite(hvp))
     assert float(tf.linalg.norm(hvp).numpy()) > 0.0
+    assert_allclose(hvp, expected_hvp)
 
 def test_compute_hvp_batch(backend):
     """Test batched Hessian-vector product computation."""
-    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
-    weights = backend.get_model_weights(model)
+    model, weights, inputs, targets, _, loss_fn, _, hessian = _make_closed_form_last_layer_case_tf(backend)
     nb_params = backend.get_num_params(weights)
-    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
-
-    inputs = tf.constant([[1.0, 0.0], [0.5, -1.0]], dtype=tf.float32)
-    targets = tf.constant([[1.0], [0.0]], dtype=tf.float32)
-    vector = [tf.ones_like(w) for w in weights]
+    vector = [tf.constant([[0.3], [-0.7]], dtype=tf.float32)]
 
     hvp = backend.compute_hvp_batch(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = tf.reshape(vector[0], (-1,))
+    expected_hvp = tf.reduce_sum(tf.einsum('bij,j->bi', hessian, vector_flat), axis=0)
 
     assert hvp.shape == (nb_params,)
     assert tf.reduce_all(tf.math.is_finite(hvp))
+    assert_allclose(hvp, expected_hvp)
+
+
+def test_compute_hvp_single_is_linear_in_direction(backend):
+    """Single-sample HVP should be linear in the direction vector."""
+    model, weights, inputs, targets, _, loss_fn, _, _ = _make_closed_form_last_layer_case_tf(backend)
+    v1 = [tf.constant([[0.3], [-0.7]], dtype=tf.float32)]
+    v2 = [tf.constant([[-0.2], [0.4]], dtype=tf.float32)]
+    v_sum = [left + right for left, right in zip(v1, v2)]
+
+    hvp_v1 = backend.compute_hvp_single(model, weights, loss_fn, v1, inputs[:1], targets[:1])
+    hvp_v2 = backend.compute_hvp_single(model, weights, loss_fn, v2, inputs[:1], targets[:1])
+    hvp_v_sum = backend.compute_hvp_single(model, weights, loss_fn, v_sum, inputs[:1], targets[:1])
+
+    assert_allclose(hvp_v_sum, hvp_v1 + hvp_v2)
 
 
 def test_compute_hvp_batch_equals_sum_of_singles(backend):
