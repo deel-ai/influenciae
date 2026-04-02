@@ -6,6 +6,7 @@
 PyTorch backend implementation.
 """
 # pylint: disable=too-many-lines
+import copy
 import inspect
 import os
 import warnings
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Tuple, Callable, Optional
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from .backend import BaseBackend, Framework
 from .pytorch_lazy_dataset import (
@@ -24,6 +25,25 @@ from .pytorch_lazy_dataset import (
 
 
 _PINV_CUDA_FALLBACK_WARNED = False
+
+
+class _LinearModelWithLosses(nn.Linear):
+    """Linear layer exposing TensorFlow-like regularization losses."""
+
+    def __init__(self, in_features: int, out_features: int, use_bias: bool, l2_regularization: float):
+        super().__init__(in_features, out_features, bias=use_bias)
+        self._l2_regularization = float(l2_regularization)
+
+    def regularization_loss(self) -> torch.Tensor:
+        """Return the L2 penalty applied to the layer weight."""
+        return self.weight.pow(2).sum() * self._l2_regularization
+
+    @property
+    def losses(self) -> List[torch.Tensor]:
+        """Expose regularization terms with Keras-like semantics."""
+        if self._l2_regularization <= 0.0:
+            return []
+        return [self.regularization_loss()]
 
 
 class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
@@ -63,6 +83,67 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         for layer in layers:
             weights.extend([p for p in layer.parameters() if p.requires_grad])
         return weights
+
+    def clone_model(self, model: nn.Module) -> nn.Module:
+        """Clone a PyTorch model and copy its weights."""
+        return copy.deepcopy(model)
+
+    def validate_loss_no_reduction(self, loss_function: Callable) -> None:
+        """Validate that a PyTorch loss function has no reduction."""
+        loss_reduction = getattr(loss_function, 'reduction', None)
+        if loss_reduction is None:
+            return
+
+        if isinstance(loss_reduction, str):
+            normalized_reduction = loss_reduction.lower()
+        else:
+            normalized_reduction = str(loss_reduction).lower()
+
+        if normalized_reduction != 'none':
+            raise ValueError("The loss function must not have reduction (use reduction='none').")
+
+    def is_dense_linear_layer(self, layer: nn.Module) -> bool:
+        """Return whether a layer is a Linear layer."""
+        return isinstance(layer, nn.Linear)
+
+    def layer_has_bias(self, layer: nn.Module) -> bool:
+        """Return whether a layer uses a bias term."""
+        return getattr(layer, 'bias', None) is not None
+
+    def get_layer_io_features(self, layer: nn.Module) -> Tuple[int, int]:
+        """Return input/output feature sizes for a Linear layer."""
+        if not self.is_dense_linear_layer(layer):
+            raise ValueError(f"Expected a Linear layer, got {type(layer)}")
+        return int(layer.in_features), int(layer.out_features)
+
+    def create_linear_model(
+        self,
+        input_shape: Tuple[int, ...],
+        out_features: int,
+        use_bias: bool = False,
+        l2_regularization: float = 0.0,
+        dtype: Optional[Any] = None,
+        reference_weight: Optional[torch.Tensor] = None,
+    ) -> nn.Module:
+        """Create a PyTorch Linear module aligned with an optional reference parameter."""
+        in_features = int(input_shape[-1])
+        linear_model = _LinearModelWithLosses(
+            in_features,
+            out_features,
+            use_bias=use_bias,
+            l2_regularization=l2_regularization,
+        )
+
+        if reference_weight is not None:
+            linear_model = linear_model.to(device=reference_weight.device, dtype=reference_weight.dtype)
+        elif dtype is not None:
+            linear_model = linear_model.to(dtype=dtype)
+
+        return linear_model
+
+    def get_linear_weight_axes(self) -> Tuple[int, int]:
+        """PyTorch Linear weights are shaped as (out_features, in_features)."""
+        return 1, 0
 
     def get_num_params(self, weights: List[torch.nn.Parameter]) -> int:
         """Get the total number of parameters."""
@@ -121,7 +202,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             if sample_weight is not None:
                 loss = loss * sample_weight[i]
 
-            loss = loss.sum()
+            loss = self.ensure_per_sample_loss(loss).sum()
             loss.backward(retain_graph=i < batch_size - 1)
 
             grads = []
@@ -172,6 +253,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 (input_sample.unsqueeze(0),),
             )
             loss = loss_function(predictions, target_sample.unsqueeze(0))
+            loss = self.ensure_per_sample_loss(loss)
             return loss.sum()
 
         def single_sample_weighted_loss(
@@ -189,6 +271,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             )
             loss = loss_function(predictions, target_sample.unsqueeze(0))
             loss = loss * sample_weight_sample
+            loss = self.ensure_per_sample_loss(loss)
             return loss.sum()
 
         if sample_weight is None:
@@ -284,7 +367,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         if sample_weight is not None:
             loss = loss * sample_weight
 
-        loss = loss.sum()
+        loss = self.ensure_per_sample_loss(loss).sum()
         loss.backward()
 
         gradients = []
@@ -321,6 +404,20 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def get_batch_size(self, tensor: torch.Tensor) -> int:
         """Get the batch size (first dimension) of a tensor."""
         return tensor.shape[0]
+
+    def ensure_per_sample_loss(self, loss: torch.Tensor) -> torch.Tensor:
+        """Ensure PyTorch losses are represented as per-sample vectors."""
+        if loss.dim() == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+        if loss.dim() > 1:
+            return loss.reshape(loss.shape[0], -1).sum(dim=1)
+        return loss
+
+    def normalize_binary_targets(self, targets: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
+        """Normalize binary PyTorch targets to match logits shape."""
+        if logits.dim() == 2 and logits.shape[-1] == 1 and targets.dim() == 1:
+            return targets.unsqueeze(-1)
+        return targets
 
     def reduce_sum(self, tensor: torch.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> torch.Tensor:
         """Reduce sum along an axis."""
@@ -528,7 +625,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Run forward pass on a model."""
         return model(inputs)
 
-    def get_children(self, model: nn.Module) -> List[nn.Module]:
+    def _get_children(self, model: nn.Module) -> List[nn.Module]:
         """Get direct children modules of a model."""
         return list(model.children())
 
@@ -546,7 +643,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         layer_idx
             Index of the layer found (negative index from end).
         """
-        children = self.get_children(model)
+        children = self._get_children(model)
         for layer_idx in range(1, len(children) + 1):
             layer = children[-layer_idx]
             params = list(layer.parameters())
@@ -570,7 +667,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         layer_idx
             Index of the layer.
         """
-        children = self.get_children(model)
+        children = self._get_children(model)
         num_layers = len(children)
 
         if layer is None:
@@ -610,7 +707,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights
             List of weight tensors.
         """
-        children = self.get_children(model)
+        children = self._get_children(model)
 
         if not children:
             # If model has no direct children (e.g., single layer), use all parameters
@@ -690,7 +787,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def load_dataset(self, path: str) -> Any:
         """Load a dataset from disk."""
         if os.path.exists(path):
-            return torch.load(path)
+            return torch.load(path, weights_only=False)
         raise FileNotFoundError(f"The dataset path: {path} was not found")
 
     def get_dataset_batch_size(self, dataset: Any) -> int:
@@ -755,6 +852,17 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         tensor = self.convert_to_tensor(tensors)
         return CachedDataset([(tensor.unsqueeze(0),)])
+
+    def create_dataset_from_tensor_slices(self, tensors: Any, batch_size: int) -> Any:
+        """Create a batched dataset by slicing tensors along their first dimension."""
+        if isinstance(tensors, torch.Tensor):
+            dataset = TensorDataset(tensors)
+        elif isinstance(tensors, (list, tuple)):
+            dataset = TensorDataset(*tensors)
+        else:
+            dataset = TensorDataset(self.convert_to_tensor(tensors))
+
+        return DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     def unbatch_dataset(self, dataset: Any) -> Any:
         """Unbatch a dataset."""

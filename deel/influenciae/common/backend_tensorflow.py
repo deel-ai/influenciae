@@ -7,7 +7,6 @@ TensorFlow backend implementation.
 """
 import os
 from typing import Any, List, Tuple, Callable, Optional, Sequence
-from xml.dom import NotFoundErr
 
 import numpy as np
 import tensorflow as tf
@@ -136,6 +135,68 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 weights.extend(self.normalize_weights_to_watch(list(trainable_weights)))
         return weights
 
+    def clone_model(self, model: tf.keras.Model) -> tf.keras.Model:
+        """Clone a Keras model and copy its weights."""
+        cloned_model = tf.keras.models.clone_model(model)
+        cloned_model.set_weights(model.get_weights())
+        return cloned_model
+
+    def validate_loss_no_reduction(self, loss_function: Callable) -> None:
+        """Validate that a TensorFlow loss function has no reduction."""
+        loss_reduction = getattr(loss_function, 'reduction', None)
+        if loss_reduction is not None and loss_reduction is not tf.keras.losses.Reduction.NONE:
+            raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
+
+    def is_dense_linear_layer(self, layer: tf.keras.layers.Layer) -> bool:
+        """Return whether a layer is a Dense layer."""
+        return isinstance(layer, tf.keras.layers.Dense)
+
+    def layer_has_bias(self, layer: tf.keras.layers.Layer) -> bool:
+        """Return whether a layer uses a bias term."""
+        return bool(getattr(layer, 'use_bias', False))
+
+    def get_layer_io_features(self, layer: tf.keras.layers.Layer) -> Tuple[int, int]:
+        """Return input/output feature sizes for a Dense layer."""
+        if not self.is_dense_linear_layer(layer):
+            raise ValueError(f"Expected a Dense layer, got {type(layer)}")
+
+        kernel = getattr(layer, 'kernel', None)
+        if kernel is not None:
+            return int(kernel.shape[0]), int(kernel.shape[1])
+
+        input_shape = getattr(layer, 'input_shape', None)
+        if input_shape is None:
+            raise ValueError("Could not infer Dense input/output features from an unbuilt layer")
+        return int(input_shape[-1]), int(layer.units)
+
+    def create_linear_model(
+        self,
+        input_shape: Tuple[int, ...],
+        out_features: int,
+        use_bias: bool = False,
+        l2_regularization: float = 0.0,
+        dtype: Optional[Any] = None,
+        reference_weight: Optional[tf.Tensor] = None,
+    ) -> tf.keras.Model:
+        """Create a Keras model containing a single Dense layer."""
+        if reference_weight is not None and dtype is None:
+            dtype = reference_weight.dtype
+        if dtype is None:
+            dtype = tf.float32
+
+        inputs = tf.keras.layers.Input(shape=input_shape, dtype=dtype)
+        outputs = tf.keras.layers.Dense(
+            out_features,
+            use_bias=use_bias,
+            kernel_regularizer=tf.keras.regularizers.L2(l2_regularization),
+            dtype=dtype,
+        )(inputs)
+        return tf.keras.Model(inputs=inputs, outputs=outputs)
+
+    def get_linear_weight_axes(self) -> Tuple[int, int]:
+        """TensorFlow Dense kernels are shaped as (in_features, out_features)."""
+        return 0, 1
+
     def get_num_params(self, weights: List[tf.Variable]) -> int:
         """Get the total number of parameters."""
         watched_weights = self.normalize_weights_to_watch(weights)
@@ -175,6 +236,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 loss = loss_function(targets, predictions, sample_weight)
             else:
                 loss = loss_function(targets, predictions)
+            loss = self.ensure_per_sample_loss(loss)
 
         jacobian = tape.jacobian(loss, watched_weights)
         self._raise_if_disconnected('compute_jacobian', jacobian, watched_weights)
@@ -201,9 +263,10 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             tape.watch(watched_weights)
             predictions = model(inputs)
             if sample_weight is not None:
-                loss = tf.expand_dims(loss_function(targets, predictions, sample_weight), axis=-1)
+                loss = loss_function(targets, predictions, sample_weight)
             else:
-                loss = tf.expand_dims(loss_function(targets, predictions), axis=-1)
+                loss = loss_function(targets, predictions)
+            loss = self.ensure_per_sample_loss(loss)
 
         gradients = tape.gradient(loss, watched_weights)
         self._raise_if_disconnected('compute_gradient', gradients, watched_weights)
@@ -233,6 +296,38 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def get_batch_size(self, tensor: tf.Tensor) -> int:
         """Get the batch size (first dimension) of a tensor."""
         return tf.shape(tensor)[0]
+
+    def ensure_per_sample_loss(self, loss: tf.Tensor) -> tf.Tensor:
+        """Ensure TensorFlow losses are represented as per-sample vectors."""
+        loss_rank = loss.shape.rank
+
+        if loss_rank == 0:
+            raise ValueError("Loss function must return per-sample losses (reduction='none')")
+
+        if loss_rank is None:
+            # control dependencies to make sure that this executes at correct time in graph
+            with tf.control_dependencies([
+                tf.debugging.assert_rank_at_least(
+                    loss,
+                    1,
+                    message="Loss function must return per-sample losses (reduction='none')",
+                )
+            ]):
+                loss = tf.identity(loss)
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            return tf.reduce_sum(loss, axis=1)
+
+        if loss_rank > 1:
+            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
+            loss = tf.reduce_sum(loss, axis=1)
+
+        return loss
+
+    def normalize_binary_targets(self, targets: tf.Tensor, logits: tf.Tensor) -> tf.Tensor:
+        """Normalize binary TensorFlow targets to match logits shape."""
+        if logits.shape.rank == 2 and logits.shape[-1] == 1 and targets.shape.rank == 1:
+            return tf.expand_dims(targets, axis=-1)
+        return targets
 
     def reduce_sum(self, tensor: tf.Tensor, axis: Optional[int] = None, keepdims: bool = False) -> tf.Tensor:
         """Reduce sum along an axis."""
@@ -313,8 +408,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
             Model containing the target_layer and beyond.
         """
         # Clone the model to avoid modifying the original
-        cloned_model = tf.keras.models.clone_model(model)
-        cloned_model.set_weights(model.get_weights())
+        cloned_model = self.clone_model(model)
 
         # Find the cut layer
         if isinstance(target_layer, str):
@@ -502,7 +596,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Load a dataset from disk."""
         if os.path.exists(path):
             return tf.data.experimental.load(path)
-        raise NotFoundErr(f"The dataset path: {path} was not found")
+        raise FileNotFoundError(f"The dataset path: {path} was not found")
 
     def get_dataset_batch_size(self, dataset: tf.data.Dataset) -> int:
         """Get the batch size of a dataset."""
@@ -523,6 +617,14 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def create_dataset_from_tensors(self, tensors: tf.Tensor, batch_size: int) -> tf.data.Dataset:
         """Create a batched dataset from tensors."""
         return tf.data.Dataset.from_tensors(tensors).batch(batch_size)
+
+    def create_dataset_from_tensor_slices(
+        self,
+        tensors: Any,
+        batch_size: int,
+    ) -> tf.data.Dataset:
+        """Create a batched dataset by slicing tensors along their first dimension."""
+        return tf.data.Dataset.from_tensor_slices(tensors).batch(batch_size)
 
     def unbatch_dataset(self, dataset: tf.data.Dataset) -> tf.data.Dataset:
         """Unbatch a dataset."""
