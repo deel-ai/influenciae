@@ -166,15 +166,9 @@ def test_get_layers(backend, simple_model):
     # children() returns direct child modules
     # Sequential(Linear, ReLU, Linear) = 3 children
     assert len(layers) == 3
-
-def test_get_children(backend, simple_model):
-    """Test getting direct children."""
-    children = backend.get_children(simple_model)
-
-    assert len(children) == 3
-    assert isinstance(children[0], nn.Linear)
-    assert isinstance(children[1], nn.ReLU)
-    assert isinstance(children[2], nn.Linear)
+    assert isinstance(layers[0], nn.Linear)
+    assert isinstance(layers[1], nn.ReLU)
+    assert isinstance(layers[2], nn.Linear)
 
 
 def test_compute_loss(backend):
@@ -258,6 +252,75 @@ def test_compute_jacobian_returns_detached_tensor(backend, simple_model):
 
     assert not jacobian.requires_grad
     assert jacobian.grad_fn is None
+
+
+def test_validate_loss_no_reduction(backend):
+    """Loss reduction validation should accept none and reject reduced losses."""
+    backend.validate_loss_no_reduction(nn.MSELoss(reduction='none'))
+
+    with pytest.raises(ValueError, match="must not have reduction"):
+        backend.validate_loss_no_reduction(nn.MSELoss())
+
+
+def test_linear_layer_helpers_and_clone_model(backend, simple_model):
+    """Linear-layer helpers should expose structural information consistently."""
+    output_layer = simple_model[-1]
+
+    assert backend.is_dense_linear_layer(output_layer)
+    assert backend.layer_has_bias(output_layer)
+    assert backend.get_layer_io_features(output_layer) == (3, 2)
+    assert backend.get_linear_weight_axes() == (1, 0)
+    assert backend.find_last_weight_layer(simple_model) == -1
+    assert backend.get_layer_index(simple_model, None) == 2
+    assert backend.get_layer_index(simple_model, -1) == 2
+
+    cloned_model = backend.clone_model(simple_model)
+    cloned_weights = backend.get_model_weights(cloned_model)
+    original_weights = backend.get_model_weights(simple_model)
+
+    for original, cloned in zip(original_weights, cloned_weights):
+        assert_allclose(original, cloned)
+        assert cloned is not original
+
+
+def test_get_layer_index_by_name(backend, named_simple_model):
+    """Layer lookup by name should match top-level child ordering."""
+    assert backend.get_layer_index(named_simple_model, 'output') == 2
+
+
+def test_create_linear_model(backend):
+    """Linear model creation should preserve PyTorch shape and dtype semantics."""
+    reference_weight = nn.Parameter(torch.ones((3, 2), dtype=torch.float64))
+    linear_model = backend.create_linear_model(
+        input_shape=(1, 2),
+        out_features=3,
+        use_bias=False,
+        l2_regularization=0.5,
+        reference_weight=reference_weight,
+    )
+
+    outputs = linear_model(torch.ones((4, 1, 2), dtype=torch.float64))
+
+    assert outputs.shape == (4, 1, 3)
+    assert linear_model.bias is None
+    assert linear_model.weight.dtype == torch.float64
+    assert len(linear_model.losses) == 1
+    assert_allclose(linear_model.losses[0], 0.5 * linear_model.weight.pow(2).sum())
+
+
+def test_ensure_per_sample_loss_and_normalize_binary_targets(backend):
+    """PyTorch helpers should normalize common RPS loss/target shapes."""
+    matrix_loss = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
+    per_sample_loss = backend.ensure_per_sample_loss(matrix_loss)
+    assert_allclose(per_sample_loss, torch.tensor([3.0, 7.0], dtype=torch.float32))
+
+    with pytest.raises(ValueError, match="per-sample"):
+        backend.ensure_per_sample_loss(torch.tensor(1.0, dtype=torch.float32))
+
+    targets = torch.tensor([0.0, 1.0], dtype=torch.float32)
+    logits = torch.tensor([[0.1], [0.2]], dtype=torch.float32)
+    normalized_targets = backend.normalize_binary_targets(targets, logits)
+    assert normalized_targets.shape == (2, 1)
 
 
 def test_compute_jacobian_vmap_matches_loop_with_sample_weight(backend, simple_model):
@@ -928,6 +991,24 @@ def test_create_dataset_from_tensors(backend):
     assert tuple_dataset[0][1].shape == (1, 2)
     assert torch.equal(tuple_dataset[0][0], torch.tensor([[1.0, 2.0]]))
     assert torch.equal(tuple_dataset[0][1], torch.tensor([[3.0, 4.0]]))
+
+
+def test_create_dataset_from_tensor_slices(backend):
+    """Tensor slice dataset creation should preserve per-sample semantics."""
+    dataset = backend.create_dataset_from_tensor_slices(
+        (
+            torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float32),
+            torch.tensor([[4.0], [5.0], [6.0]], dtype=torch.float32),
+        ),
+        batch_size=2,
+    )
+    batches = list(dataset)
+
+    assert len(batches) == 2
+    assert torch.equal(batches[0][0], torch.tensor([[1.0], [2.0]], dtype=torch.float32))
+    assert torch.equal(batches[0][1], torch.tensor([[4.0], [5.0]], dtype=torch.float32))
+    assert torch.equal(batches[1][0], torch.tensor([[3.0]], dtype=torch.float32))
+    assert torch.equal(batches[1][1], torch.tensor([[6.0]], dtype=torch.float32))
 
 def test_shuffle_dataset_size_and_element_spec(backend):
     """Test shuffle, size and element spec helpers."""
