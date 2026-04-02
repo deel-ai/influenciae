@@ -57,7 +57,7 @@ def test_alpha():
     with tf.GradientTape() as tape:
         logits = perturbed_model(feature_maps)
         loss = loss_function(targets_train, logits)
-        loss = rps_lje._ensure_per_sample_loss_tensorflow(loss, tf)
+        loss = rps_lje._ensure_per_sample_loss(loss)
         loss = -tf.reduce_mean(loss)
     grads = tape.gradient(loss, perturbed_trainable_vars)
     optimizer.apply_gradients(zip(grads, perturbed_trainable_vars))
@@ -75,7 +75,7 @@ def test_alpha():
         tape.watch(impl_weights)
         logits = rps_lje.perturbed_head(feature_maps)
         loss = loss_function(targets_train, logits)
-        loss = rps_lje._ensure_per_sample_loss_tensorflow(loss, tf)
+        loss = rps_lje._ensure_per_sample_loss(loss)
     grads = tape.jacobian(loss, impl_weights)[0]
 
     grads = tf.multiply(
