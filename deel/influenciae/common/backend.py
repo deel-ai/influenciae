@@ -214,6 +214,102 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
+    def clone_model(self, model: Model) -> Model:
+        """
+        Clone a model and copy its weights.
+
+        Parameters
+        ----------
+        model
+            The model to clone.
+
+        Returns
+        -------
+        cloned_model
+            A cloned model with the same weights.
+        """
+
+    @abstractmethod
+    def validate_loss_no_reduction(self, loss_function: LossFunction) -> None:
+        """
+        Validate that a loss function returns per-sample losses.
+
+        Parameters
+        ----------
+        loss_function
+            The loss function to validate.
+
+        Raises
+        ------
+        ValueError
+            If the loss function uses a reduction other than no reduction.
+        """
+
+    @abstractmethod
+    def is_dense_linear_layer(self, layer: Layer) -> bool:
+        """Return whether a layer is a Dense/Linear layer."""
+
+    @abstractmethod
+    def layer_has_bias(self, layer: Layer) -> bool:
+        """Return whether a layer uses a bias parameter."""
+
+    @abstractmethod
+    def get_layer_io_features(self, layer: Layer) -> Tuple[int, int]:
+        """
+        Return the input and output feature sizes for a Dense/Linear layer.
+
+        Parameters
+        ----------
+        layer
+            The layer to inspect.
+
+        Returns
+        -------
+        in_features
+            Input feature dimension.
+        out_features
+            Output feature dimension.
+        """
+
+    @abstractmethod
+    def create_linear_model(
+        self,
+        input_shape: Tuple[int, ...],
+        out_features: int,
+        use_bias: bool = False,
+        l2_regularization: float = 0.0,
+        dtype: Optional[DType] = None,
+        reference_weight: Optional[Tensor] = None,
+    ) -> Model:
+        """
+        Create a linear model matching the backend's Dense/Linear semantics.
+
+        Parameters
+        ----------
+        input_shape
+            Shape of a single input sample excluding the batch dimension.
+        out_features
+            Number of output features.
+        use_bias
+            Whether the linear layer uses a bias term.
+        l2_regularization
+            Optional L2 regularization coefficient for the linear weights.
+        dtype
+            Optional dtype for the created model.
+        reference_weight
+            Optional tensor/parameter used to align backend-specific dtype/device state.
+
+        Returns
+        -------
+        model
+            A backend-native linear model.
+        """
+
+    @abstractmethod
+    def get_linear_weight_axes(self) -> Tuple[int, int]:
+        """Return the input-axis and output-axis order for linear layer weights."""
+
+    @abstractmethod
     def get_num_params(self, weights: List[WeightVariable]) -> int:
         """
         Get the total number of parameters in a list of weights.
@@ -365,6 +461,45 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """Get the batch size (first dimension) of a tensor."""
 
     @abstractmethod
+    def ensure_per_sample_loss(self, loss: Tensor) -> Tensor:
+        """
+        Ensure that a loss tensor is represented as a per-sample vector.
+
+        Parameters
+        ----------
+        loss
+            Loss tensor returned by a framework loss function.
+
+        Returns
+        -------
+        per_sample_loss
+            A tensor with one scalar loss per sample.
+
+        Raises
+        ------
+        ValueError
+            If the loss is scalar and therefore already reduced.
+        """
+
+    @abstractmethod
+    def normalize_binary_targets(self, targets: Tensor, logits: Tensor) -> Tensor:
+        """
+        Normalize binary-classification targets to match logits shape.
+
+        Parameters
+        ----------
+        targets
+            The target tensor.
+        logits
+            The logits tensor produced by the model.
+
+        Returns
+        -------
+        normalized_targets
+            Targets reshaped if necessary to match binary logits.
+        """
+
+    @abstractmethod
     def reduce_sum(self, tensor: Tensor, axis: Optional[int] = None, keepdims: bool = False) -> Tensor:
         """Reduce sum along an axis."""
 
@@ -501,6 +636,14 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         layer
             The layer object.
         """
+
+    @abstractmethod
+    def find_last_weight_layer(self, model: Model) -> int:
+        """Return the negative index of the last layer with trainable weights."""
+
+    @abstractmethod
+    def get_layer_index(self, model: Model, layer: Any) -> int:
+        """Resolve a layer name/index/None to a concrete non-negative index."""
 
     @abstractmethod
     def get_layers(self, model: Model) -> List[Layer]:
@@ -683,6 +826,28 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         -------
         dataset
             A batched dataset containing the tensors.
+        """
+
+    @abstractmethod
+    def create_dataset_from_tensor_slices(
+        self,
+        tensors: Union[Tensor, Tuple[Tensor, ...]],
+        batch_size: int,
+    ) -> DatasetLike:
+        """
+        Create a batched dataset by slicing tensors along the first dimension.
+
+        Parameters
+        ----------
+        tensors
+            A tensor or tuple of tensors sharing the same leading dimension.
+        batch_size
+            The batch size for the resulting dataset.
+
+        Returns
+        -------
+        dataset
+            A batched dataset containing one element per tensor slice.
         """
 
     @abstractmethod
@@ -1368,7 +1533,8 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         cond_fn: Callable,
         body_fn: Callable,
         loop_vars: List[Any],
-        maximum_iterations: Optional[int] = None
+        maximum_iterations: Optional[int] = None,
+        parallel_iterations: int = 10,
     ) -> List[Any]:
         """
         Execute a while loop with the given condition and body functions.
@@ -1383,6 +1549,8 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
             Initial values for the loop variables.
         maximum_iterations
             Optional maximum number of iterations.
+        parallel_iterations
+            Backend hint controlling loop parallelism when supported.
 
         Returns
         -------
