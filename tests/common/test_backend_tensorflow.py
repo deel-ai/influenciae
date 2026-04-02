@@ -249,6 +249,71 @@ def test_compute_jacobian(backend):
     assert_allclose(jacobian, expected_jacobian)
 
 
+def test_validate_loss_no_reduction(backend):
+    """Loss reduction validation should accept NONE and reject reduced losses."""
+    backend.validate_loss_no_reduction(MeanSquaredError(reduction=Reduction.NONE))
+
+    with pytest.raises(ValueError, match="must not have reduction"):
+        backend.validate_loss_no_reduction(MeanSquaredError())
+
+
+def test_dense_layer_helpers_and_clone_model(backend, simple_model):
+    """Dense-layer helpers should expose structural information consistently."""
+    _ = simple_model(tf.zeros((1, 5), dtype=tf.float32))
+    output_layer = simple_model.layers[-1]
+
+    assert backend.is_dense_linear_layer(output_layer)
+    assert backend.layer_has_bias(output_layer)
+    assert backend.get_layer_io_features(output_layer) == (3, 2)
+    assert backend.get_linear_weight_axes() == (0, 1)
+    assert backend.find_last_weight_layer(simple_model) == -1
+    assert backend.get_layer_index(simple_model, None) == 1
+    assert backend.get_layer_index(simple_model, 'output') == 1
+    assert backend.get_layer_index(simple_model, -1) == 1
+
+    cloned_model = backend.clone_model(simple_model)
+    cloned_weights = backend.get_model_weights(cloned_model)
+    original_weights = backend.get_model_weights(simple_model)
+
+    for original, cloned in zip(original_weights, cloned_weights):
+        assert_allclose(original, cloned)
+        assert cloned is not original
+
+
+def test_create_linear_model(backend):
+    """Linear model creation should preserve TensorFlow shape and dtype semantics."""
+    reference_weight = tf.Variable(tf.ones((2, 3), dtype=tf.float64))
+    linear_model = backend.create_linear_model(
+        input_shape=(1, 2),
+        out_features=3,
+        use_bias=False,
+        l2_regularization=0.5,
+        reference_weight=reference_weight,
+    )
+
+    outputs = linear_model(tf.ones((4, 1, 2), dtype=tf.float64))
+
+    assert outputs.shape == (4, 1, 3)
+    assert linear_model.layers[-1].use_bias is False
+    assert linear_model.layers[-1].kernel.dtype == tf.float64
+    assert len(linear_model.losses) == 1
+
+
+def test_ensure_per_sample_loss_and_normalize_binary_targets(backend):
+    """TensorFlow helpers should normalize common RPS loss/target shapes."""
+    matrix_loss = tf.constant([[1.0, 2.0], [3.0, 4.0]], dtype=tf.float32)
+    per_sample_loss = backend.ensure_per_sample_loss(matrix_loss)
+    assert_allclose(per_sample_loss, tf.constant([3.0, 7.0], dtype=tf.float32))
+
+    with pytest.raises(ValueError, match="per-sample"):
+        backend.ensure_per_sample_loss(tf.constant(1.0, dtype=tf.float32))
+
+    targets = tf.constant([0.0, 1.0], dtype=tf.float32)
+    logits = tf.constant([[0.1], [0.2]], dtype=tf.float32)
+    normalized_targets = backend.normalize_binary_targets(targets, logits)
+    assert normalized_targets.shape == (2, 1)
+
+
 def test_compute_gradient_raises_on_disconnected_graph(backend, simple_model):
     """Disconnected gradients should raise an explicit error."""
     inputs = tf.random.normal((4, 5))
@@ -871,6 +936,22 @@ def test_create_dataset_from_tensors(backend):
     assert element[1].shape == (1, 2)
     assert np.array_equal(element[0].numpy(), np.array([[1.0, 2.0]], dtype=np.float32))
     assert np.array_equal(element[1].numpy(), np.array([[3.0, 4.0]], dtype=np.float32))
+
+
+def test_create_dataset_from_tensor_slices(backend):
+    """Tensor slice dataset creation should preserve per-sample semantics."""
+    tensors = (
+        tf.constant([[1.0], [2.0], [3.0]], dtype=tf.float32),
+        tf.constant([[4.0], [5.0], [6.0]], dtype=tf.float32),
+    )
+    dataset = backend.create_dataset_from_tensor_slices(tensors, batch_size=2)
+    batches = list(dataset.as_numpy_iterator())
+
+    assert len(batches) == 2
+    assert np.array_equal(batches[0][0], np.array([[1.0], [2.0]], dtype=np.float32))
+    assert np.array_equal(batches[0][1], np.array([[4.0], [5.0]], dtype=np.float32))
+    assert np.array_equal(batches[1][0], np.array([[3.0]], dtype=np.float32))
+    assert np.array_equal(batches[1][1], np.array([[6.0]], dtype=np.float32))
 
 def test_shuffle_dataset_and_size(backend):
     """Test shuffling and counting dataset elements."""
