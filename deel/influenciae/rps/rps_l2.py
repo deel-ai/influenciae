@@ -11,10 +11,13 @@ Supports both TensorFlow and PyTorch models through the backend abstraction laye
 """
 from typing import Any, Callable, Optional, Tuple, Union
 
-from .._optional_imports import import_optional_attr, import_optional_module
 from .base_representer_point import BaseRepresenterPoint
-from ..common import Framework
 from ..types import DatasetLike
+from ..utils.model_surgery import (
+    compute_l2_alpha,
+    create_surrogate_linear_model,
+    train_surrogate_linear_model,
+)
 
 
 class RepresenterPointL2(BaseRepresenterPoint):
@@ -70,252 +73,46 @@ class RepresenterPointL2(BaseRepresenterPoint):
         self.linear_layer: Optional[Any] = None
         self._train_last_layer(self.epochs)
 
-    def _train_last_layer(self, epochs: int):
+    def _train_last_layer(self, epochs: int) -> None:
         """
-        Trains an L2-regularized surrogate linear model to predict like the model on the
-        training dataset. The optimization is done using a Backtracking Line-Search
-        algorithm with the Armijo condition and SGD as the optimizer as it was done
-        in the original implementation.
+        Train an L2-regularized surrogate linear model to predict like the original head.
 
         Parameters
         ----------
         epochs
             An integer with the amount of epochs to train the surrogate model.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            self._train_last_layer_tensorflow(epochs)
-        else:
-            self._train_last_layer_pytorch(epochs)
-
-    def _train_last_layer_tensorflow(self, epochs: int):
-        """TensorFlow-specific training using BacktrackingLineSearch optimizer."""
-        tf = import_optional_module("tensorflow", extra="tensorflow")
-        mean_squared_error_cls = import_optional_attr(
-            "tensorflow.keras.losses",
-            "MeanSquaredError",
-            extra="tensorflow",
+        self.linear_layer = self._create_surrogate_model()
+        self.linear_layer = train_surrogate_linear_model(
+            backend=self.backend,
+            surrogate_model=self.linear_layer,
+            feature_extractor=self.feature_extractor,
+            original_head=self.original_head,
+            train_set=self.train_set,
+            loss_function=self.loss_function,
+            scaling_factor=self.scaling_factor,
+            epochs=epochs,
         )
-        backtracking_line_search_cls = import_optional_attr(
-            "deel.influenciae.utils",
-            "BacktrackingLineSearch",
-            extra="tensorflow",
-        )
-
-        self.linear_layer = self._create_surrogate_model_tensorflow()
-        optimizer = backtracking_line_search_cls(
-            batches_per_epoch=int(self.n_train / self.backend.get_dataset_batch_size(self.train_set)),
-            scaling_factor=self.scaling_factor
-        )
-        mse_loss = mean_squared_error_cls(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
-
-        assert self.linear_layer is not None  # Type narrowing for mypy
-        self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
-        for _ in range(epochs):
-            for x_batch, _ in self.train_set:
-                loss, grads, z_batch, y_target = self._learn_step_last_layer_tensorflow(x_batch, mse_loss)
-                optimizer.step(self.linear_layer, loss, z_batch, y_target, grads)
-
-        self.linear_layer.compile(optimizer=optimizer, loss=self.loss_function)
-
-    def _train_last_layer_pytorch(self, epochs: int):
-        """PyTorch-specific training using BacktrackingLineSearchPyTorch optimizer."""
-        torch = import_optional_module("torch", extra="pytorch")
-        nn = import_optional_module("torch.nn", extra="pytorch")
-        backtracking_line_search_cls = import_optional_attr(
-            "deel.influenciae.utils",
-            "BacktrackingLineSearchPyTorch",
-            extra="pytorch",
-        )
-
-        device = next(self.model.parameters()).device
-        self.linear_layer = self._create_surrogate_model_pytorch().to(device)
-        assert self.linear_layer is not None  # Type narrowing for mypy
-        mse_loss = nn.MSELoss(reduction="mean")
-
-        # Create the backtracking line search optimizer
-        optimizer = backtracking_line_search_cls(
-            params=self.linear_layer.parameters(),
-            batches_per_epoch=int(self.n_train / len(next(iter(self.train_set))[0])),
-            scaling_factor=self.scaling_factor
-        )
-
-        W = self.linear_layer.weight  # only parameter (bias=False)
-
-        self.linear_layer.train()
-        for _ in range(epochs):
-            for batch in self.train_set:
-                x_batch = batch[0].to(device)
-
-                # Feature maps + teacher logits (no grad)
-                with torch.no_grad():
-                    z_batch = self.feature_extractor(x_batch)
-                    y_target = self.original_head(z_batch)
-
-                # Forward + loss (with L2 reg like Keras L2: lambda * sum(W^2))
-                optimizer.zero_grad()
-                logits = self.linear_layer(z_batch)
-                mse = mse_loss(logits, y_target)
-                reg = self.lambda_regularization * (W.pow(2).sum())
-                loss = mse + reg
-
-                # If already non-finite, skip update (defensive)
-                if not torch.isfinite(loss):
-                    continue
-
-                loss.backward()
-                g = W.grad
-                if g is None or not torch.isfinite(g).all():
-                    optimizer.zero_grad()
-                    continue
-
-                # Clip to avoid rare spikes
-                torch.nn.utils.clip_grad_norm_([W], max_norm=10.0)
-
-                # Collect gradients for the optimizer
-                gradients = [p.grad.clone() for p in self.linear_layer.parameters() if p.grad is not None]
-
-                # Define closure for loss re-evaluation
-                def closure(z_batch_local=z_batch, y_target_local=y_target):
-                    assert self.linear_layer is not None  # Already checked earlier
-                    with torch.no_grad():
-                        logits_new = self.linear_layer(z_batch_local)
-                        mse_new = mse_loss(logits_new, y_target_local)
-                        reg_new = self.lambda_regularization * (W.pow(2).sum())
-                        return mse_new + reg_new
-
-                # Perform backtracking line search step
-                optimizer.step(
-                    model=self.linear_layer,
-                    current_loss=loss.detach(),
-                    x_inputs=z_batch,
-                    labels=y_target,
-                    gradients=gradients,
-                    closure=closure
-                )
-
-        self.linear_layer.eval()
-
-    def _learn_step_last_layer_tensorflow(self, x_batch: Any, mse_loss: Any) -> Tuple[Any, Any, Any, Any]:
-        """
-        TensorFlow-specific learning step for the surrogate linear model.
-
-        Parameters
-        ----------
-        x_batch
-            A training sample wrt to which we wish to compute the gradients.
-        mse_loss
-            A callable that computes the MSE loss.
-
-        Returns
-        -------
-        loss, gradients, z_batch, y_target
-            Tuple with loss value, gradients, latent space, and target predictions.
-        """
-        tf = import_optional_module("tensorflow", extra="tensorflow")
-
-        assert self.linear_layer is not None  # Initialized in __init__
-        z_batch = self.feature_extractor(x_batch)
-        y_target = self.model.layers[-1](z_batch)
-        with tf.GradientTape() as tape:
-            logits = self.linear_layer(z_batch, training=True)
-            loss = mse_loss(y_target, logits)
-            # Compatibility with Keras 3: add regularization losses if present
-            if self.linear_layer.losses:
-                regularization_loss = tf.add_n([
-                    tf.cast(loss_term, loss.dtype)
-                    for loss_term in self.linear_layer.losses
-                ])
-                loss = loss + regularization_loss
-        gradients = tape.gradient(loss, self.linear_layer.trainable_weights)
-        return loss, gradients, z_batch, y_target
-
-    def _create_surrogate_model_tensorflow(self) -> Any:
-        """
-        Creates an L2-regularized linear model for TensorFlow.
-
-        Returns
-        -------
-        surrogate_model
-            A TensorFlow L2-regularized linear model.
-        """
-        tf = import_optional_module("tensorflow", extra="tensorflow")
-
-        feature_shape = self.feature_extractor.output_shape
-        if isinstance(feature_shape, list):
-            feature_shape = feature_shape[0]
-        feature_dtype = getattr(self.feature_extractor, 'compute_dtype', None)
-        if feature_dtype is None:
-            feature_dtype = getattr(self.feature_extractor, 'dtype', tf.float32)
-
-        try:
-            model_output_shape = self.backend.get_output_shape(self.model)
-        except (AttributeError, ValueError):
-            model_output_shape = self.backend.get_output_shape(self.original_head)
-        output_units = model_output_shape[-1] if len(model_output_shape) > 1 else 1
-
-        inputs = tf.keras.layers.Input(shape=feature_shape[1:], dtype=feature_dtype)
-        last_layer = tf.keras.layers.Dense(
-            output_units,
-            use_bias=False,
-            kernel_regularizer=tf.keras.regularizers.L2(self.lambda_regularization),
-            dtype=feature_dtype
-        )
-        outputs = last_layer(inputs)
-        surrogate_model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        surrogate_model.layers[-1].trainable = True
-        surrogate_model.compile(loss=self.loss_function)
-
-        return surrogate_model
-
-    def _create_surrogate_model_pytorch(self) -> Any:
-        """
-        Creates an L2-regularized linear model for PyTorch.
-
-        Returns
-        -------
-        surrogate_model
-            A PyTorch L2-regularized linear model.
-        """
-        nn = import_optional_module("torch.nn", extra="pytorch")
-
-        # Get input and output dimensions from the feature extractor and model
-        children = list(self.model.children())
-        last_layer = children[-1]
-
-        if hasattr(last_layer, 'in_features') and hasattr(last_layer, 'out_features'):
-            in_features = last_layer.in_features
-            out_features = last_layer.out_features
-        else:
-            raise ValueError("Could not determine input/output dimensions for surrogate model")
-
-        # Create a simple linear layer without bias
-        surrogate_model = nn.Linear(in_features, out_features, bias=False)
-
-        # Move to same device as the original model
-        device = next(self.model.parameters()).device
-        surrogate_model = surrogate_model.to(device)
-
-        return surrogate_model
 
     def _create_surrogate_model(self) -> Any:
         """
-        Creates an L2-regularized linear model to use as surrogate with the
-        right input and output shapes.
+        Create an L2-regularized linear surrogate with the right input and output sizes.
 
         Returns
         -------
         surrogate_model
             An L2-regularized linear model.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            return self._create_surrogate_model_tensorflow()
-        return self._create_surrogate_model_pytorch()
+        return create_surrogate_linear_model(
+            self.backend,
+            self.feature_extractor,
+            self.original_head,
+            self.lambda_regularization,
+        )
 
     def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
         """
-        Computes the alpha factor for the kernel approximation. This element gives a notion of
-        the resistance that each training data-point towards minimizing the norm of the linear
-        layer's weight matrix. This is essentially this method's notion of influence score.
+        Compute the alpha factor for the kernel approximation.
 
         Parameters
         ----------
@@ -329,94 +126,20 @@ class RepresenterPointL2(BaseRepresenterPoint):
         alpha
             The alpha coefficients representing the influence score.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            return self._compute_alpha_tensorflow(z_batch, y_batch)
-        return self._compute_alpha_pytorch(z_batch, y_batch)
-
-    def _compute_alpha_tensorflow(self, z_batch: Any, y_batch: Any) -> Any:
-        """TensorFlow-specific alpha computation."""
-        tf = import_optional_module("tensorflow", extra="tensorflow")
-
-        assert self.linear_layer is not None  # Initialized in __init__
-        weights = self.backend.normalize_weights_to_watch(list(self.linear_layer.trainable_weights))
-
-        with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(weights)
-            logits = self.linear_layer(z_batch)
-            y_batch_for_loss = self._normalize_tensorflow_binary_targets(y_batch, logits, tf)
-            loss = self.loss_function(y_batch_for_loss, logits)
-            loss = self._ensure_per_sample_loss_tensorflow(loss, tf)
-        alpha = tape.jacobian(loss, weights)[0]
-        alpha = tf.divide(
-            alpha,
-            (
-                -2.0 * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype)
-                + tf.constant(1e-5, dtype=alpha.dtype)
-            ),
+        assert self.linear_layer is not None
+        return compute_l2_alpha(
+            backend=self.backend,
+            linear_layer=self.linear_layer,
+            loss_function=self.loss_function,
+            z_batch=z_batch,
+            y_batch=y_batch,
+            n_train=self.n_train,
+            lambda_regularization=self.lambda_regularization,
         )
-
-        feature_maps = tf.cast(z_batch, alpha.dtype)
-        eps = tf.constant(1e-5, dtype=alpha.dtype)
-
-        # Now, divide each of the alpha_i by their feature maps
-        alpha = tf.multiply(
-            alpha,
-            tf.repeat(
-                tf.expand_dims(
-                    tf.divide(tf.ones_like(feature_maps), feature_maps + eps),
-                    axis=-1),
-                alpha.shape[-1], axis=-1
-            )
-        )
-        alpha = tf.reduce_sum(alpha, axis=1)
-
-        return alpha
-
-    def _compute_alpha_pytorch(self, z_batch: Any, y_batch: Any) -> Any:
-        """PyTorch-specific alpha computation (stable + matches TF intent)."""
-        torch = import_optional_module("torch", extra="pytorch")
-
-        assert self.linear_layer is not None  # Initialized in __init__
-        device = z_batch.device
-        dtype = z_batch.dtype
-        y_batch = y_batch.to(device=device)
-
-        W = self.linear_layer.weight  # (out_features, in_features)
-
-        # Forward
-        logits = self.linear_layer(z_batch)
-
-        # Per-sample loss; make sure each sample is a scalar
-        loss = self.loss_function(logits, y_batch)
-        # BCEWithLogitsLoss(reduction='none') may return (B,1); ensure (B,)
-        loss = loss.view(loss.shape[0], -1).sum(dim=1)
-
-        # Per-sample gradients wrt W: shape (B, out, in)
-        grads = []
-        for i in range(loss.shape[0]):
-            gi = torch.autograd.grad(loss[i], W, retain_graph=True, create_graph=False)[0]
-            grads.append(gi)
-        alpha = torch.stack(grads, dim=0)
-
-        # Scale by (-2 * lambda * n_train + eps) in *same dtype*
-        eps = torch.tensor(1e-5, device=device, dtype=dtype)
-        denom = -2.0 * self.lambda_regularization * float(self.n_train)
-        denom = torch.tensor(denom, device=device, dtype=dtype) + eps
-        alpha = alpha / denom
-
-        # Divide by feature maps (TF does 1/(z + eps)); avoid pathological tiny denominators
-        z_denom = z_batch + eps
-        z_denom = torch.where(z_denom.abs() < eps, eps * torch.ones_like(z_denom), z_denom)
-        z_inv = 1.0 / z_denom  # (B, in)
-
-        # alpha: (B, out, in) * (B, 1, in) -> sum over in -> (B, out)
-        alpha = (alpha * z_inv.unsqueeze(1)).sum(dim=2)
-
-        return alpha
 
     def predict_with_kernel(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
         """
-        Uses the learned kernel to approximate the model's predictions on a group of samples.
+        Use the learned kernel to approximate the model's predictions on a batch of samples.
 
         Parameters
         ----------
@@ -429,45 +152,12 @@ class RepresenterPointL2(BaseRepresenterPoint):
         predictions
             A tensor with an approximation of the model's predictions.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            return self._predict_with_kernel_tensorflow(samples_to_evaluate)
-        return self._predict_with_kernel_pytorch(samples_to_evaluate)
-
-    def _predict_with_kernel_tensorflow(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
-        """TensorFlow-specific kernel prediction."""
-        tf = import_optional_module("tensorflow", extra="tensorflow")
-
-        influence_vectors = self.compute_influence_vector(self.train_set)
-        _, influence_dataset = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
-        influence_values_dataset = self.backend.map_dataset(influence_dataset, lambda x, v: v)
-        dataset_iterator = iter(influence_values_dataset)
-        dataset_cardinality = self.backend.get_dataset_cardinality(influence_values_dataset)
-
-        def body_fun(i, value):
-            v = next(dataset_iterator)
-            i = i + 1
-            value = tf.cast(value, v.dtype) + tf.reduce_sum(v, axis=1)
-            return i, value
-
-        _, predictions = tf.while_loop(
-            lambda i, value: i < dataset_cardinality,
-            body_fun,
-            [tf.constant(0, dtype=tf.int64),
-             tf.zeros((tf.shape(samples_to_evaluate[-1])[0],), dtype=tf.float32)]
-        )
-
-        return predictions
-
-    def _predict_with_kernel_pytorch(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
-        """PyTorch-specific kernel prediction."""
-        torch = import_optional_module("torch", extra="pytorch")
-
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
 
         predictions = None
-        for _, v in dataset_influence:
-            batch_pred = torch.sum(v, dim=1)
+        for _, influence_values in dataset_influence:
+            batch_pred = self.backend.reduce_sum(influence_values, axis=1)
             if predictions is None:
                 predictions = batch_pred
             else:
