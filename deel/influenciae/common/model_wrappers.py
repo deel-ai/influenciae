@@ -127,25 +127,7 @@ class BaseInfluenceModel:
 
     def _validate_loss_function(self, loss_function: LossFunction) -> None:
         """Validate that the loss function doesn't have reduction."""
-        if self.backend.framework == Framework.TENSORFLOW:
-            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
-            loss_reduction = getattr(loss_function, 'reduction', None)
-            if loss_reduction is not None and loss_reduction is not reduction.NONE:
-                raise ValueError('The loss function must not have reduction (use Reduction.NONE).')
-            return
-
-        if self.backend.framework == Framework.PYTORCH:
-            loss_reduction = getattr(loss_function, 'reduction', None)
-            if loss_reduction is None:
-                return
-
-            if isinstance(loss_reduction, str):
-                normalized_reduction = loss_reduction.lower()
-            else:
-                normalized_reduction = str(loss_reduction).lower()
-
-            if normalized_reduction != 'none':
-                raise ValueError("The loss function must not have reduction (use reduction='none').")
+        self.backend.validate_loss_no_reduction(loss_function)
 
     def __call__(self, inputs: Tensor) -> Tensor:
         """
