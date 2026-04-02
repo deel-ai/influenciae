@@ -3,14 +3,24 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """TensorFlow-specific helpers for RPS model surgery."""
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
 import tensorflow as tf
 
-from ..common import BaseBackend
+from ..common.backend import BaseBackend
 from ..types import DatasetLike, Model, Tensor
 from .backtracking_line_search import BacktrackingLineSearch
-from .model_surgery import split_batch_inputs_targets
+
+
+def _split_batch_inputs_targets(samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+    """Split a batched sample tuple into inputs and targets."""
+    if len(samples) == 2:
+        return samples[0], samples[1]
+
+    inputs = samples[:-1]
+    if isinstance(inputs, tuple) and len(inputs) == 1:
+        inputs = inputs[0]
+    return inputs, samples[-1]
 
 
 def train_surrogate_linear_model_tensorflow(
@@ -34,7 +44,7 @@ def train_surrogate_linear_model_tensorflow(
     surrogate_model.compile(optimizer=optimizer, loss=mse_loss)
     for _ in range(epochs):
         for batch in train_set:
-            inputs, _ = split_batch_inputs_targets(batch)
+            inputs, _ = _split_batch_inputs_targets(batch)
             z_batch = backend.forward(feature_extractor, inputs)
             y_target = backend.forward(original_head, z_batch)
             with tf.GradientTape() as tape:

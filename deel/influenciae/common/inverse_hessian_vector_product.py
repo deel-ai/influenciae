@@ -10,7 +10,7 @@ functions.
 from abc import ABC, abstractmethod
 from enum import Enum
 from argparse import ArgumentError
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
