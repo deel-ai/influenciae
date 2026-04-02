@@ -1,0 +1,110 @@
+# Copyright IRT Antoine de Saint Exupéry et Université Paul Sabatier Toulouse III - All
+# rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
+# CRIAQ and ANITI - https://www.deel.ai/
+# =====================================================================================
+"""TensorFlow-specific helpers for RPS model surgery."""
+from typing import Any, Callable
+
+import tensorflow as tf
+
+from ..common import BaseBackend
+from ..types import DatasetLike, Model, Tensor
+from .backtracking_line_search import BacktrackingLineSearch
+from .model_surgery import split_batch_inputs_targets
+
+
+def train_surrogate_linear_model_tensorflow(
+    backend: BaseBackend,
+    surrogate_model: Model,
+    feature_extractor: Model,
+    original_head: Model,
+    train_set: DatasetLike,
+    loss_function: Callable,
+    scaling_factor: float,
+    epochs: int,
+    batches_per_epoch: int,
+) -> Model:
+    """Fit the surrogate linear model with TensorFlow's line-search optimizer."""
+    mse_loss = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+    optimizer = BacktrackingLineSearch(
+        batches_per_epoch=batches_per_epoch,
+        scaling_factor=scaling_factor,
+    )
+
+    surrogate_model.compile(optimizer=optimizer, loss=mse_loss)
+    for _ in range(epochs):
+        for batch in train_set:
+            inputs, _ = split_batch_inputs_targets(batch)
+            z_batch = backend.forward(feature_extractor, inputs)
+            y_target = backend.forward(original_head, z_batch)
+            with tf.GradientTape() as tape:
+                logits = surrogate_model(z_batch, training=True)
+                loss = mse_loss(y_target, logits)
+                if surrogate_model.losses:
+                    regularization_loss = tf.add_n([
+                        tf.cast(loss_term, loss.dtype)
+                        for loss_term in surrogate_model.losses
+                    ])
+                    loss = loss + regularization_loss
+            gradients = tape.gradient(loss, surrogate_model.trainable_weights)
+            optimizer.step(surrogate_model, loss, z_batch, y_target, gradients)
+
+    surrogate_model.compile(optimizer=optimizer, loss=loss_function)
+    return surrogate_model
+
+
+def perturb_head_single_sgd_step_tensorflow(
+    backend: BaseBackend,
+    perturbed_head: Model,
+    feature_extractor: Model,
+    feature_dataset: DatasetLike,
+    loss_function: Callable,
+    learning_rate: float = 1e-4,
+) -> Model:
+    """Apply one TensorFlow SGD step to the cloned head."""
+    if not perturbed_head.built and hasattr(feature_extractor, 'output_shape'):
+        perturbed_head.build(feature_extractor.output_shape)
+
+    trainable_vars = list(perturbed_head.trainable_variables)
+    if not trainable_vars:
+        return perturbed_head
+
+    optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate)
+    accum_vars = [tf.Variable(tf.zeros_like(variable), trainable=False) for variable in trainable_vars]
+    count_dtype = trainable_vars[0].dtype
+    total_samples = tf.zeros((), dtype=count_dtype)
+
+    for feature_batch, target_batch in feature_dataset:
+        with tf.GradientTape() as tape:
+            logits = backend.forward(perturbed_head, feature_batch)
+            normalized_targets = backend.normalize_binary_targets(target_batch, logits)
+            loss = loss_function(normalized_targets, logits)
+            loss = -backend.reduce_mean(backend.ensure_per_sample_loss(loss))
+        gradients = tape.gradient(loss, trainable_vars)
+
+        batch_size = backend.cast(backend.get_batch_size(feature_batch), count_dtype)
+        total_samples = total_samples + batch_size
+        for idx, gradient in enumerate(gradients):
+            if gradient is None:
+                raise ValueError("Gradient is None while computing perturbed-head update for RPS-LJE")
+            accum_vars[idx].assign_add(gradient * tf.cast(batch_size, gradient.dtype))
+
+    mean_grads = [accum_var / tf.cast(total_samples, accum_var.dtype) for accum_var in accum_vars]
+    optimizer.apply_gradients(zip(mean_grads, trainable_vars))
+    return perturbed_head
+
+
+def compute_lje_second_term_tensorflow(
+    backend: BaseBackend,
+    ihvp_calculator: Any,
+    scaled_jacobian: Tensor,
+) -> Tensor:
+    """Compute the TensorFlow-specific IHVP term for RPS-LJE."""
+    second_term = backend.map_fn(
+        lambda value: ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=protected-access
+            tf.expand_dims(value, axis=0),
+            use_gradient=False,
+        ),
+        scaled_jacobian,
+    )
+    return tf.reshape(second_term, tf.shape(scaled_jacobian))
