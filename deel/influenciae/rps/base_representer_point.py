@@ -8,11 +8,11 @@ Module containing the base class for representer point theorem-based influence c
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
 from abc import abstractmethod
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Tuple, Union
 
-from .._optional_imports import import_optional_attr, import_optional_module
-from ..common import BaseInfluenceCalculator, BaseBackend, Framework, get_backend_for_model
+from ..common import BaseInfluenceCalculator, BaseBackend, get_backend_for_model, get_backend_for_tensor
 from ..types import DatasetLike
+from ..utils.model_surgery import split_batch_inputs_targets
 
 
 class BaseRepresenterPoint(BaseInfluenceCalculator):
@@ -71,15 +71,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         loss_function
             The loss function to validate.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
-            if hasattr(loss_function, 'reduction'):
-                assert loss_function.reduction == reduction.NONE, \
-                    "The loss function must not have reduction (use Reduction.NONE)."
-        else:  # PyTorch
-            if hasattr(loss_function, 'reduction'):
-                assert loss_function.reduction == 'none', \
-                    "The loss function must not have reduction (use reduction='none')."
+        self.backend.validate_loss_no_reduction(loss_function)
 
     def _validate_last_layer(self, model: Any) -> None:
         """
@@ -90,78 +82,24 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         model
             The model to validate.
         """
-        if self.backend.framework == Framework.TENSORFLOW:
-            tf = import_optional_module("tensorflow", extra="tensorflow")
-            layers = self.backend.get_layers(model)
-            if not isinstance(layers[-1], tf.keras.layers.Dense):
-                raise ValueError('The last layer of the model must be a Dense layer with no bias.')
-            if layers[-1].use_bias:
-                raise ValueError('The last layer of the model must be a Dense layer with no bias.')
-        else:  # PyTorch
-            # Get the last layer - for PyTorch we need to find the last Linear layer
-            last_layer = self._get_last_linear_layer(model)
-            if last_layer is None:
-                raise ValueError('The last layer of the model must be a Linear layer with no bias.')
-            if last_layer.bias is not None:
-                raise ValueError('The last layer of the model must be a Linear layer with no bias.')
-
-    def _get_last_linear_layer(self, model: Any) -> Optional[Any]:
-        """
-        Get the last Linear layer from a PyTorch model.
-
-        Parameters
-        ----------
-        model
-            The PyTorch model.
-
-        Returns
-        -------
-        layer
-            The last Linear layer, or None if not found.
-        """
-        nn = import_optional_module("torch.nn", extra="pytorch")
-        last_linear = None
-        for module in model.modules():
-            if isinstance(module, nn.Linear):
-                last_linear = module
-        return last_linear
+        last_layer = self.backend.get_layers(model)[-1]
+        if not self.backend.is_dense_linear_layer(last_layer) or self.backend.layer_has_bias(last_layer):
+            raise ValueError('The last layer of the model must be a Dense/Linear layer with no bias.')
 
     @staticmethod
-    def _normalize_tensorflow_binary_targets(y_batch: Any, logits: Any, tf: Any) -> Any:
-        """Normalize binary TensorFlow targets to match logits shape."""
-        if (
-            logits.shape.rank == 2
-            and logits.shape[-1] == 1
-            and y_batch.shape.rank == 1
-        ):
-            return tf.expand_dims(y_batch, axis=-1)
-        return y_batch
+    def _normalize_binary_targets(y_batch: Any, logits: Any) -> Any:
+        """Normalize binary classification targets to match logits shape."""
+        return get_backend_for_tensor(logits).normalize_binary_targets(y_batch, logits)
 
     @staticmethod
-    def _ensure_per_sample_loss_tensorflow(loss: Any, tf: Any) -> Any:
-        """Ensure TensorFlow losses are per-sample vectors."""
-        loss_rank = loss.shape.rank
+    def _ensure_per_sample_loss(loss: Any) -> Any:
+        """Ensure framework losses are represented as per-sample vectors."""
+        return get_backend_for_tensor(loss).ensure_per_sample_loss(loss)
 
-        if loss_rank == 0:
-            raise ValueError("Loss function must return per-sample losses (reduction='none')")
-
-        if loss_rank is None:
-            with tf.control_dependencies([
-                tf.debugging.assert_rank_at_least(
-                    loss,
-                    1,
-                    message="Loss function must return per-sample losses (reduction='none')",
-                )
-            ]):
-                loss = tf.identity(loss)
-            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
-            return tf.reduce_sum(loss, axis=1)
-
-        if loss_rank > 1:
-            loss = tf.reshape(loss, (tf.shape(loss)[0], -1))
-            loss = tf.reduce_sum(loss, axis=1)
-
-        return loss
+    @staticmethod
+    def _split_batch_inputs_targets(samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+        """Split a batch into inputs and targets."""
+        return split_batch_inputs_targets(samples)
 
     @abstractmethod
     def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
@@ -198,16 +136,8 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         y_t
             The labels.
         """
-        # Handle both TensorFlow (where samples[:-1] gives inputs) and PyTorch (where samples[0] gives inputs)
-        if len(samples) == 2:
-            inputs = samples[0]
-        else:
-            inputs = samples[:-1]
-            if isinstance(inputs, tuple) and len(inputs) == 1:
-                inputs = inputs[0]
-
+        inputs, y_t = self._split_batch_inputs_targets(samples)
         x_batch = self.backend.forward(self.feature_extractor, inputs)
-        y_t = samples[-1]
 
         return x_batch, y_t
 
@@ -231,16 +161,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             This allows for optimizations to be put in place but is not really an influence vector
             of any kind.
         """
-        # Handle both TensorFlow and PyTorch input formats
-        if len(train_samples) == 2:
-            inputs = train_samples[0]
-        else:
-            inputs = train_samples[:-1]
-            if isinstance(inputs, tuple) and len(inputs) == 1:
-                inputs = inputs[0]
-
+        inputs, targets = self._split_batch_inputs_targets(train_samples)
         x_batch = self.backend.forward(self.feature_extractor, inputs)
-        alpha = self._compute_alpha(x_batch, train_samples[-1])
+        alpha = self._compute_alpha(x_batch, targets)
 
         return alpha, x_batch
 
@@ -338,16 +261,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         influence_values
             A tensor with the self-influence of the training samples.
         """
-        # Handle both TensorFlow and PyTorch input formats
-        if len(train_samples) == 2:
-            inputs = train_samples[0]
-        else:
-            inputs = train_samples[:-1]
-            if isinstance(inputs, tuple) and len(inputs) == 1:
-                inputs = inputs[0]
-
+        inputs, targets = self._split_batch_inputs_targets(train_samples)
         x_batch = self.backend.forward(self.feature_extractor, inputs)
-        alpha = self._compute_alpha(x_batch, train_samples[-1])
+        alpha = self._compute_alpha(x_batch, targets)
 
         # If the problem is binary classification, take all the alpha values
         # If multiclass, take only those that correspond to the prediction
