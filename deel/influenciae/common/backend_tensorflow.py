@@ -5,6 +5,7 @@
 """
 TensorFlow backend implementation.
 """
+# pylint: disable=too-many-lines
 import os
 from typing import Any, List, Tuple, Callable, Optional, Sequence, Iterable, cast
 from xml.dom import NotFoundErr

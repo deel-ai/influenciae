@@ -26,11 +26,13 @@ class Tensor(Protocol):
 
     @property
     def shape(self) -> Any:
-        ...
+        """Return the tensor shape metadata."""
+        raise NotImplementedError
 
     @property
     def dtype(self) -> Any:
-        ...
+        """Return the tensor dtype metadata."""
+        raise NotImplementedError
 
     def __getitem__(self, key: Any) -> "Tensor":
         ...
@@ -75,10 +77,12 @@ class Tensor(Protocol):
         ...
 
     def item(self) -> Union[int, float, bool]:
-        ...
+        """Convert a scalar tensor to its Python value."""
+        raise NotImplementedError
 
     def numpy(self) -> "np.ndarray":
-        ...
+        """Return a NumPy view or copy of the tensor."""
+        raise NotImplementedError
 
 
 class Model(Protocol):
@@ -106,31 +110,31 @@ class FluentDatasetLike(DatasetLike, Protocol):
 
     def map(self, map_fn: Callable[[Any], Any]) -> "FluentDatasetLike":
         """Return a dataset transformed by ``map_fn``."""
-        ...
+        raise NotImplementedError
 
     def cache(self) -> "FluentDatasetLike":
         """Return a cached/materialized dataset wrapper."""
-        ...
+        raise NotImplementedError
 
     def zip(self, other: DatasetLike) -> "FluentDatasetLike":
         """Return a dataset zipped with ``other``."""
-        ...
+        raise NotImplementedError
 
     def batch(self, batch_size: int) -> "FluentDatasetLike":
         """Return a dataset grouped into batches of ``batch_size``."""
-        ...
+        raise NotImplementedError
 
     def unbatch(self) -> "FluentDatasetLike":
         """Return a dataset where batched elements are flattened."""
-        ...
+        raise NotImplementedError
 
     def shuffle(self, buffer_size: int) -> "FluentDatasetLike":
         """Return a dataset shuffled with a finite ``buffer_size``."""
-        ...
+        raise NotImplementedError
 
     def take(self, count: int) -> "FluentDatasetLike":
         """Return a dataset restricted to the first ``count`` elements."""
-        ...
+        raise NotImplementedError
 
 
 __all__ = [

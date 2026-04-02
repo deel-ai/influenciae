@@ -139,10 +139,9 @@ class MislabelingDetectorEvaluator:
         if backend is not None:
             if isinstance(backend, BaseBackend):
                 return backend
-            elif isinstance(backend, Framework):
+            if isinstance(backend, Framework):
                 return get_backend(backend)
-            else:
-                raise ValueError(f"Unsupported backend argument type: {type(backend)}")
+            raise ValueError(f"Unsupported backend argument type: {type(backend)}")
 
         def _extract_first_tensor(obj: Any) -> Optional[Tensor]:
             """Extract first tensor-like leaf from nested dataset elements."""

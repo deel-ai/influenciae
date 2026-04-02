@@ -3,15 +3,25 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """PyTorch-specific helpers for RPS model surgery."""
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
 import torch
-import torch.nn as nn
+from torch import nn
 
-from ..common import BaseBackend
+from ..common.backend import BaseBackend
 from ..types import DatasetLike, Model, Tensor
 from .backtracking_line_search import BacktrackingLineSearchPyTorch
-from .model_surgery import split_batch_inputs_targets
+
+
+def _split_batch_inputs_targets(samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+    """Split a batched sample tuple into inputs and targets."""
+    if len(samples) == 2:
+        return samples[0], samples[1]
+
+    inputs = samples[:-1]
+    if isinstance(inputs, tuple) and len(inputs) == 1:
+        inputs = inputs[0]
+    return inputs, samples[-1]
 
 
 def _move_to_reference_device(obj: Any, reference_parameter: torch.Tensor) -> Any:
@@ -47,7 +57,7 @@ def train_surrogate_linear_model_pytorch(
     surrogate_model.train()
     for _ in range(epochs):
         for batch in train_set:
-            inputs, _ = split_batch_inputs_targets(batch)
+            inputs, _ = _split_batch_inputs_targets(batch)
             inputs = _move_to_reference_device(inputs, weight)
 
             with torch.no_grad():

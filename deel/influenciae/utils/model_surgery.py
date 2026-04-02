@@ -10,7 +10,7 @@ framework-specific training loops to private utility modules.
 """
 from typing import Any, Callable, Optional, Tuple
 
-from ..common import BaseBackend, Framework
+from ..common.backend import BaseBackend, Framework
 from ..types import DatasetLike, Model, Tensor
 
 
@@ -69,7 +69,7 @@ def create_surrogate_linear_model(
     )
 
 
-def train_surrogate_linear_model(
+def train_surrogate_linear_model(  # pylint: disable=import-outside-toplevel
     backend: BaseBackend,
     surrogate_model: Model,
     feature_extractor: Model,
@@ -147,7 +147,7 @@ def _prepare_feature_dataset(
     return backend.create_dataset_from_tensor_slices((features, targets), batch_size=batch_size)
 
 
-def perturb_head_single_sgd_step(
+def perturb_head_single_sgd_step(  # pylint: disable=import-outside-toplevel
     backend: BaseBackend,
     original_head: Model,
     feature_extractor: Model,
@@ -203,7 +203,7 @@ def _scale_linear_jacobian(
     batch_scale: Optional[Any] = None,
 ) -> Tensor:
     """Scale a linear-layer Jacobian by the feature maps in backend-native layout."""
-    input_axis, output_axis = backend.get_linear_weight_axes()
+    _, output_axis = backend.get_linear_weight_axes()
     jacobian_dtype = backend.get_dtype(jacobian)
     feature_maps = backend.cast(feature_maps, jacobian_dtype)
     eps = backend.cast(epsilon, jacobian_dtype)
@@ -264,7 +264,7 @@ def compute_l2_alpha(
     return _reduce_linear_jacobian(backend, jacobian)
 
 
-def compute_lje_alpha(
+def compute_lje_alpha(  # pylint: disable=import-outside-toplevel
     backend: BaseBackend,
     perturbed_head: Model,
     ihvp_calculator: Any,
