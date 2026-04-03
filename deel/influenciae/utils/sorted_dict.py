@@ -7,7 +7,7 @@ Module containing the implementation of a SortedDictionary, useful for computing
 top-k most influential samples in a large dataset.
 """
 from enum import Enum
-from typing import Tuple, Any, Optional, Union
+from typing import Tuple, Any, Optional, Union, cast
 
 import numpy as np
 
@@ -79,8 +79,8 @@ class BatchSort:
         self._best_values = self._initialize_best_values(k_shape)
 
         if device is not None and self._backend.framework == Framework.PYTORCH:
-            self._best_batch = self._best_batch.to(device)
-            self._best_values = self._best_values.to(device)
+            self._best_batch = cast(Any, self._best_batch).to(device)
+            self._best_values = cast(Any, self._best_values).to(device)
 
     @staticmethod
     def _default_backend() -> BaseBackend:
@@ -149,8 +149,8 @@ class BatchSort:
             # Move internal tensors to the device of the incoming batch if needed
             if not self._initialized and hasattr(batch_values, 'device'):
                 target_device = batch_values.device
-                self._best_batch = self._best_batch.to(target_device)
-                self._best_values = self._best_values.to(target_device)
+                self._best_batch = cast(Any, self._best_batch).to(target_device)
+                self._best_values = cast(Any, self._best_values).to(target_device)
                 self._device = target_device
                 self._initialized = True
 

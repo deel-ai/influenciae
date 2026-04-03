@@ -275,6 +275,7 @@ class ExactIHVP(InverseHessianVectorProduct):
         else:
             grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
 
+        assert self.hessian is not None
         hvp = self.backend.matmul(self.hessian, self.backend.transpose(grads))
         return hvp
 
@@ -437,6 +438,7 @@ class ForwardOverBackwardHVP:
 
         dataset = self.train_dataset
         if self.stochastic_hvp:
+            assert self._stochastic_dataset is not None
             dataset = self._stochastic_dataset
             dataset = self.backend.take_dataset(dataset, self.hvp_steps_per_iter)
 
@@ -542,6 +544,7 @@ class IterativeIHVP(InverseHessianVectorProduct):
         else:
             self.feature_extractor = feature_extractor
 
+        assert self.train_set is not None
         self.train_set = self._compute_feature_map_dataset(self.train_set)  # extract the train set's features
 
         # Create model that predicts based on the extracted feature maps

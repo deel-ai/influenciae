@@ -203,4 +203,5 @@ class BaseGroupInfluenceCalculator:
                 reduced_ihvp = batch_sum
             else:
                 reduced_ihvp = reduced_ihvp + batch_sum
+        assert reduced_ihvp is not None, "ihvp_ds must not be empty"
         return reduced_ihvp

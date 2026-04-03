@@ -14,7 +14,7 @@ the computation can be written as a matrix-vector product with a matrix that can
 """
 from abc import abstractmethod
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 from warnings import warn
 
 from .backend import BaseBackend
@@ -251,7 +251,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     """
 
     @abstractmethod
-    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Any:
         """
         Preprocess a sample to evaluate
 
@@ -266,7 +266,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         raise NotImplementedError()
 
     @abstractmethod
-    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Any:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -662,9 +662,9 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     @abstractmethod
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: Tensor,
-            influence_vector: Tensor
-    ) -> Tensor:
+            preproc_test_sample: Any,
+            influence_vector: Any
+    ) -> Any:
         """
         Estimates the influence score of leaving out the influence vector corresponding to a given training
         data-point on a test sample that has already been pre-processed.

@@ -76,6 +76,12 @@ class Tensor(Protocol):
     def __ge__(self, other: Any) -> "Tensor":
         ...
 
+    def __eq__(self, other: Any) -> "Tensor":  # type: ignore[override]
+        ...
+
+    def __ne__(self, other: Any) -> "Tensor":  # type: ignore[override]
+        ...
+
     def item(self) -> Union[int, float, bool]:
         """Convert a scalar tensor to its Python value."""
         raise NotImplementedError

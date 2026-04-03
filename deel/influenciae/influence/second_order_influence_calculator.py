@@ -224,6 +224,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             else:
                 result = result + scaled_batch
 
+        assert result is not None, "interactions dataset must not be empty"
         return result
 
     def estimate_influence_values_group(
