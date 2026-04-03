@@ -39,8 +39,6 @@ def train_surrogate_linear_model_tensorflow(
     tf_feature_extractor = cast(tf.keras.Model, feature_extractor)
     tf_original_head = cast(tf.keras.Model, original_head)
     mse_loss = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
-    if BacktrackingLineSearch is None:
-        raise ImportError("TensorFlow support is required to use the backtracking line-search optimizer")
     optimizer = BacktrackingLineSearch(
         batches_per_epoch=batches_per_epoch,
         scaling_factor=scaling_factor,
