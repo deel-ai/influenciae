@@ -176,4 +176,4 @@ def compute_lje_second_term_pytorch(
         second_term_batches.append(ihvp_result.squeeze())
 
     second_term = backend.stack(second_term_batches, axis=0)
-    return backend.reshape(second_term, backend.tensor_shape(torch_scaled_jacobian.shape))
+    return backend.reshape(second_term, backend.tensor_shape(torch_scaled_jacobian))
