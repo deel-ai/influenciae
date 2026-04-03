@@ -8,9 +8,12 @@ Module implementing plotting functions for image-type data.
 from math import ceil
 from typing import Optional, Union
 
-import tensorflow as tf
 import numpy as np
 from matplotlib import pyplot as plt
+
+from .._optional_imports import import_optional_module
+
+tf = import_optional_module("tensorflow", extra="tensorflow")
 
 
 def _normalize(image: Union[tf.Tensor, np.ndarray]) -> np.ndarray:
