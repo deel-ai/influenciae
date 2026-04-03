@@ -5,8 +5,9 @@ These helpers centralize optional dependency loading and keep import statements
 at module top-level to satisfy linting, while preserving backend-agnostic lazy
 behavior.
 """
-from functools import lru_cache
 import importlib
+import importlib.util
+from functools import lru_cache
 from typing import Any, Optional
 
 
@@ -14,6 +15,11 @@ from typing import Any, Optional
 def _import_module_cached(module_name: str, package: Optional[str] = None) -> Any:
     """Import and cache a module by name."""
     return importlib.import_module(module_name, package=package)
+
+
+def is_module_available(module_name: str) -> bool:
+    """Return whether a module can be resolved without importing it."""
+    return importlib.util.find_spec(module_name) is not None
 
 
 def import_optional_module(
