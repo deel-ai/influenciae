@@ -9,9 +9,17 @@ This code was based on an implementation by Louis Bethune (ANITI) -- https://git
 Supports both TensorFlow and PyTorch backends.
 """
 from dataclasses import dataclass
-from typing import Callable, Optional
+from functools import lru_cache
+from typing import TYPE_CHECKING, Callable, Optional
 
 from .._optional_imports import import_optional_attr, import_optional_module
+
+if TYPE_CHECKING:
+    import tensorflow as tf
+    from tensorflow.keras import Model
+    from tensorflow.keras.optimizers import Optimizer as BacktrackingLineSearch
+
+    TensorFlowBacktrackingLineSearch = BacktrackingLineSearch
 
 
 @dataclass()
@@ -30,23 +38,13 @@ class BTLSParameters:
 # TensorFlow Implementation
 # =============================================================================
 
-# Conditionally define TensorFlow classes only when TensorFlow is available
-try:
-    import tensorflow as tf
-    from tensorflow.keras import Model  # pylint: disable=E0611
-    from tensorflow.keras.optimizers import Optimizer, SGD  # pylint: disable=E0611
-    _HAS_TENSORFLOW = True
-except (ImportError, ModuleNotFoundError):
-    _HAS_TENSORFLOW = False
-    # Create placeholder to avoid NameError
-    Optimizer = object
-    Model = None
-    SGD = None
-    tf = None
+@lru_cache(maxsize=1)
+def _build_tensorflow_backtracking_line_search() -> type:  # pylint: disable=too-many-statements
+    """Build the TensorFlow optimizer class only when first accessed."""
+    tf = import_optional_module("tensorflow", extra="tensorflow")
+    Optimizer = import_optional_attr("tensorflow.keras.optimizers", "Optimizer", extra="tensorflow")
+    SGD = import_optional_attr("tensorflow.keras.optimizers", "SGD", extra="tensorflow")
 
-_BACKTRACKING_LINE_SEARCH_TF: Optional[type] = None
-
-if _HAS_TENSORFLOW:
     class TensorFlowBacktrackingLineSearch(Optimizer):
         """
         Implementation of a batched Backtracking Line Search optimizer with SGD steps.
@@ -218,7 +216,13 @@ if _HAS_TENSORFLOW:
             """
             return tf.less_equal(target, source - eta * norm)
 
-        def attempt_step(self, model: Model, curr_weights: tf.Tensor, gradients: tf.Tensor, closure: Callable):
+        def attempt_step(
+                self,
+                model: "Model",
+                curr_weights: "tf.Tensor",
+                gradients: "tf.Tensor",
+                closure: Callable,
+        ):
             """
             Performs a step of SGD using the updated learning rate in the direction of the gradient and returns the new
             value of the loss function with the new weights.
@@ -275,10 +279,18 @@ if _HAS_TENSORFLOW:
             base_config["scaling_factor"] = self.scaling_factor
             return base_config
 
-    _BACKTRACKING_LINE_SEARCH_TF = TensorFlowBacktrackingLineSearch
+    return TensorFlowBacktrackingLineSearch
 
 
-BacktrackingLineSearch = _BACKTRACKING_LINE_SEARCH_TF
+def __getattr__(name):
+    """Lazily expose TensorFlow-specific backtracking helpers."""
+    if name in {"BacktrackingLineSearch", "TensorFlowBacktrackingLineSearch"}:
+        cls = _build_tensorflow_backtracking_line_search()
+        globals()["BacktrackingLineSearch"] = cls
+        globals()["TensorFlowBacktrackingLineSearch"] = cls
+        return cls
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # =============================================================================
