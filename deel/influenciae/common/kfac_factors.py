@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..types import DatasetLike, LossFunction, Tensor
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel
 
@@ -206,8 +207,8 @@ def _load_tensor_from_checkpoint(
     layer_idx: int,
     tensor_name: str,
     tensor_metadata: Dict[str, Any],
-    reference_tensor: Optional[Any],
-) -> Any:
+    reference_tensor: Optional[Tensor],
+) -> Tensor:
     """Load a tensor from checkpoint metadata and move it to the target device."""
     file_name = tensor_metadata.get("file")
     if not isinstance(file_name, str):
@@ -506,7 +507,7 @@ class KroneckerFactors:
     def __init__(
         self,
         model: BaseInfluenceModel,
-        train_dataset: Any,
+        train_dataset: DatasetLike,
         backend: BaseBackend,
         layer_map: LayerParameterMap,
         fisher_type: str = "empirical",
@@ -540,8 +541,8 @@ class KroneckerFactors:
         self.keep_accumulator_offload_artifacts = keep_accumulator_offload_artifacts
         self._true_fisher_warning_emitted = False
         self._factor_checkpoint: Optional[Dict[str, Any]] = None
-        self.A: Dict[int, Any] = {}  # layer_idx -> A factor
-        self.G: Dict[int, Any] = {}  # layer_idx -> G factor
+        self.A: Dict[int, Tensor] = {}  # layer_idx -> A factor
+        self.G: Dict[int, Tensor] = {}  # layer_idx -> G factor
 
         self._compute_factors(train_dataset)
 
@@ -669,7 +670,7 @@ class KroneckerFactors:
 
         return instance
 
-    def _warn_true_fisher_fallback(self, loss_function: Callable) -> None:
+    def _warn_true_fisher_fallback(self, loss_function: LossFunction) -> None:
         """Warn once when true Fisher sampling is not supported for a loss."""
         if self._true_fisher_warning_emitted:
             return
@@ -681,7 +682,7 @@ class KroneckerFactors:
         )
         self._true_fisher_warning_emitted = True
 
-    def _symmetrize_matrix(self, matrix: Any) -> Any:
+    def _symmetrize_matrix(self, matrix: Tensor) -> Tensor:
         """Return the symmetric part of a square matrix."""
         return 0.5 * (matrix + self.backend.transpose(matrix))
 
@@ -691,7 +692,7 @@ class KroneckerFactors:
             return [self.layer_map.layers_info]
         return _chunk_layer_infos(self.layer_map.layers_info, self.module_partition_size)
 
-    def _get_device_reference_tensor(self) -> Optional[Any]:
+    def _get_device_reference_tensor(self) -> Optional[Tensor]:
         """Return a tensor living on the target compute device."""
         model_weights = getattr(self.model, "weights", None)
         if model_weights:
@@ -710,7 +711,7 @@ class KroneckerFactors:
         self,
         partition_dir: str,
         partition_idx: int,
-        tensors: Dict[str, Dict[int, Any]],
+        tensors: Dict[str, Dict[int, Tensor]],
         n_rows_per_layer: Dict[int, int],
     ) -> str:
         """Serialize one accumulator partition to a compressed ``.npz`` file."""
@@ -785,8 +786,8 @@ class KroneckerFactors:
 
     def _checkpoint_factor_accumulators(
         self,
-        a_sums: Dict[int, Any],
-        g_sums: Dict[int, Any],
+        a_sums: Dict[int, Tensor],
+        g_sums: Dict[int, Tensor],
         n_rows_per_layer: Dict[int, int],
     ) -> None:
         """Store in-memory factor checkpoint state at data-partition boundaries."""
@@ -801,14 +802,14 @@ class KroneckerFactors:
     # Factor computation
     # ------------------------------------------------------------------
 
-    def _compute_factors(self, train_dataset: Any) -> None:
+    def _compute_factors(self, train_dataset: DatasetLike) -> None:
         """Estimate A and G from *train_dataset* using hooks."""
         for layer_partition in self._iter_layer_partitions():
             self._compute_factors_for_layer_partition(train_dataset, layer_partition)
 
     def _compute_factors_for_layer_partition(
         self,
-        train_dataset: Any,
+        train_dataset: DatasetLike,
         layer_infos: List[LayerInfo],
     ) -> None:
         """Estimate A and G for a specific partition of layers."""
@@ -824,14 +825,14 @@ class KroneckerFactors:
                 return int(value.numpy())
 
         # Storage for running sums
-        a_sums: Dict[int, Any] = {}
-        g_sums: Dict[int, Any] = {}
+        a_sums: Dict[int, Tensor] = {}
+        g_sums: Dict[int, Tensor] = {}
         n_rows_per_layer: Dict[int, int] = {}
 
         # --- Register hooks -----------------------------------------------
         handles = []
-        activations: Dict[int, Any] = {}
-        grad_outputs: Dict[int, Any] = {}
+        activations: Dict[int, Tensor] = {}
+        grad_outputs: Dict[int, Tensor] = {}
 
         for info in layer_infos:
             idx = info.layer_idx
@@ -1004,11 +1005,11 @@ class KroneckerFactors:
     def _forward_backward(
         self,
         model: BaseInfluenceModel,
-        model_inp: Any,
-        y_true: Any,
-        sample_weight: Optional[Any],
-        activations: Dict[int, Any],
-        grad_outputs: Dict[int, Any],
+        model_inp: Tensor,
+        y_true: Tensor,
+        sample_weight: Optional[Tensor],
+        activations: Dict[int, Tensor],
+        grad_outputs: Dict[int, Tensor],
         layer_infos: Optional[List[LayerInfo]] = None,
     ) -> None:
         """Run forward + backward to populate hook-captured activations and gradients.
@@ -1045,7 +1046,7 @@ class KroneckerFactors:
         self,
         predictions: Any,
         y_true: Any,
-        loss_function: Callable,
+        loss_function: LossFunction,
     ) -> Any:
         """Sample labels from the model predictive distribution (PyTorch)."""
         import torch
@@ -1080,7 +1081,7 @@ class KroneckerFactors:
         self,
         predictions: Any,
         y_true: Any,
-        loss_function: Callable,
+        loss_function: LossFunction,
     ) -> Any:
         """Sample labels from the model predictive distribution (TensorFlow)."""
         import tensorflow as tf
@@ -1249,8 +1250,8 @@ class KroneckerFactors:
                     info.layer.call = original_calls[idx]
 
     def _prepare_activation_gradient(
-        self, info: LayerInfo, activation: Any, grad_output: Any
-    ) -> Tuple[Any, Any]:
+        self, info: LayerInfo, activation: Tensor, grad_output: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         """Reshape activation and gradient for factor accumulation.
 
         For Linear/Dense layers:
@@ -1291,8 +1292,8 @@ class KroneckerFactors:
         return a, g
 
     def _prepare_conv2d(
-        self, info: LayerInfo, activation: Any, grad_output: Any
-    ) -> Tuple[Any, Any]:
+        self, info: LayerInfo, activation: Tensor, grad_output: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         """Unfold Conv2d activations (im2col) and reshape gradients."""
         backend = self.backend
 
@@ -1422,7 +1423,7 @@ class EKFACFactors(KroneckerFactors):
     def __init__(
         self,
         model: BaseInfluenceModel,
-        train_dataset: Any,
+        train_dataset: DatasetLike,
         backend: BaseBackend,
         layer_map: LayerParameterMap,
         n_ekfac_samples: Optional[int] = None,
@@ -1450,10 +1451,10 @@ class EKFACFactors(KroneckerFactors):
         )
 
         # Eigendecompose A and G
-        self.Q_A: Dict[int, Any] = {}
-        self.Lambda_A: Dict[int, Any] = {}
-        self.Q_G: Dict[int, Any] = {}
-        self.Lambda_G: Dict[int, Any] = {}
+        self.Q_A: Dict[int, Tensor] = {}
+        self.Lambda_A: Dict[int, Tensor] = {}
+        self.Q_G: Dict[int, Tensor] = {}
+        self.Lambda_G: Dict[int, Tensor] = {}
 
         for info in layer_map.layers_info:
             idx = info.layer_idx
@@ -1480,7 +1481,7 @@ class EKFACFactors(KroneckerFactors):
                 self.Lambda_G[idx] = backend.cast(self.Lambda_G[idx], g_dtype)
 
         # Corrected eigenvalues
-        self.Lambda_corrected: Dict[int, Any] = {}
+        self.Lambda_corrected: Dict[int, Tensor] = {}
         self._corrected_checkpoint: Optional[Dict[str, Any]] = None
         self.n_ekfac_samples = n_ekfac_samples
         self._estimate_corrected_eigenvalues(train_dataset, n_ekfac_samples)
@@ -1666,7 +1667,7 @@ class EKFACFactors(KroneckerFactors):
         return instance
 
     def _estimate_corrected_eigenvalues(
-        self, train_dataset: Any, n_ekfac_samples: Optional[int]
+        self, train_dataset: DatasetLike, n_ekfac_samples: Optional[int]
     ) -> None:
         """Estimate corrected eigenvalues, optionally using module partitions."""
         for layer_partition in self._iter_layer_partitions():
@@ -1678,7 +1679,7 @@ class EKFACFactors(KroneckerFactors):
 
     def _checkpoint_corrected_accumulators(
         self,
-        corrected_sums: Dict[int, Any],
+        corrected_sums: Dict[int, Tensor],
         n_rows_per_layer: Dict[int, int],
     ) -> None:
         """Store in-memory EK-FAC checkpoint state at data-partition boundaries."""
@@ -1690,7 +1691,7 @@ class EKFACFactors(KroneckerFactors):
 
     def _estimate_corrected_eigenvalues_for_layer_partition(
         self,
-        train_dataset: Any,
+        train_dataset: DatasetLike,
         n_ekfac_samples: Optional[int],
         layer_infos: List[LayerInfo],
     ) -> None:
@@ -1716,14 +1717,14 @@ class EKFACFactors(KroneckerFactors):
                 return int(value.numpy())
 
         # Storage for running sums: layer_idx -> (n_out, n_in_eff) accumulator
-        corrected_sums: Dict[int, Any] = {}
+        corrected_sums: Dict[int, Tensor] = {}
         n_rows_per_layer: Dict[int, int] = {}
         n_samples = 0
 
         # Register hooks (same as factor computation)
         handles = []
-        activations: Dict[int, Any] = {}
-        grad_outputs_captured: Dict[int, Any] = {}
+        activations: Dict[int, Tensor] = {}
+        grad_outputs_captured: Dict[int, Tensor] = {}
 
         for info in layer_infos:
             idx = info.layer_idx
@@ -1882,9 +1883,9 @@ class EKFACFactors(KroneckerFactors):
                     if n_rows <= 0:
                         continue
 
-                    corrected = merged_corrected[idx] / float(n_rows)
+                    corrected_array = merged_corrected[idx] / float(n_rows)
                     corrected_tensor = backend.to_device(
-                        backend.convert_to_tensor(corrected),
+                        backend.convert_to_tensor(corrected_array),
                         reference=device_reference,
                     )
                     self.Lambda_corrected[idx] = backend.reshape(corrected_tensor, (-1,))
@@ -1900,7 +1901,7 @@ class EKFACFactors(KroneckerFactors):
                         continue
 
                     # (n_out, n_in_eff) -> flatten to (n_out * n_in_eff,)
-                    corrected = corrected_sums[idx] / float(n_rows)
-                    self.Lambda_corrected[idx] = backend.reshape(corrected, (-1,))
+                    corrected_factor = corrected_sums[idx] / float(n_rows)
+                    self.Lambda_corrected[idx] = backend.reshape(corrected_factor, (-1,))
         finally:
             self._cleanup_accumulator_partition_dir(partition_dir)
