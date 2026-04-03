@@ -472,7 +472,6 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     ) -> torch.Tensor:
         if batch_dims == 0:
             # Simple gather of whole slices along axis
-            # Expect indices to be 1D here (matches your current use cases)
             if indices.dim() == 0:
                 indices = indices.unsqueeze(0)
             # Flatten indices if needed
