@@ -150,3 +150,12 @@ module = [
     "torch.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "deel.influenciae.common.backend_pytorch",
+    "deel.influenciae.common.backend_tensorflow",
+    "influenciae.common.backend_pytorch",
+    "influenciae.common.backend_tensorflow",
+]
+disable_error_code = ["override"]
