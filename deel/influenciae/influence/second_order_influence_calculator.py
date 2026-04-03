@@ -12,15 +12,14 @@ the accuracy of the influence estimations for big groups of data.
 Disclaimer: this method can be very computationally expensive, especially when calculating
 the influence for a large number of weights.
 """
-import tensorflow as tf
+from typing import Optional, Union
 
 from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP
 from ..common import InfluenceModel
 from ..common import InverseHessianVectorProduct, IHVPCalculator
 
-from ..utils import assert_batched_dataset, dataset_size
-from ..types import Optional, Union
+from ..types import DatasetLike, Tensor
 
 
 class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
@@ -43,9 +42,9 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     Parameters
     ----------
     model
-        The TF2.X model implementing the InfluenceModel interface.
+        The model implementing the InfluenceModel interface (TensorFlow or PyTorch).
     dataset
-        A batched TF dataset containing the training dataset over which we will estimate the
+        A batched dataset containing the training dataset over which we will estimate the
         inverse-hessian-vector product.
     ihvp_calculator
         Either a string containing the IHVP method ('exact' or 'cgd'), an IHVPCalculator
@@ -59,7 +58,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
     def __init__(
             self,
             model: InfluenceModel,
-            dataset: tf.data.Dataset,
+            dataset: DatasetLike,
             ihvp_calculator: Union[str, InverseHessianVectorProduct, IHVPCalculator] = 'exact',
             n_samples_for_hessian: Optional[int] = None,
             shuffle_buffer_size: Optional[int] = 10000
@@ -73,12 +72,12 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             shuffle_buffer_size
         )
 
-        self.train_size = dataset_size(dataset)
+        self.train_size = self._backend.get_dataset_size(dataset)
 
     def compute_influence_vector_group(
             self,
-            group: tf.data.Dataset
-    ) -> tf.Tensor:
+            group: DatasetLike
+    ) -> Tensor:
         """
         Computes the influence function vector -- an estimation of the weights difference when
         removing the points -- of the whole group of points.
@@ -86,7 +85,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         Parameters
         ----------
         group
-            A batched TF dataset containing the group of points of which we wish to compute the
+            A batched dataset containing the group of points of which we wish to compute the
             influence of removal.
 
         Returns
@@ -94,22 +93,59 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         influence_group
             A tensor containing one vector for the whole group.
         """
-        assert_batched_dataset(group)
-        fraction = tf.cast(dataset_size(group), dtype=tf.float32) / tf.cast(self.train_size, dtype=tf.float32)
+        self._backend.assert_batched_dataset(group)
 
-        coeff_additive_term = (1. - 2 * fraction) / \
-                              (tf.square(1. - fraction) * tf.cast(self.train_size, dtype=tf.float32))
-        coeff_pairwise_term = 1. / tf.square((1. - fraction) * tf.cast(self.train_size, dtype=tf.float32))
+        group_size = self._backend.get_dataset_size(group)
+        fraction = self._backend.cast(
+            group_size,
+            self._backend.float32_dtype()
+        ) / self._backend.cast(
+            self.train_size,
+            self._backend.float32_dtype()
+        )
 
-        additive = coeff_additive_term * self._compute_additive_term(group)
-        pairwise = coeff_pairwise_term * self._compute_pairwise_interactions(group)
+        train_size_float = self._backend.cast(self.train_size, self._backend.float32_dtype())
+        one_minus_fraction = 1.0 - fraction
+        one_minus_fraction_sq = one_minus_fraction * one_minus_fraction
+
+        coeff_additive_term = (1.0 - 2.0 * fraction) / (one_minus_fraction_sq * train_size_float)
+        coeff_pairwise_term = 1.0 / (one_minus_fraction_sq * train_size_float * train_size_float)
+
+        additive = self._compute_additive_term(group)
+        additive = self._scalar_multiply(additive, coeff_additive_term)
+
+        pairwise = self._compute_pairwise_interactions(group)
+        pairwise = self._scalar_multiply(pairwise, coeff_pairwise_term)
 
         influence_group = additive + pairwise
-        influence_group = tf.transpose(influence_group)  # to get the right shape for the output
+        influence_group = self._backend.transpose(influence_group)  # to get the right shape for the output
 
         return influence_group
 
-    def _compute_additive_term(self, dataset: tf.data.Dataset):
+    def _scalar_multiply(self, tensor: Tensor, scalar: Union[Tensor, float, int]) -> Tensor:
+        """
+        Multiply a tensor by a scalar.
+
+        Parameters
+        ----------
+        tensor
+            The tensor to multiply.
+        scalar
+            The scalar value.
+
+        Returns
+        -------
+        result
+            The multiplied tensor.
+        """
+        # Convert scalar to tensor if needed and multiply
+        scalar_tensor = self._backend.cast(
+            self._backend.constant(scalar) if not hasattr(scalar, 'dtype') else scalar,
+            self._backend.get_dtype(tensor)
+        )
+        return self._backend.multiply(tensor, scalar_tensor)
+
+    def _compute_additive_term(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the additive term as per Basu et al.'s article. It accounts for the influence of each of the
         points that we wish to remove, without taking into account the interactions between each other
@@ -117,7 +153,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         Parameters
         ----------
         dataset
-            A batched TF dataset containing the points we wish to remove
+            A batched dataset containing the points we wish to remove
 
         Returns
         -------
@@ -125,10 +161,9 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing the addition of the influence of the points in the group
         """
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
-        reduced_ihvp = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1, keepdims=True))
-        return reduced_ihvp.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
+        return self._reduce_ihvp_batches(ihvp_ds, keepdims=True)
 
-    def _compute_pairwise_interactions(self, dataset: tf.data.Dataset):
+    def _compute_pairwise_interactions(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the term corresponding to the pairwise interactions as per Basu et al.'s article. It will
         contain all the interactions between each of the points with each of the other points.
@@ -140,7 +175,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         Parameters
         ----------
         dataset
-            A batched TF dataset containing the points we wish to remove
+            A batched dataset containing the points we wish to remove
 
         Returns
         -------
@@ -148,40 +183,55 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             A tensor containing the sum of all the interactions of each point we are removing with each other point
             of the group
         """
+        local_ihvp: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP]
         if isinstance(self.ihvp_calculator, ExactIHVP):
             local_ihvp = ExactIHVP(self.model, dataset)
         elif isinstance(self.ihvp_calculator, ConjugateGradientDescentIHVP):
             local_ihvp = ConjugateGradientDescentIHVP(self.model, self.ihvp_calculator.extractor_layer,
                                                       dataset, self.ihvp_calculator.n_opt_iters,
                                                       self.ihvp_calculator.feature_extractor)
-        else:
+        elif isinstance(self.ihvp_calculator, LissaIHVP):
             local_ihvp = LissaIHVP(self.model, self.ihvp_calculator.extractor_layer,
                                    dataset, self.ihvp_calculator.n_opt_iters,
                                    self.ihvp_calculator.feature_extractor)
+        else:
+            raise TypeError("Unsupported IHVP calculator type for second-order interactions.")
 
         ihvp_ds = self.ihvp_calculator.compute_ihvp(dataset)
-        ihvp_ds = ihvp_ds.map(lambda x: tf.reduce_sum(x, axis=1))
+        reduced_ihvp = self._reduce_ihvp_batches(ihvp_ds, keepdims=False)
 
-        reduced_ihvp = ihvp_ds.reduce(tf.constant(0, dtype=ihvp_ds.element_spec.dtype), lambda x, y: x + y)
-        reduced_ihvp_ds = tf.data.Dataset.from_tensors(reduced_ihvp).batch(dataset._batch_size)  # pylint: disable=W0212
+        # Create a dataset from the reduced IHVP
+        batch_size = self._backend.get_dataset_batch_size(dataset)
+        reduced_ihvp_ds = self._backend.create_dataset_from_tensors(reduced_ihvp, batch_size)
 
-        local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False).batch(
-            dataset._batch_size)  # pylint: disable=W0212
+        # Compute HVP
+        local_hvp = local_ihvp.compute_hvp(reduced_ihvp_ds, use_gradient=False)
+        local_hvp_batched = self._backend.batch_dataset(local_hvp, batch_size)
 
+        # Compute final IHVP
         interactions = self.ihvp_calculator.compute_ihvp(
-            local_hvp, use_gradient=False
+            local_hvp_batched, use_gradient=False
         )
 
-        ds_size = tf.cast(dataset_size(dataset), dtype=interactions.element_spec.dtype)
-        interactions = interactions.map(lambda x: x * ds_size)
+        # Multiply by dataset size and return single element
+        ds_size = self._backend.get_dataset_size(dataset)
 
-        return interactions.get_single_element()
+        result = None
+        for batch in interactions:
+            scaled_batch = self._scalar_multiply(batch, self._backend.cast(ds_size, self._backend.get_dtype(batch)))
+            if result is None:
+                result = scaled_batch
+            else:
+                result = result + scaled_batch
+
+        assert result is not None, "interactions dataset must not be empty"
+        return result
 
     def estimate_influence_values_group(
             self,
-            group_train: tf.data.Dataset,
-            group_to_evaluate: Optional[tf.data.Dataset] = None
-    ) -> tf.Tensor:
+            group_train: DatasetLike,
+            group_to_evaluate: Optional[DatasetLike] = None
+    ) -> Tensor:
         """
         Computes Cook's distance of the whole group of points provided, giving measure of the
         influence that the group carries on the model's weights.
@@ -197,9 +247,9 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         Parameters
         ----------
         group_train
-            A batched TF dataset containing the group of points we wish to remove.
+            A batched dataset containing the group of points we wish to remove.
         group_to_evaluate
-            A batched TF dataset containing the group of points with respect to whom we wish to
+            A batched dataset containing the group of points with respect to whom we wish to
             measure the influence of removing the training points.
 
         Returns
@@ -210,8 +260,13 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
         if group_to_evaluate is None:
             group_to_evaluate = group_train
         ds_size = self.assert_compatible_datasets(group_train, group_to_evaluate)
-        influence = tf.transpose(self.compute_influence_vector_group(group_train))
-        reduced_grads = tf.reduce_sum(tf.reshape(self.model.batch_jacobian(group_to_evaluate),
-                                                 (ds_size, -1)), axis=0, keepdims=True)
 
-        return tf.matmul(reduced_grads, influence)
+        influence = self._backend.transpose(self.compute_influence_vector_group(group_train))
+
+        jacobian = self.model.batch_jacobian(group_to_evaluate)
+        reduced_grads = self._backend.reduce_sum(
+            self._backend.reshape(jacobian, (ds_size, -1)),
+            axis=0, keepdims=True
+        )
+
+        return self._backend.matmul(reduced_grads, influence)

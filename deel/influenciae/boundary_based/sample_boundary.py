@@ -12,20 +12,23 @@ Unlike other influence calculators, this one cannot be used to estimate
 the influence of a point on another.
 
 The adversarial attacks are performed via deep fool.
+
+Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-import tensorflow as tf
-from tensorflow.keras import Model  # pylint:  disable=E0611
+from typing import Any, Tuple
 
-from ..common import SelfInfluenceCalculator
-from ..types import Tuple
+from ..common import SelfInfluenceCalculator, BaseBackend, get_backend_for_model
+from ._base_boundary import _BaseBoundaryCalculatorMixin
 
 
-class SampleBoundaryCalculator(SelfInfluenceCalculator):
+class SampleBoundaryCalculator(_BaseBoundaryCalculatorMixin, SelfInfluenceCalculator):
     """
     A class implementing an influence score based on the distance of a sample to the
     boundary of the classifier.
     The distance to the boundary is estimated using the deep fool method.
     [https://arxiv.org/abs/1511.04599]
+
+    Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 
     Notes
     -----
@@ -34,48 +37,23 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
     Parameters
     ----------
     model
-        A TF2 model that has already been trained
+        A TensorFlow or PyTorch model that has already been trained
     step_nbr
         Number of the iterations to find the closest adversarial problem
     eps
         Difference between two logits to assume that they have the same values
     """
 
-    def __init__(self, model: Model, step_nbr: int = 100, eps: float = 1E-6):
-        self.weights_init = [tf.identity(w) for w in model.trainable_variables]
+    def __init__(self, model: Any, step_nbr: int = 100, eps: float = 1E-6):
+        self.backend: BaseBackend = get_backend_for_model(model)
+        self.weights_init = [self.backend.clone_variable(w)
+                            for w in self.backend.get_model_weights(model)]
         self.model = model
 
         self.step_nbr = step_nbr
         self.eps = eps
 
-    @staticmethod
-    def __delta_to_index(indexes_1: tf.Tensor, indexes_2: tf.Tensor, x: tf.Tensor):
-        """
-        Compute the difference between the logit of a given class and the other logits
-
-        Parameters
-        ----------
-        indexes_1
-            The logits of other classes
-        indexes_2
-            The logits of the predicted class
-        x
-            The logits
-
-        Returns
-        -------
-        delta_x
-            The difference between the logits
-        """
-        x1 = tf.gather(x, indexes_1, batch_dims=1)
-        x2 = tf.gather(x, tf.expand_dims(indexes_2, axis=1), batch_dims=1)
-
-        delta_x = x1 - tf.repeat(x2, tf.shape(x1)[1], axis=1)
-
-        return delta_x
-
-    @tf.function
-    def _step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _step(self, x: Any, y_pred: Any) -> Tuple[Any, Any, Any]:
         """
         The optimization step to find the distance between the boundary and a given sample x.
 
@@ -101,51 +79,95 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         x_new
             The sample updated by the optimization procedure
         """
-        y_pred = tf.argmax(y_pred, axis=1)
+        y_pred_class = self.backend.argmax(y_pred, axis=1)
 
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(x)
-            y = self.model(x)
+        # Compute output and jacobian with respect to input
+        y, jac = self.backend.compute_output_jacobian(self.model, x)
 
-        y_computed = tf.argmax(y, axis=1)
+        y_shape = self.backend.tensor_shape(y)
+        computation = self._compute_step_condition(y, y_pred_class, self.eps)
 
-        def update_grads():
-            jac = tape.jacobian(y, x)
+        # Default values if we don't need to update
+        x_dtype = self.backend.get_dtype(x)
+        default_loss = self.backend.constant(0.0, dtype=x_dtype)
+        default_x = x
 
-            indexes_all = tf.repeat(tf.expand_dims(tf.range(0, tf.shape(y)[1]), axis=0), tf.shape(y)[0], axis=0)
-            indexes_class = tf.cast(tf.repeat(tf.expand_dims(y_pred, axis=1), tf.shape(y)[1], axis=1), dtype=tf.int32)
-            indexes_other = tf.reshape(indexes_all[indexes_all != indexes_class], (-1, tf.shape(y)[1] - 1))
-
-            delta_y = self.__delta_to_index(indexes_other, y_pred, y)
-            delta_y = tf.abs(tf.reduce_mean(delta_y, axis=0))
-
-            jac_delta = tf.reduce_mean(self.__delta_to_index(indexes_other, y_pred, jac), axis=0)
-
-            jac_norm = tf.reshape(jac_delta, (tf.shape(jac_delta)[0], -1))
-            jac_norm = tf.norm(jac_norm, axis=1)
-
-            coeff = delta_y / jac_norm
-
-            best_class = tf.argmin(coeff, axis=0)
-
-            loss = (coeff / jac_norm)[best_class]
-
-            x_new = x + loss * jac_delta[best_class]
-
-            return loss, x_new
-
-        computation = tf.reduce_any(y_computed == y_pred)
-
-        top_k, _ = tf.math.top_k(tf.squeeze(y, axis=0), k=2)
-        enough_close = tf.abs(top_k[0] - top_k[1]) > self.eps
-
-        computation = tf.logical_and(computation, enough_close)
-
-        loss_value, x_updated = tf.cond(computation, update_grads, lambda: (tf.constant(0.0, dtype=x.dtype), x))
+        # Only compute update if we should continue
+        if computation:
+            loss_value, x_updated = self._compute_update(x, y, jac, y_pred_class, y_shape)
+        else:
+            loss_value, x_updated = default_loss, default_x
 
         return computation, loss_value, x_updated
 
-    def __compute_single_sample_score(self, x: tf.Tensor) -> tf.Tensor:
+    def _compute_update(self, x: Any, y: Any, jac: Any, y_pred_class: Any, y_shape: Tuple) -> Tuple[Any, Any]:
+        """
+        Compute the DeepFool update step.
+
+        Parameters
+        ----------
+        x
+            Current input sample
+        y
+            Model output logits
+        jac
+            Jacobian of model output with respect to input
+        y_pred_class
+            Original predicted class
+        y_shape
+            Shape of the output tensor
+
+        Returns
+        -------
+        loss
+            The loss value for this step
+        x_new
+            The updated sample
+        """
+        indexes_other = self._build_other_class_indices(y_pred_class, y_shape)
+
+        # Compute delta in logits
+        delta_y = self._compute_delta_y(indexes_other, y_pred_class, y)
+
+        # Compute delta in jacobian
+        jac_delta = self.backend.reduce_mean(
+            self._delta_to_index(indexes_other, y_pred_class, jac),
+            axis=0
+        )
+
+        # Compute norm of jacobian difference
+        jac_delta_shape = self.backend.tensor_shape(jac_delta)
+        jac_norm = self.backend.reshape(jac_delta, (jac_delta_shape[0], -1))
+        jac_norm = self.backend.norm(jac_norm, axis=1)
+
+        # Compute coefficient for each class
+        coeff = delta_y / jac_norm
+
+        # Find best class to attack
+        best_class = self.backend.argmin(coeff, axis=0)
+
+        # Compute loss and update using tensor operations (no to_numpy - graph-compatible)
+        # Use gather to get the value at best_class index
+        loss = self.backend.gather_along_axis(
+            coeff / jac_norm,
+            self.backend.expand_dims(best_class, axis=0),
+            axis=0
+        )
+        loss = self.backend.squeeze(loss)
+
+        # Gather the best jacobian delta
+        jac_delta_best = self.backend.gather_along_axis(
+            jac_delta,
+            self.backend.expand_dims(best_class, axis=0),
+            axis=0
+        )
+        jac_delta_best = self.backend.squeeze(jac_delta_best, axis=0)
+
+        x_new = x + loss * jac_delta_best
+
+        return loss, x_new
+
+    def _compute_single_sample_score(self, x: Any) -> Any:
         """
         Computes the influence score (self-influence) for a single training sample.
 
@@ -159,23 +181,34 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         score
             The influence score of the sample.
         """
-        x = tf.expand_dims(x, axis=0)
-        y_pred = self.model(x)
+        x = self.backend.expand_dims(x, axis=0)
+        y_pred = self.backend.forward(self.model, x)
 
-        def body(index, x_current):
-            computation, _, x_new = self._step(x_current, y_pred)
-            return computation, index + 1, x_new
+        # Use while_loop for graph-compatible iteration
+        def cond_fn(cond, idx, _x_current):
+            return self.backend.logical_and(cond, idx < self.step_nbr)
 
-        _, _, x_adversarial = tf.while_loop(
-            lambda cond, index, x_current: tf.logical_and(cond, index < self.step_nbr),
-            lambda cond, index, x_current: body(index, x_current),
-            [tf.constant(True), tf.constant(0, dtype=tf.int32), x])
+        def body_fn(_cond, idx, x_current):
+            new_cond, _, x_new = self._step(x_current, y_pred)
+            return [new_cond, idx + 1, x_new]
 
-        score = tf.norm(x - x_adversarial)
+        # Initial loop variables
+        init_cond = self.backend.constant(True)
+        init_idx = self.backend.constant(0, dtype=self.backend.int32_dtype())
+
+        # Run the loop
+        _, _, x_final = self.backend.while_loop(
+            cond_fn,
+            body_fn,
+            [init_cond, init_idx, x],
+            maximum_iterations=self.step_nbr
+        )
+
+        score = self.backend.norm(x - x_final)
 
         return score
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -189,7 +222,10 @@ class SampleBoundaryCalculator(SelfInfluenceCalculator):
         influence_values
             The influence score of each sample in the batch train_samples.
         """
-        scores = tf.map_fn(self.__compute_single_sample_score, train_samples[:-1][0], parallel_iterations=1)
-        scores = - tf.expand_dims(scores, axis=1)
+        # Get the input samples (first element of tuple, excluding last which is typically labels)
+        inputs = train_samples[:-1][0] if len(train_samples) > 1 else train_samples[0]
+
+        scores = self.backend.map_fn(self._compute_single_sample_score, inputs)
+        scores = - self.backend.expand_dims(scores, axis=1)
 
         return scores

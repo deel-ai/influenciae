@@ -11,6 +11,7 @@ performing influence calculator technique should be able to put forth the mislab
 samples among the top-most influential points.
 """
 import ssl
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -22,12 +23,11 @@ from tensorflow.keras.regularizers import L1L2 # pylint: disable=E0611
 from tensorflow.keras.losses import CategoricalCrossentropy # pylint: disable=E0611
 from tensorflow.keras.optimizers import Adam # pylint: disable=E0611
 
-from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator, ModelsSaver
+from .base_benchmark import BaseTrainingProcedure, MislabelingDetectorEvaluator
+from .tensorflow_benchmark_utils import ModelsSaver
 from .model_resnet import ResNet
 
-from ..types import Tuple, Union, Any, Optional, List
-
-ssl._create_default_https_context = ssl._create_unverified_context # pylint: disable=W0212
+ssl._create_default_https_context = ssl._create_unverified_context # type: ignore[assignment] # pylint: disable=W0212
 
 
 class ConvNetCIFAR(Sequential):
@@ -230,6 +230,7 @@ class Cifar10TrainingProcedure(BaseTrainingProcedure):
         _, test_stats = model.evaluate(test_dataset, batch_size=test_batch_size, verbose=0)
 
         if self.epochs_to_save is not None:
+            assert model_saver is not None  # model_saver is initialized when epochs_to_save is not None
             return train_stats, test_stats, model, (model_saver.models, model_saver.learning_rates)
 
         return train_stats, test_stats, model, None

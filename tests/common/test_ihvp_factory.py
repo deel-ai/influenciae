@@ -16,9 +16,11 @@ from deel.influenciae.common import InverseHessianVectorProductFactory, ExactIHV
 from ..utils_test import almost_equal
 
 
+pytestmark = pytest.mark.tensorflow
+
+
 def test_exact_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))
@@ -37,7 +39,6 @@ def test_exact_factory():
 
 def test_cgd_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))
@@ -76,13 +77,12 @@ def test_cgd_factory():
 
     # case 3: model feature extractor without layer position
     feature_extractor = Sequential(model.layers[:1])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
 
 
 def test_lissa_factory():
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
     inputs = tf.random.normal((25, 1, 3))
@@ -121,5 +121,5 @@ def test_lissa_factory():
 
     # case 3: model feature extractor without layer position
     feature_extractor = Sequential(model.layers[:1])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)

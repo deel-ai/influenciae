@@ -2,6 +2,7 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
@@ -10,7 +11,10 @@ from tensorflow.keras.losses import CategoricalCrossentropy, Reduction, MeanSqua
 from deel.influenciae.common import InfluenceModel
 from deel.influenciae.trac_in.tracin import TracIn
 
-from ..utils_test import almost_equal, assert_inheritance
+from ..utils_test import relative_almost_equal, assert_inheritance
+
+
+pytestmark = pytest.mark.tensorflow
 
 def test_compute_influence_vector():
     model_feature = Sequential()
@@ -44,7 +48,7 @@ def test_compute_influence_vector():
         #TODO: What should be the shape of that (nb_model*batch_size, nb_params) or (batch_size, nb_model*nb_params)
         inf_vect.append(batched_inf_vec)
     inf_vect = tf.concat(inf_vect, axis=0)
-    assert almost_equal(expected_inf_vect, inf_vect)
+    assert relative_almost_equal(expected_inf_vect, inf_vect, percent=1e-6)
 
 def test_preprocess_sample_to_evaluate():
     """Not needed as it is simply the compute_influence_vector function tested already"""
@@ -105,7 +109,7 @@ def test_compute_influence_value_from_influence_vector():
         computed_values.append(inf_values)
     computed_values = tf.concat(computed_values, axis=0)
     assert computed_values.shape == (50, 10)
-    assert tf.reduce_max(tf.abs(computed_values - expected_values)) < 1E-6
+    assert relative_almost_equal(expected_values, computed_values, percent=1e-6)
 
 def test_compute_pairwise_influence_value():
     model_feature = Sequential()
@@ -140,7 +144,7 @@ def test_compute_pairwise_influence_value():
         pairwise_inf.append(loc_pairwise_inf)
     pairwise_inf = tf.concat(pairwise_inf, axis=0)
     assert pairwise_inf.shape == (10, 1)
-    assert almost_equal(expected_pairwise_inf_vect, pairwise_inf)
+    assert relative_almost_equal(expected_pairwise_inf_vect, pairwise_inf, percent=1e-6)
 
 def test_inheritance():
     model_feature = Sequential()

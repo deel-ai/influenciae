@@ -6,7 +6,24 @@
 Common classes and methods
 """
 
-from .model_wrappers import BaseInfluenceModel, InfluenceModel
+from .backend import (
+    Framework,
+    BaseBackend,
+    detect_framework,
+    detect_tensor_framework,
+    detect_dtype_framework,
+    get_backend,
+    get_backend_for_model,
+    get_backend_for_tensor,
+    get_available_frameworks,
+)
+from .model_wrappers import (
+    BaseInfluenceModel,
+    InfluenceModel,
+    TensorFlowInfluenceModel,
+    PyTorchInfluenceModel,
+    default_process_batch,
+)
 from .base_influence import SelfInfluenceCalculator, BaseInfluenceCalculator, CACHE
 from .inverse_hessian_vector_product import InverseHessianVectorProduct, ExactIHVP, ConjugateGradientDescentIHVP, \
      IHVPCalculator, LissaIHVP, ForwardOverBackwardHVP

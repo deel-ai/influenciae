@@ -11,162 +11,466 @@ BiCGSTAB (Biconjugate Gradient Stabilized) solver based also on jax.scipy's impl
 https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.sparse.linalg.bicgstab.html
 https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method#Preconditioned_BiCGSTAB
 """
-import tensorflow as tf
+import importlib
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from ..types import Callable, Optional
+import numpy as np
+
+from ..types import Tensor
+
+if TYPE_CHECKING:
+    from ..common.backend import BaseBackend
 
 
-def _identity(x): # pylint: disable=C0116
+def _identity(x):  # pylint: disable=C0116
     return x
 
 
+def _to_python_float(value: Any) -> float:
+    """Convert backend scalar-like values to Python float."""
+    if hasattr(value, 'item'):
+        return float(value.item())
+    if hasattr(value, 'numpy'):
+        return float(value.numpy())
+    return float(value)
+
+
+def _is_tensorflow_backend(backend: "BaseBackend") -> bool:
+    """Return True when backend belongs to TensorFlow framework."""
+    framework = getattr(backend, "framework", None)
+    return getattr(framework, "value", framework) == "tensorflow"
+
+
+def _get_backend_for_tensor(tensor: Tensor) -> "BaseBackend":
+    """Get backend for tensor without module-level common import."""
+    backend_module = importlib.import_module("deel.influenciae.common.backend")
+    return backend_module.get_backend_for_tensor(tensor)
+
+
 def conjugate_gradients_solve(
-        operator: Callable,
-        b: tf.Tensor,
-        x0: Optional[tf.Tensor] = None,
-        *,
-        maxiter: int,
-        tol: float = 1e-3,
-        atol: float = 1e-5,
-        M: Callable = _identity
-):
+    operator: Callable[[Any], Any],
+    b: Any,
+    x0: Optional[Any] = None,
+    maxiter: int = 100,
+    tol: float = 1e-10,
+    eps: float = 1e-12,
+    backend: Optional["BaseBackend"] = None,
+) -> Any:
     """
-    A simple Conjugate Gradients solver based on jax.scipy
+    Solve Ax = b using Conjugate Gradients where operator(x) returns Ax.
+
+    This function is backend-agnostic and supports both TensorFlow and PyTorch tensors,
+    as well as NumPy arrays.
 
     Parameters
     ----------
-    operator: Callable
-        The operator that calculates the linear map A(x). It is assumed to be hermitian and positive definite
-    b: tf.Tensor
-        The right hand side of the linear system, represented by a single vector.
-    x0: Optional
-        A tensor with the same shape as b and the output that servers as a first guess for the solution
-    maxiter: int
-        The maximum amount of iterations
-    tol: float
-        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    atol: float
-        Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    M: Callable
-        A preconditioner approximating the inverse of A.
+    operator
+        Function implementing A @ x.
+    b
+        Right-hand side vector or matrix (typically shape (n, 1), (n,), or (n, k)).
+    x0
+        Initial guess. If None, uses zeros_like(b).
+    maxiter
+        Maximum number of CG iterations.
+    tol
+        Stop when ||r|| <= tol.
+    eps
+        Small number to avoid division by zero.
+    backend
+        Optional backend instance. If None, will be auto-detected from tensor type.
 
     Returns
     -------
-    x_final: tf.Tensor
-        A tensor with the solution found by the solver
+    x
+        Approximate solution with the same type and shape as b.
     """
-    if x0 is None:
-        x0 = tf.zeros_like(b)
+    # Handle NumPy arrays separately (no backend needed)
+    if isinstance(b, np.ndarray):
+        return _conjugate_gradients_numpy(operator, b, x0, maxiter, tol, eps)
 
-    bs = tf.reduce_sum(tf.matmul(b, b, transpose_a=True))
-    atol2 = tf.reduce_max([tf.cast(tf.square(tol), dtype=bs.dtype) * bs, tf.cast(tf.square(atol), dtype=bs.dtype)])
+    # Auto-detect backend if not provided
+    if backend is None:
+        backend = _get_backend_for_tensor(b)
 
-    def cond_fun(_, r, gamma, __, k):
-        rs = gamma if M is _identity else tf.reduce_sum(tf.matmul(r, r, transpose_a=True))
-        cond1 = tf.greater(rs, atol2)
-        cond2 = tf.greater(maxiter, k)
-        return tf.logical_and(cond1, cond2)
+    if _is_tensorflow_backend(backend):
+        return _conjugate_gradients_tensorflow(operator, b, x0, maxiter, tol, eps, backend)
 
-    def body_fun(x, r, gamma, p, k):
+    is_batched = backend.tensor_ndim(b) > 1
+    axis = 0 if is_batched else None
+
+    # Initialize solution
+    x = backend.zeros_like(b) if x0 is None else x0
+
+    # Compute initial residual: r = b - Ax
+    r = b - operator(x)
+    p = backend.copy(r)
+
+    # Compute initial squared residual norm
+    rs_old = backend.reduce_sum(backend.multiply(r, r), axis=axis)
+
+    for _ in range(maxiter):
+        # Compute A @ p
         Ap = operator(p)
-        alpha = gamma / (tf.reduce_sum(tf.matmul(p, Ap, transpose_a=True)))
-        x_ = x + alpha * p
-        r_ = r - alpha * Ap
-        z_ = M(r_)
-        gamma_ = tf.reduce_sum(tf.matmul(r_, z_, transpose_a=True))
-        beta_ = gamma_ / gamma
-        p_ = z_ + beta_ * p
 
-        return x_, r_, gamma_, p_, k + 1
+        # Compute step size: alpha = r^T r / (p^T A p)
+        pAp = backend.reduce_sum(backend.multiply(p, Ap), axis=axis)
+        denom = backend.maximum(pAp, eps)
+        alpha = rs_old / denom
 
-    r0 = b - operator(x0)
-    p0 = z0 = M(r0)
-    gamma0 = tf.reduce_sum(tf.matmul(r0, z0, transpose_a=True))
-    initial_value = [x0, r0, gamma0, p0, tf.constant(0, dtype=tf.int32)]
+        # Update solution: x = x + alpha * p
+        x = x + alpha * p
 
-    val = tf.while_loop(
-        cond=cond_fun,
-        body=body_fun,
-        loop_vars=initial_value
+        # Update residual: r = r - alpha * Ap
+        r = r - alpha * Ap
+
+        # Compute new squared residual norm
+        rs_new = backend.reduce_sum(backend.multiply(r, r), axis=axis)
+
+        # Check convergence
+        residual_norm = backend.sqrt(rs_new)
+        if is_batched:
+            is_converged = backend.reduce_any(residual_norm > tol)
+        else:
+            is_converged = residual_norm > tol
+
+        if hasattr(is_converged, 'item'):
+            converged_flag = bool(is_converged.item())
+        elif hasattr(is_converged, 'numpy'):
+            converged_flag = bool(is_converged.numpy())
+        else:
+            converged_flag = bool(is_converged)
+
+        if not converged_flag:
+            break
+
+        # Update search direction: p = r + (rs_new / rs_old) * p
+        rs_safe = backend.maximum(rs_old, eps)
+        beta = rs_new / rs_safe
+        p = r + beta * p
+        rs_old = rs_new
+
+    return x
+
+
+def _conjugate_gradients_tensorflow(
+    operator: Callable[[Any], Any],
+    b: Any,
+    x0: Optional[Any],
+    maxiter: int,
+    tol: float,
+    eps: float,
+    backend: "BaseBackend",
+) -> Any:
+    """
+    TF-safe Conjugate Gradients: uses backend.while_loop so it can run under
+    tf.function / tf.data.Dataset.map / tf.map_fn without AutoGraph issues.
+    """
+    dtype = backend.get_dtype(b)
+    tol_t = backend.constant(tol, dtype=dtype)
+    eps_t = backend.constant(eps, dtype=dtype)
+
+    # Use a TF scalar for maxiter to avoid mixed Python/Tensor comparisons in graph mode
+    maxiter_t = backend.constant(maxiter, dtype=backend.int32_dtype())
+
+    is_batched = backend.tensor_ndim(b) > 1
+    axis = 0 if is_batched else None
+
+    x = backend.zeros_like(b) if x0 is None else x0
+    r = b - operator(x)
+    p = backend.copy(r)
+    rs = backend.reduce_sum(backend.multiply(r, r), axis=axis)
+
+    k0 = backend.constant(0, dtype=backend.int32_dtype())
+
+    def cond_fn(k, _x, _r, _p, rs):
+        # Continue while k < maxiter and ||r|| > tol
+        return backend.logical_and(k < maxiter_t, backend.reduce_any(backend.sqrt(rs) > tol_t))
+
+    def body_fn(k, x, r, p, rs):
+        Ap = operator(p)
+        pAp = backend.reduce_sum(backend.multiply(p, Ap), axis=axis)
+        denom = backend.maximum(pAp, eps_t)
+        alpha = rs / denom
+
+        x = x + alpha * p
+        r = r - alpha * Ap
+
+        rs_new = backend.reduce_sum(backend.multiply(r, r), axis=axis)
+
+        # Avoid rs==0 division edge case
+        rs_safe = backend.maximum(rs, eps_t)
+        beta = rs_new / rs_safe
+        p = r + beta * p
+
+        return [k + 1, x, r, p, rs_new]
+
+    _k, x, _r, _p, _rs = backend.while_loop(
+        cond_fn=cond_fn,
+        body_fn=body_fn,
+        loop_vars=[k0, x, r, p, rs],
+        maximum_iterations=None,
     )
 
-    x_final, *_ = val
+    return x
 
-    return x_final
+
+def _conjugate_gradients_numpy(
+    operator: Callable[[np.ndarray], np.ndarray],
+    b: np.ndarray,
+    x0: Optional[np.ndarray] = None,
+    maxiter: int = 100,
+    tol: float = 1e-10,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    NumPy implementation of Conjugate Gradients solver.
+
+    Parameters
+    ----------
+    operator
+        Function implementing A @ x.
+    b
+        Right-hand side vector.
+    x0
+        Initial guess. If None, uses zeros_like(b).
+    maxiter
+        Maximum number of CG iterations.
+    tol
+        Stop when ||r|| <= tol.
+    eps
+        Small number to avoid division by zero.
+
+    Returns
+    -------
+    x
+        Approximate solution.
+    """
+    x = np.zeros_like(b) if x0 is None else x0.copy()
+
+    is_batched = b.ndim > 1
+    axis = 0 if is_batched else None
+
+    r = b - operator(x)
+    p = r.copy()
+    rs_old = np.sum(r * r, axis=axis)
+
+    for _ in range(maxiter):
+        Ap = operator(p)
+        pAp = np.sum(p * Ap, axis=axis)
+        denom = np.maximum(pAp, eps)
+        alpha = rs_old / denom
+
+        x = x + alpha * p
+        r = r - alpha * Ap
+
+        rs_new = np.sum(r * r, axis=axis)
+        residual_norm = np.sqrt(rs_new)
+        if is_batched:
+            if not np.any(residual_norm > tol):
+                break
+        else:
+            if residual_norm <= tol:
+                break
+
+        rs_safe = np.maximum(rs_old, eps)
+        p = r + (rs_new / rs_safe) * p
+        rs_old = rs_new
+
+    return x
 
 
 def biconjugate_gradient_stabilized_solve(
         operator: Callable,
-        b: tf.Tensor,
-        x0: Optional[tf.Tensor] = None,
+        b: Any,
+        x0: Optional[Any] = None,
         *,
         maxiter: int,
         tol: float = 1e-5,
         atol: float = 1e-6,
-        M: Callable = _identity):
+        M: Callable = _identity,
+        backend: Optional["BaseBackend"] = None):
     """
-    A simple BiCGSTAB solver based on jax.scipy
+    A BiCGSTAB (Biconjugate Gradient Stabilized) solver.
+
+    This function is backend-agnostic and supports both TensorFlow and PyTorch tensors.
 
     Parameters
     ----------
-    operator: Callable
-        The operator that calculates the linear map A(x). It is assumed to be hermitian and positive definite
-    b: tf.Tensor
+    operator
+        The operator that calculates the linear map A(x). It is assumed to be hermitian and positive definite.
+    b
         The right hand side of the linear system, represented by a single vector.
-    x0: Optional
-        A tensor with the same shape as b and the output that servers as a first guess for the solution
-    maxiter: int
-        The maximum amount of iterations
-    tol: float
+    x0
+        A tensor with the same shape as b and the output that serves as a first guess for the solution.
+    maxiter
+        The maximum amount of iterations.
+    tol
         Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    atol: float
+    atol
         Tolerance for convergence. norm(residual) <= max(tol * norm(b), atol)
-    M: Callable
+    M
+        A preconditioner approximating the inverse of A.
+    backend
+        Optional backend instance. If None, will be auto-detected from tensor type.
+
+    Returns
+    -------
+    x_final
+        A tensor with the solution found by the solver.
+    """
+    # Handle NumPy arrays separately
+    if isinstance(b, np.ndarray):
+        return _bicgstab_numpy(operator, b, x0, maxiter=maxiter, tol=tol, atol=atol, M=M)
+
+    # Auto-detect backend if not provided
+    if backend is None:
+        backend = _get_backend_for_tensor(b)
+
+    if x0 is None:
+        x0 = backend.zeros_like(b)
+
+    # Helper function to compute dot product (x^T @ y)
+    def dot(x, y):
+        return backend.reduce_sum(backend.multiply(x, y))
+
+    bs = dot(b, b)
+    atol2 = backend.maximum(tol * tol * bs, atol * atol)
+    atol2_val = _to_python_float(atol2)
+
+    def check_convergence(r, k):
+        rs_val = _to_python_float(dot(r, r))
+        return (rs_val > atol2_val) and (0 <= k < maxiter)
+
+    r0 = b - operator(x0)
+    rho = alpha = omega = 1.0
+    x = x0
+    r = backend.copy(r0)
+    rhat = backend.copy(r0)
+    p = backend.copy(r0)
+    q = backend.copy(r0)
+    k = 0
+
+    while check_convergence(r, k):
+        rho_ = dot(rhat, r)
+
+        if _to_python_float(rho_) == 0.0:
+            break
+
+        beta = (rho_ / rho) * (alpha / omega)
+        p = r + beta * (p - omega * q)
+        phat = M(p)
+        q = operator(phat)
+
+        rhat_q = dot(rhat, q)
+        alpha = rho_ / rhat_q
+
+        s = r - alpha * q
+
+        ss = dot(s, s)
+        if _to_python_float(ss) < atol2_val:
+            x = x + alpha * phat
+            break
+
+        shat = M(s)
+        t = operator(shat)
+
+        ts = dot(t, s)
+        tt = dot(t, t)
+        omega = ts / tt
+
+        if _to_python_float(omega) == 0.0 or _to_python_float(alpha) == 0.0:
+            break
+
+        x = x + alpha * phat + omega * shat
+        r = s - omega * t
+        rho = rho_
+        k += 1
+
+    return x
+
+
+def _bicgstab_numpy(
+        operator: Callable[[np.ndarray], np.ndarray],
+        b: np.ndarray,
+        x0: Optional[np.ndarray] = None,
+        *,
+        maxiter: int,
+        tol: float = 1e-5,
+        atol: float = 1e-6,
+        M: Callable = _identity) -> np.ndarray:
+    """
+    NumPy implementation of BiCGSTAB solver.
+
+    Parameters
+    ----------
+    operator
+        The operator that calculates the linear map A(x).
+    b
+        The right hand side of the linear system.
+    x0
+        Initial guess. If None, uses zeros_like(b).
+    maxiter
+        Maximum number of iterations.
+    tol
+        Tolerance for convergence.
+    atol
+        Absolute tolerance for convergence.
+    M
         A preconditioner approximating the inverse of A.
 
     Returns
     -------
-    x_final: tf.Tensor
-        A tensor with the solution found by the solver
+    x
+        Approximate solution.
     """
     if x0 is None:
-        x0 = tf.zeros_like(b)
+        x0 = np.zeros_like(b)
+    assert x0 is not None
 
-    bs = tf.reduce_sum(tf.matmul(b, b, transpose_a=True))
-    atol2 = tf.reduce_max([tf.square(tol) * bs, tf.square(atol)])
+    def dot(x, y):
+        return float(np.sum(x * y))
 
-    def cond_fun(value):
-        _, r, *_, k = value
-        rs = tf.reduce_sum(tf.matmul(r, r, transpose_a=True))
-        return (rs > atol2) & (k < maxiter) & (k >= 0)
-
-    def body_fun(value):
-        x, r, rhat, alpha, omega, rho, p, q, k = value
-        rho_ = tf.reduce_sum(tf.matmul(rhat, r, transpose_a=True))
-        beta = rho_ / rho * alpha / omega
-        p_ = r + beta * (p - omega * q)
-        phat = M(p_)
-        q_ = operator(phat)
-        alpha_ = rho_ / tf.reduce_sum(tf.matmul(rhat, q_, transpose_a=True))
-        s = r - alpha_ * q_
-        exit_early = tf.reduce_sum(tf.matmul(s, s, transpose_a=True)) < atol2
-        shat = M(s)
-        t = operator(shat)
-        omega_ = tf.reduce_sum(tf.matmul(t, s, transpose_a=True)) / tf.reduce_sum(tf.matmul(t, t, transpose_a=True))
-        x_ = x + alpha_ * phat if exit_early else x + alpha_ * phat + omega_ * shat
-        r_ = s if exit_early else s - omega_ * t
-        k_ = tf.where((omega_ == 0) | (alpha_ == 0), -11, k + 1)
-        k_ = tf.where((rho_ == 0), -10, k_)
-        return x_, r_, rhat, alpha_, omega_, rho_, p_, q_, k_
+    bs = dot(b, b)
+    atol2 = max(tol * tol * bs, atol * atol)
 
     r0 = b - operator(x0)
-    rho0 = alpha0 = omega0 = 1.
-    initial_value = (x0, r0, r0, alpha0, omega0, rho0, r0, r0, 0)
+    rho = alpha = omega = 1.0
+    x = x0.copy()
+    r = r0.copy()
+    rhat = r0.copy()
+    p = r0.copy()
+    q = r0.copy()
+    k = 0
 
-    # Perform the minimization until convergence
-    val = initial_value
-    while cond_fun(val):
-        val = body_fun(val)
-    x_final, *_ = val
+    while dot(r, r) > atol2 and 0 <= k < maxiter:
+        rho_ = dot(rhat, r)
 
-    return x_final
+        if rho_ == 0:
+            break
+
+        beta = (rho_ / rho) * (alpha / omega)
+        p = r + beta * (p - omega * q)
+        phat = M(p)
+        q = operator(phat)
+
+        alpha = rho_ / dot(rhat, q)
+        s = r - alpha * q
+
+        if dot(s, s) < atol2:
+            x = x + alpha * phat
+            break
+
+        shat = M(s)
+        t = operator(shat)
+
+        omega = dot(t, s) / dot(t, t)
+
+        if omega == 0 or alpha == 0:
+            break
+
+        x = x + alpha * phat + omega * shat
+        r = s - omega * t
+        rho = rho_
+        k += 1
+
+    return x

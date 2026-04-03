@@ -2,12 +2,16 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Sequential
 import numpy as np
 
 from deel.influenciae.boundary_based import WeightsBoundaryCalculator
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 def test_compute_influence_shape():

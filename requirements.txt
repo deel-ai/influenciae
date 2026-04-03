@@ -1,3 +1,12 @@
-tensorflow >=2.7.0, <2.10.0
-numpy
-matplotlib
+# Influenciae Core Requirements
+# =============================
+# These are the minimal dependencies for influenciae.
+# Backends (TensorFlow, PyTorch) are optional.
+#
+# Install with a specific backend:
+#   pip install -e ".[tensorflow]"  # TensorFlow backend
+#   pip install -e ".[pytorch]"     # PyTorch backend
+#   pip install -e ".[all]"         # Both backends
+#
+numpy>=1.19.0
+matplotlib>=3.3.0

@@ -3,104 +3,184 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Custom wrappers for tensorflow model
+Framework-agnostic model wrappers for influence functions.
+Supports both TensorFlow and PyTorch models.
 """
-import itertools
+from typing import Any, Callable, List, Optional, Tuple, Union
 
-import tensorflow as tf
-from tensorflow.keras.losses import Reduction  # pylint: disable=E0611
+from .._optional_imports import import_optional_attr, import_optional_module
+from .backend import BaseBackend, Framework, get_backend_for_model
+from ..types import DatasetLike, Layer, LossFunction, Model, Tensor, WeightVariable
 
-from ..utils import assert_batched_dataset, from_layer_name_to_layer_idx, default_process_batch
-from ..types import Callable, Optional, Union, List, Tuple
+# Type aliases
+ProcessBatchTypeAlias = Callable[[Tuple[Any, ...]], Tuple[Tensor, Tensor, Optional[Tensor]]]
 
-ProcessBatchTypeAlias = Callable[[Tuple[tf.Tensor, ...]], Tuple[tf.Tensor, tf.Tensor, tf.Tensor]]
+
+def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+    """
+    Default batch processing function.
+
+    Parameters
+    ----------
+    batch
+        A batch tuple of (inputs, labels) or (inputs, labels, sample_weights).
+
+    Returns
+    -------
+    inputs
+        The input data.
+    labels
+        The labels/targets.
+    sample_weight
+        Sample weights (None if not provided).
+    """
+    if len(batch) == 2:
+        return batch[0], batch[1], None
+    if len(batch) >= 3:
+        return batch[0], batch[1], batch[2]
+    raise ValueError(f"Batch should have 2 or 3 elements, got {len(batch)}")
 
 
 class BaseInfluenceModel:
     """
-    A generic Tensorflow model wrapper for Influence functions that facilitates the access to the
+    A framework-agnostic model wrapper for Influence functions that facilitates the access to the
     weights for which these quantities are to be computed.
+
+    Supports both TensorFlow (tf.keras.Model) and PyTorch (nn.Module) models.
 
     Attributes
     ----------
     model
         Model used for computing influence score.
-    weights_to_watch
+    weights
         List of the model weights to watch when computing gradients, jacobians & hessians.
     loss_function
-        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
-        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
-        for example.
+        Loss function to calculate influence. Make sure not to apply any reduction.
     process_batch_for_loss_fn
         A callable for preprocessing the batch to transform it into a format that can be treated
         by the algorithm: (inputs, label, sample weight).
-    weights_processed
-        A boolean indicating whether the weights are already in the right format to be ingested by
-        the class' methods or if they need to be processed beforehand.
+    backend
+        The framework-specific backend for operations.
     """
 
-    def __init__(self,
-                 model: tf.keras.Model,
-                 weights_to_watch: Optional[List[tf.Variable]] = None,
-                 loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-                    from_logits=False, reduction=Reduction.NONE),
-                 process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch,
-                 weights_processed: bool = False):
-
-        if hasattr(loss_function, 'reduction') and loss_function.reduction is not Reduction.NONE:
-            raise ValueError('The loss function must not have reduction.')
-
-        self.model = model
-        self.weights_processed = weights_processed
-        if weights_to_watch is None:
-            weights_to_watch = [layer.weights for layer in model.layers]
-            self.weights_processed = False
-        # "flatten" the list of weights and remove empty weights
-        self.weights = self.__process_weights_list(weights_to_watch)
-
-        self.nb_params = tf.reduce_sum([tf.size(w) for w in self.weights])
-        self.loss_function = loss_function
-        self.process_batch_for_loss_fn = process_batch_for_loss_fn
-
-    def __call__(self, inps: tf.Tensor) -> tf.Tensor:
+    def __init__(
+        self,
+        model: Model,
+        weights_to_watch: Optional[List[WeightVariable]] = None,
+        loss_function: Optional[LossFunction] = None,
+        process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch,
+        weights_processed: bool = False
+    ):
         """
-        Computes the forward of the original model
+        Initialize the BaseInfluenceModel.
 
         Parameters
         ----------
-        inps
+        model
+            The model (tf.keras.Model or nn.Module) used for computing influence.
+        weights_to_watch
+            List of weights to watch. If None, all trainable weights are used.
+        loss_function
+            Loss function to use. If None, a default cross-entropy loss is used.
+        process_batch_for_loss_fn
+            Function to preprocess batches into (inputs, labels, sample_weights).
+        weights_processed
+            Whether weights_to_watch is already in the correct format.
+        """
+        self.model = model
+        self.backend: BaseBackend = get_backend_for_model(model)
+        self.process_batch_for_loss_fn = process_batch_for_loss_fn
+        self.weights_processed = weights_processed
+
+        # Set default loss function based on framework
+        if loss_function is None:
+            loss_function = self._get_default_loss_function()
+        self.loss_function = loss_function
+
+        # Validate loss function reduction
+        self._validate_loss_function(loss_function)
+
+        # Get weights to watch
+        if weights_to_watch is None:
+            weights_to_watch = self.backend.get_model_weights(model)
+            self.weights_processed = True
+
+        if not self.weights_processed:
+            # Flatten nested weight lists
+            self.weights = self._process_weights_list(weights_to_watch)
+        else:
+            self.weights = weights_to_watch
+
+        self.nb_params = self.backend.get_num_params(self.weights)
+
+    def _get_default_loss_function(self) -> LossFunction:
+        """Get the default loss function for the framework."""
+        if self.backend.framework == Framework.TENSORFLOW:
+            tf = import_optional_module("tensorflow", extra="tensorflow")
+            reduction = import_optional_attr("tensorflow.keras.losses", "Reduction", extra="tensorflow")
+            return tf.keras.losses.CategoricalCrossentropy(
+                from_logits=False, reduction=reduction.NONE
+            )
+
+        nn = import_optional_module("torch.nn", extra="pytorch")
+        return nn.CrossEntropyLoss(reduction='none')
+
+    def _validate_loss_function(self, loss_function: LossFunction) -> None:
+        """Validate that the loss function doesn't have reduction."""
+        self.backend.validate_loss_no_reduction(loss_function)
+
+    def __call__(self, inputs: Tensor) -> Tensor:
+        """
+        Computes the forward pass of the original model.
+
+        Parameters
+        ----------
+        inputs
             Inputs on which to make the inference.
 
         Returns
         -------
-        y
+        outputs
             Outputs of the original model.
         """
-        return self.model(inps)
+        return self.backend.forward(self.model, inputs)
 
-    def __process_weights_list(self, weights_to_watch: Union[tf.Tensor, List[tf.Tensor]]) -> List[tf.Tensor]:
+    def _process_weights_list(
+        self,
+        weights_to_watch: Union[WeightVariable, List[WeightVariable]],
+    ) -> List[WeightVariable]:
         """
-        Ensure a proper formatting of the weights
-        TODO: Improve it, cause list(itertools.chain(*weights_to_watch)) is not idempotent
+        Ensure a proper formatting of the weights (flatten nested lists).
 
         Parameters
         ----------
         weights_to_watch
-            A collection of weights for which we wish to compute the influence function in some unspecified
-            format
+            A collection of weights in potentially nested format.
 
         Returns
         -------
         processed_weights
-            A list with the weights in the right format for them to be ingested by the rest of the class' methods
+            A flat list of weights.
         """
         if self.weights_processed:
-            return weights_to_watch
+            if isinstance(weights_to_watch, (list, tuple)):
+                return list(weights_to_watch)
+            return [weights_to_watch]
 
-        return list(itertools.chain(*weights_to_watch))
+        if not isinstance(weights_to_watch, (list, tuple)):
+            return [weights_to_watch]
+
+        processed_weights: List[WeightVariable] = []
+        for weights in weights_to_watch:
+            if isinstance(weights, (list, tuple)):
+                processed_weights.extend(weights)
+            else:
+                processed_weights.append(weights)
+
+        return processed_weights
 
     @property
-    def layers(self):
+    def layers(self) -> List[Layer]:
         """
         Access the layers of the original model.
 
@@ -109,115 +189,70 @@ class BaseInfluenceModel:
         layers
             The layers of the original model.
         """
-        return self.model.layers
+        return self.backend.get_layers(self.model)
 
-    @staticmethod
-    @tf.function
-    def _loss(
-        model: tf.keras.Model,
-        loss_function: Callable,
-        batch: Tuple[tf.Tensor, ...],
-        process_batch_for_loss_fn: ProcessBatchTypeAlias
-    ) -> tf.Tensor:
+    def _compute_loss(self, batch: Tuple[Any, ...]) -> Tensor:
         """
         Computes the model's loss for a single batch of samples.
 
         Parameters
         ----------
-        model
-            The model used for computing the influence score.
-        loss_function
-            The reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
             A batch of tuples of sets of inputs and their corresponding outputs.
-        process_batch_for_loss_fn
-            A callable for preprocessing the batch to transform it into a format that can be treated
-            by the algorithm: (inputs, label, sample weight).
 
         Returns
         -------
         loss_values
             The loss values for each input (i.e. not reduced).
         """
-        model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
-        return loss_function(y_true, model(model_inp), sample_weight)
+        model_inp, y_true, sample_weight = self.process_batch_for_loss_fn(batch)
+        return self.backend.compute_loss(
+            self.model, self.loss_function, model_inp, y_true, sample_weight
+        )
 
-    @staticmethod
-    @tf.function
-    def _jacobian(model: tf.keras.Model, weights: tf.Tensor, loss_function: Callable,
-                  batch: Tuple[tf.Tensor, ...], process_batch_for_loss_fn: ProcessBatchTypeAlias) -> tf.Tensor:
+    def _compute_jacobian(self, batch: Tuple[Any, ...]) -> Tensor:
         """
-        Computes the model's jacobian for a single batch of samples.
+        Computes the model's Jacobian for a single batch of samples.
 
         Parameters
         ----------
-        model
-            The model used for computing the influence score.
-        loss_function
-            The reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
             A batch of tuples of sets of inputs and their corresponding outputs.
-        process_batch_for_loss_fn
-            A callable for preprocessing the batch to transform it into a format that can be treated
-            by the algorithm: (inputs, label, sample weight).
 
         Returns
         -------
         jacobian
-            The jacobian matrix for the set of inputs.
+            The Jacobian matrix for the set of inputs.
         """
-        model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
-        batch_size = tf.shape(y_true)[0]
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(weights)
-            y_pred = loss_function(y_true, model(model_inp), sample_weight)
+        model_inp, y_true, sample_weight = self.process_batch_for_loss_fn(batch)
+        return self.backend.compute_jacobian(
+            self.model, self.weights, self.loss_function,
+            model_inp, y_true, sample_weight
+        )
 
-        jacobian = tape.jacobian(y_pred, weights)
-
-        jacobian = [tf.reshape(j, (batch_size, -1,)) for j in jacobian]
-        jacobian = tf.concat(jacobian, axis=1)
-
-        return jacobian
-
-    @staticmethod
-    @tf.function
-    def _gradient(model: tf.keras.Model, weights: tf.Variable, loss_function: Callable,
-                  batch: Tuple[tf.Tensor, ...], process_batch_for_loss_fn: ProcessBatchTypeAlias) -> tf.Tensor:
+    def _compute_gradient(self, batch: Tuple[Any, ...]) -> Tensor:
         """
-        Computes the model gradients for a single batch of sample.
+        Computes the model's gradient for a single batch of samples.
 
         Parameters
         ----------
-        model
-            The model used for computing the influence score.
-        loss_function
-            Reduction-less loss function to calculate the influence (e.g. cross-entropy).
         batch
             A batch of tuples of sets of inputs and their corresponding outputs.
-        process_batch_for_loss_fn
-            A callable for preprocessing the batch to transform it into a format that can be treated
-            by the algorithm: (inputs, label, sample weight).
 
         Returns
         -------
         gradient
             The gradient vector for the set of inputs.
         """
-        model_inp, y_true, sample_weight = process_batch_for_loss_fn(batch)
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(weights)
-            y_pred = tf.expand_dims(loss_function(y_true, model(model_inp), sample_weight), axis=-1)
+        model_inp, y_true, sample_weight = self.process_batch_for_loss_fn(batch)
+        return self.backend.compute_gradient(
+            self.model, self.weights, self.loss_function,
+            model_inp, y_true, sample_weight
+        )
 
-        gradients = tape.gradient(y_pred, weights)
-        # note that it is the accumulated gradients for all inputs in the batch
-        gradients = [tf.reshape(g, (-1,)) for g in gradients]
-        gradients = tf.concat(gradients, axis=0)
-
-        return gradients
-
-    def _loss_tensor(self, batch: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _loss_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
-        Computes the model's loss on the batched tensor
+        Computes the model's loss on the batched tensor.
 
         Parameters
         ----------
@@ -229,37 +264,28 @@ class BaseInfluenceModel:
         loss_values
             Loss values for each of the points of the batch.
         """
-        loss_values = BaseInfluenceModel._loss(self.model, self.loss_function, batch, self.process_batch_for_loss_fn)
+        return self._compute_loss(batch)
 
-        return loss_values
-
-    def batch_loss(self, dataset: tf.data.Dataset) -> tf.Tensor:
+    def batch_loss(self, dataset: DatasetLike) -> Tensor:
         """
         Computes the model's loss on the whole batched dataset.
 
         Parameters
         ----------
         dataset
-            Batched dataset on which to compute the loss.
+            Batched dataset (tf.data.Dataset or PyTorch DataLoader).
 
         Returns
         -------
         loss_values
             Loss values for each of the points in the dataset.
         """
-        assert_batched_dataset(dataset)
+        losses = [self._compute_loss(batch) for batch in dataset]
+        return self.backend.concat(losses, axis=0)
 
-        loss_values = tf.concat([
-            BaseInfluenceModel._loss(self.model, self.loss_function, batch, self.process_batch_for_loss_fn)
-            for batch in dataset
-        ], axis=0)
-
-        return loss_values
-
-    @tf.function
-    def batch_jacobian_tensor(self, batch: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def batch_jacobian_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
-        Computes the jacobian of the loss wrt the weights of the start_layer on a Tensor
+        Computes the Jacobian of the loss wrt the weights on a Tensor.
 
         Parameters
         ----------
@@ -269,44 +295,30 @@ class BaseInfluenceModel:
         Returns
         -------
         jacobians
-            Matrix of the first-order partial derivative of the loss function wrt the
-            start_layer weights.
+            Matrix of the first-order partial derivative of the loss function wrt weights.
         """
-        jacobians = BaseInfluenceModel._jacobian(self.model, self.weights, self.loss_function,
-                                             batch, self.process_batch_for_loss_fn)
+        return self._compute_jacobian(batch)
 
-        return jacobians
-
-    def batch_jacobian(self, dataset: tf.data.Dataset) -> tf.Tensor:
+    def batch_jacobian(self, dataset: DatasetLike) -> Tensor:
         """
-        Computes the jacobian of the loss wrt the weights of the start_layer on the whole
-        batched dataset.
+        Computes the Jacobian of the loss wrt the weights on the whole batched dataset.
 
         Parameters
         ----------
         dataset
-            Batched dataset on which to compute the jacobian.
+            Batched dataset (tf.data.Dataset or PyTorch DataLoader).
 
         Returns
         -------
         jacobians
-            Matrix of the first-order partial derivative of the loss function wrt the
-            start_layer weights.
+            Matrix of the first-order partial derivative of the loss function wrt weights.
         """
-        assert_batched_dataset(dataset)
+        jacobians = [self._compute_jacobian(batch) for batch in dataset]
+        return self.backend.concat(jacobians, axis=0)
 
-        jacobians = tf.concat([
-            BaseInfluenceModel._jacobian(self.model, self.weights, self.loss_function,
-                                         batch, self.process_batch_for_loss_fn)
-            for batch in dataset
-        ], axis=0)
-
-        return jacobians
-
-    @tf.function
-    def batch_gradient_tensor(self, batch: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def batch_gradient_tensor(self, batch: Tuple[Any, ...]) -> Tensor:
         """
-        Computes the gradient of the loss wrt the weights of the start_layer on a Tensor
+        Computes the gradient of the loss wrt the weights on a Tensor.
 
         Parameters
         ----------
@@ -316,48 +328,39 @@ class BaseInfluenceModel:
         Returns
         -------
         gradients
-            Gradient values of the loss function wrt the start_layer's weights.
+            Gradient values of the loss function wrt weights.
         """
-        gradients = BaseInfluenceModel._gradient(self.model, self.weights, self.loss_function,
-                                             batch, self.process_batch_for_loss_fn)
+        return self._compute_gradient(batch)
 
-        return gradients
-
-    def batch_gradient(self, dataset) -> tf.Tensor:
+    def batch_gradient(self, dataset: DatasetLike) -> Tensor:
         """
-        Computes the gradient of the loss wrt the weights of the start_layer on the whole
-        batched dataset.
+        Computes the gradient of the loss wrt the weights on the whole batched dataset.
 
         Parameters
         ----------
         dataset
-            Batched dataset on which to compute the gradient.
+            Batched dataset (tf.data.Dataset or PyTorch DataLoader).
 
         Returns
         -------
         gradients
-            Gradient values of the loss function wrt the start_layer's weights.
+            Gradient values of the loss function wrt weights.
         """
-        assert_batched_dataset(dataset)
-
-        gradients = tf.stack([
-            BaseInfluenceModel._gradient(self.model, self.weights, self.loss_function,
-                                         batch, self.process_batch_for_loss_fn)
-            for batch in dataset
-        ])
-
-        return gradients
+        gradients = [self._compute_gradient(batch) for batch in dataset]
+        return self.backend.stack(gradients, axis=0)
 
 
 class InfluenceModel(BaseInfluenceModel):
     """
-    A Tensorflow model wrapper for Influence functions which only require the first layer
-    index or name from which we will watch the weights (e.g. one decides to ignore the feature extractor).
+    A framework-agnostic model wrapper for Influence functions which allows specifying
+    layer ranges from which to watch weights (e.g. ignoring a feature extractor).
+
+    Supports both TensorFlow (tf.keras.Model) and PyTorch (nn.Module) models.
 
     Parameters
     ----------
     model
-        Model used for computing influence score.
+        Model used for computing influence score (tf.keras.Model or nn.Module).
     start_layer
         Starting layer name or index for the weights and bias collection. If set to None,
         will search for the last layer with weights before logits.
@@ -365,98 +368,66 @@ class InfluenceModel(BaseInfluenceModel):
         Last layer name or index for the weights and biases collection.
         If set to None, only the layer indicated in the start_layer parameter will be used.
     loss_function
-        Loss function to calculate influence (e.g. keras CategoricalCrossentropy). Make sure not to
-        apply any reduction (Reduction.NONE), and specify correctly if the output is `from_logits`
-        for example.
+        Loss function to calculate influence. Make sure not to apply any reduction.
     process_batch_for_loss_fn
         A callable for preprocessing the batch to transform it into a format that can be treated
         by the algorithm: (inputs, label, sample weight).
     """
-    def __init__(self,
-                 model: tf.keras.Model,
-                 start_layer: Optional[Union[str, int]] = None,
-                 last_layer: Optional[Union[str, int]] = None,
-                 loss_function: Callable = tf.keras.losses.CategoricalCrossentropy(
-                     from_logits=False, reduction=Reduction.NONE),
-                 process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch):
+
+    def __init__(
+        self,
+        model: Model,
+        start_layer: Optional[Union[str, int]] = None,
+        last_layer: Optional[Union[str, int]] = None,
+        loss_function: Optional[LossFunction] = None,
+        process_batch_for_loss_fn: ProcessBatchTypeAlias = default_process_batch
+    ):
         self.start_layer = start_layer
-        weights_to_watch = InfluenceModel._get_weights_of_interest(model, start_layer, last_layer)
-        super().__init__(model, weights_to_watch, loss_function, process_batch_for_loss_fn, weights_processed=True)
+        self.last_layer = last_layer
+
+        # Get the backend first to determine weights
+        backend = get_backend_for_model(model)
+
+        # Get weights for the specified layer range
+        weights_to_watch = self._get_weights_of_interest(backend, model, start_layer, last_layer)
+
+        super().__init__(
+            model,
+            weights_to_watch,
+            loss_function,
+            process_batch_for_loss_fn,
+            weights_processed=True
+        )
 
     @staticmethod
-    def _get_weights_of_interest(model: tf.keras.Model,
-                                 start_layer: Optional[Union[str, int]],
-                                 last_layer: Optional[Union[str, int]]) -> list:
+    def _get_weights_of_interest(
+        backend: BaseBackend,
+        model: Model,
+        start_layer: Optional[Union[str, int]],
+        last_layer: Optional[Union[str, int]]
+    ) -> List[WeightVariable]:
         """
-        Gets the list of trainable weights from layer 'start_layer' to layer 'last_layer' in model
+        Gets the list of trainable weights from layer 'start_layer' to layer 'last_layer'.
 
         Parameters
         ----------
+        backend
+            The framework-specific backend.
         model
-            Model we want to get the weights from.
+            Model to get weights from.
         start_layer
-            Starting layer for the weights and bias collection. If set to None, will search for the
-            last layer with weights before logits.
+            Starting layer for the weights collection. If None, auto-detects the last weight layer.
         last_layer
-            Last layer for the weights and biases collection used in hessian computation. If set to
-            None, only the layer indicated in the start_layer parameter will be used.
+            Last layer for the weights collection. If None, only start_layer is used.
 
         Returns
         -------
         weights
-            A flatten list of weights between the start_layer and the last_layer layers in model.
+            A flat list of weights between start_layer and last_layer.
         """
-        # get an id value for the start_layer parameter
-        if start_layer is None:
-            start_layer = InfluenceModel._find_last_weight_layer(model)
-            start_layer = len(model.layers) + start_layer
-        elif isinstance(start_layer, str):
-            start_layer = from_layer_name_to_layer_idx(model, start_layer)
-        else:
-            assert(isinstance(start_layer, int)), "start_layer should be None, a string or an int"
+        return backend.get_weights_for_layer_range(model, start_layer, last_layer)
 
-        # get the list of layers of interest
-        if last_layer is None:
-            layers_for_influence = [model.layers[start_layer]]
-        elif isinstance(last_layer, str):
-            last_layer = from_layer_name_to_layer_idx(model, last_layer)
-            assert last_layer >= start_layer, \
-                f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
-            layers_for_influence = model.layers[start_layer : last_layer+1]
-            start_layer = last_layer
-        else:
-            assert(isinstance(last_layer, int)), "last_layer should be None, a string or an int"
-            if last_layer < 0:
-                last_layer += len(model.layers)
-                assert last_layer >= start_layer, \
-                    f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
-            elif last_layer == 0:
-                assert last_layer == start_layer, \
-                    f"last_layer id: {last_layer} should be greater than start_layer id: {start_layer}"
-            layers_for_influence = model.layers[start_layer : last_layer+1]
 
-        # get the list of weights of interest
-        weights = [lay.weights for lay in layers_for_influence]
-        weights = list(itertools.chain(*weights))
-        return weights
-
-    @staticmethod
-    def _find_last_weight_layer(model: tf.keras.Model) -> int:
-        """
-        Find and return the id of the last layer before logits with weights.
-
-        Parameters
-        ----------
-        model
-            Model used for computing influence score.
-
-        Returns
-        -------
-        layer_id
-            Id (e.g. -2, -3...) of the layer found.
-        """
-        for layer_id in range(2, len(model.layers)):
-            layer = model.layers[-layer_id]
-            if hasattr(layer, 'weights') and layer.weights:
-                return -layer_id
-        raise ValueError('No layers with weights found for the model.')
+# Backwards compatibility aliases
+TensorFlowInfluenceModel = InfluenceModel
+PyTorchInfluenceModel = InfluenceModel

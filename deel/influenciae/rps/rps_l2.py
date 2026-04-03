@@ -6,17 +6,18 @@
 Module implementing the representer point theorem for kernels for estimating the
 influence of training data-points, as per:
 https://arxiv.org/abs/1811.09720
+
+Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-import tensorflow as tf
-from tensorflow.keras import Model #pylint:  disable=E0611
-from tensorflow.keras.layers import Input, Dense #pylint:  disable=E0611
-from tensorflow.keras.losses import MeanSquaredError, Loss #pylint:  disable=E0611
-from tensorflow.keras.regularizers import L2 #pylint:  disable=E0611
+from typing import Any, Callable, Optional, Tuple, Union
 
 from .base_representer_point import BaseRepresenterPoint
-from ..types import Tuple, Callable, Union
-
-from ..utils import BacktrackingLineSearch, dataset_size
+from ..types import DatasetLike
+from ..utils.model_surgery import (
+    compute_l2_alpha,
+    create_surrogate_linear_model,
+    train_surrogate_linear_model,
+)
 
 
 class RepresenterPointL2(BaseRepresenterPoint):
@@ -29,193 +30,137 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     y_t = sum_i k(alpha_i, x_i, x_t)
 
+    Supports both TensorFlow and PyTorch models through the backend abstraction layer.
+
     Disclaimer: This method only works on classification problems!
 
     Parameters
     ----------
     model
-        A TF2 model that has already been trained
+        A model that has already been trained (TensorFlow or PyTorch).
     train_set
-        A batched TF dataset with the points with which the model was trained
+        A batched dataset with the points with which the model was trained.
     loss_function
         The loss function with which the model was trained. This loss function MUST NOT be reduced.
     lambda_regularization
         The coefficient for the regularization of the surrogate last layer that needs
-        to be trained for this method
+        to be trained for this method.
     scaling_factor
         A float with the scaling factor for the SGD backtracking line-search optimizer
-        for fitting the surrogate linear model
+        for fitting the surrogate linear model.
     epochs
-        An integer for the amount of epochs to fit the linear model
+        An integer for the amount of epochs to fit the linear model.
     layer_index
-        layer of the logits
+        Layer index of the logits (-1 for last layer by default).
     """
 
     def __init__(
             self,
-            model: Model,
-            train_set: tf.data.Dataset,
-            loss_function: Union[Callable[[tf.Tensor, tf.Tensor], tf.Tensor], Loss],
+            model: Any,
+            train_set: DatasetLike,
+            loss_function: Union[Callable, Any],
             lambda_regularization: float,
             scaling_factor: float = 0.1,
             epochs: int = 100,
             layer_index: int = -1,
     ):
         super().__init__(model, train_set, loss_function, layer_index)
-        self.n_train = dataset_size(train_set)
+        self.n_train = self.backend.get_dataset_size(train_set)
         self.train_set = train_set
         self.lambda_regularization = lambda_regularization
         self.scaling_factor = scaling_factor
         self.epochs = epochs
-        self.linear_layer = None
+        self.linear_layer: Optional[Any] = None
         self._train_last_layer(self.epochs)
 
-    def _train_last_layer(self, epochs: int):
+    def _train_last_layer(self, epochs: int) -> None:
         """
-        Trains an L2-regularized surrogate linear model to predict like the model on the
-        training dataset. The optimization is done using a Backtracking Line-Search
-        algorithm with the Armijo condition and SGD as the optimizer as it was done
-        in the original implementation.
+        Train an L2-regularized surrogate linear model to predict like the original head.
 
         Parameters
         ----------
         epochs
-            An integer with the amount of epochs to train the surrogate model
+            An integer with the amount of epochs to train the surrogate model.
         """
         self.linear_layer = self._create_surrogate_model()
-        optimizer = BacktrackingLineSearch(batches_per_epoch=self.n_train / self.train_set._batch_size,  # pylint: disable=W0212
-                                           scaling_factor=self.scaling_factor)  # the optimizer used in the paper's code
-        loss_function = self.loss_function
-        mse_loss = MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+        self.linear_layer = train_surrogate_linear_model(
+            backend=self.backend,
+            surrogate_model=self.linear_layer,
+            feature_extractor=self.feature_extractor,
+            original_head=self.original_head,
+            train_set=self.train_set,
+            loss_function=self.loss_function,
+            scaling_factor=self.scaling_factor,
+            epochs=epochs,
+        )
 
-        self.linear_layer.compile(optimizer=optimizer, loss=mse_loss)
-        for _ in range(epochs):
-            for x_batch, _ in self.train_set:
-                loss, grads, z_batch, y_target = self._learn_step_last_layer(x_batch, mse_loss)
-                optimizer.step(self.linear_layer, loss, z_batch, y_target, grads)
-
-        self.linear_layer.compile(optimizer=optimizer, loss=loss_function)
-
-    @tf.function
-    def _learn_step_last_layer(
-            self,
-            x_batch: tf.Tensor,
-            mse_loss: Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
-    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _create_surrogate_model(self) -> Any:
         """
-        Trains the L2-regularized surrogate linear model to predict like the model on the training
-        dataset for one optimizer step on a single batch.
-
-        Parameters
-        ----------
-        x_batch
-            A training sample wrt to which we wish to compute the gradients
-        mse_loss
-            A callable that computes the MSE loss
-
-        Returns
-        -------
-        A tuple with (value of the loss, gradients of the linear model, the latent space of the batch, the prediction)
-        """
-        z_batch = self.feature_extractor(x_batch)
-        y_target = self.model.layers[-1](z_batch)
-        with tf.GradientTape() as tape:
-            logits = self.linear_layer(z_batch, training=True)
-            loss = mse_loss(y_target, logits)
-        gradients = tape.gradient(loss, self.linear_layer.trainable_weights)
-        return loss, gradients, z_batch, y_target
-
-    def _create_surrogate_model(self) -> Model:
-        """
-        Instances an L2-regularized linear model to use as surrogate with the
-        right input and output shapes.
+        Create an L2-regularized linear surrogate with the right input and output sizes.
 
         Returns
         -------
         surrogate_model
-            A TF2 L2-regularized linear model
+            An L2-regularized linear model.
         """
-        inputs = Input(shape=self.feature_extractor.output_shape[1:], dtype=self.model.output.dtype)
-        last_layer = Dense(self.model.output_shape[-1], use_bias=False,
-                           kernel_regularizer=L2(self.lambda_regularization),
-                           dtype=self.model.output.dtype)
-        outputs = last_layer(inputs)
-        surrogate_model = Model(inputs=inputs, outputs=outputs)
-        surrogate_model.layers[-1].trainable = True
-        surrogate_model.compile(loss=self.model.compiled_loss)
+        return create_surrogate_linear_model(
+            self.backend,
+            self.feature_extractor,
+            self.original_head,
+            self.lambda_regularization,
+        )
 
-        return surrogate_model
-
-    def _compute_alpha(self, z_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+    def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
         """
-        Computes the alpha factor for the kernel approximation. This element gives a notion of
-        the resistance that each training data-point towards minimizing the norm of the linear
-        layer's weight matrix. This is essentially this method's notion of influence score.
+        Compute the alpha factor for the kernel approximation.
 
         Parameters
         ----------
         z_batch
-            a training sample wrt to which we wish to compute the gradients
+            A training sample wrt to which we wish to compute the gradients.
         y_batch
-            label associated to the training sample
+            Label associated to the training sample.
 
         Returns
         -------
         alpha
-            mean of the gradient
+            The alpha coefficients representing the influence score.
         """
-        with tf.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(self.linear_layer.weights)
-            logits = self.linear_layer(z_batch)
-            loss = self.linear_layer.compiled_loss(y_batch, logits)
-        alpha = tape.jacobian(loss, self.linear_layer.weights)[0]
-        alpha = tf.divide(
-            alpha,
-            -2. * self.lambda_regularization * tf.cast(self.n_train, alpha.dtype) + tf.constant(1e-5, dtype=alpha.dtype)
+        assert self.linear_layer is not None
+        return compute_l2_alpha(
+            backend=self.backend,
+            linear_layer=self.linear_layer,
+            loss_function=self.loss_function,
+            z_batch=z_batch,
+            y_batch=y_batch,
+            n_train=self.n_train,
+            lambda_regularization=self.lambda_regularization,
         )
 
-        # Now, divide each of the alpha_i by their feature maps
-        alpha = tf.multiply(
-            alpha,
-            tf.repeat(
-                tf.expand_dims(
-                    tf.divide(tf.ones_like(z_batch), z_batch + tf.constant(1e-5, dtype=alpha.dtype)),
-                    axis=-1),
-                alpha.shape[-1], axis=-1
-            )
-        )  # Do the multiplication part of the inner product
-        alpha = tf.reduce_sum(alpha, axis=1)  # Now do the sum
-
-        return alpha
-
-    def predict_with_kernel(self, samples_to_evaluate: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def predict_with_kernel(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
         """
-        Uses the learned kernel to approximate the model's predictions on a group of samples.
+        Use the learned kernel to approximate the model's predictions on a batch of samples.
 
         Parameters
         ----------
         samples_to_evaluate
             A single batch of tensors with the samples for which we wish to approximate the model's
-            predictions
+            predictions.
 
         Returns
         -------
         predictions
-            A tensor with an approximation of the model's predictions
+            A tensor with an approximation of the model's predictions.
         """
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
-        dataset_influence = dataset_influence.map(lambda x, v: v)
-        dataset_iterator = iter(dataset_influence)
 
-        def body_fun(i, value):
-            v = next(dataset_iterator)
-            i = i + 1
-            value = tf.cast(value, v.dtype) + tf.reduce_sum(v, axis=1)
-            return i, value
-
-        _, predictions = tf.while_loop(lambda i, value: i < dataset_influence.cardinality(), body_fun,
-                                            [tf.constant(0, dtype=tf.int64),
-                                             tf.zeros((tf.shape(samples_to_evaluate[-1])[0],), dtype=tf.float32)])
+        predictions = None
+        for _, influence_values in dataset_influence:
+            batch_pred = self.backend.reduce_sum(influence_values, axis=1)
+            if predictions is None:
+                predictions = batch_pred
+            else:
+                predictions = predictions + batch_pred
 
         return predictions

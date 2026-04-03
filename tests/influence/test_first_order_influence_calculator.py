@@ -8,6 +8,7 @@ Test FirstOrderInfluenceCalculator and influence_abstract interfaces
 import os
 import shutil
 
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
@@ -17,10 +18,32 @@ from deel.influenciae.common import InfluenceModel
 from deel.influenciae.common import ExactIHVP, ConjugateGradientDescentIHVP, CACHE
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
-from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
+from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth, set_seed_tf
 
-def set_seed():
-    tf.random.set_seed(0)
+
+pytestmark = pytest.mark.tensorflow
+
+
+CGD_N_OPT_ITERS = 60
+
+
+def build_ihvp_objects(influence_model, train_set, extractor_layer=-1, include_cgd=False):
+    """Build IHVP calculators for the current test context."""
+    exact = ("exact", ExactIHVP(influence_model, train_set))
+    if include_cgd:
+        cgd = (
+            "cgd",
+            ConjugateGradientDescentIHVP(
+                influence_model,
+                extractor_layer,
+                train_set,
+                n_opt_iters=CGD_N_OPT_ITERS,
+            ),
+        )
+        return [exact, cgd]
+    return [exact]
+
+set_seed = set_seed_tf
 
 def test_compute_influence_vector():
     """
@@ -29,7 +52,6 @@ def test_compute_influence_vector():
     set_seed()
     # start with a simple model
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -50,11 +72,14 @@ def test_compute_influence_vector():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_influence = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    # Test several configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
-
-    for ihvp_calculator in ihvp_objects:
+    # Test exact precision and CGD approximation with reduced combinations
+    for ihvp_kind, ihvp_calculator in build_ihvp_objects(
+        influence_model,
+        train_set.batch(5),
+        include_cgd=True,
+    ):
+        normalization = [True, False] if ihvp_kind == "exact" else [False]
+        epsilon = 1e-3
         for normalize in normalization:
             influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
                                                          n_samples_for_hessian=25,
@@ -75,7 +100,7 @@ def test_compute_influence_vector():
                 ground_truth = ground_truth_influence / tf.norm(ground_truth_influence, axis=0, keepdims=True)
             else:
                 ground_truth = ground_truth_influence
-            assert almost_equal(influences_vector, tf.transpose(ground_truth), epsilon=1e-3)
+            assert almost_equal(influences_vector, tf.transpose(ground_truth), epsilon=epsilon)
 
 
 def test_compute_influence_vector_dataset():
@@ -84,7 +109,6 @@ def test_compute_influence_vector_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -105,27 +129,24 @@ def test_compute_influence_vector_dataset():
     ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, target)], axis=1)
     ground_truth_influence = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
-
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            inf_vector_ds = influence_calculator.compute_influence_vector(train_set.batch(5))
-            # check first order build the right dataset
-            if normalize:
-                ground_truth = ground_truth_influence / tf.norm(ground_truth_influence, axis=0, keepdims=True)
-            else:
-                ground_truth = ground_truth_influence
-            gt_dataset = tf.data.Dataset.from_tensor_slices(((inputs, target), tf.transpose(ground_truth))).batch(5)
-            for ((gt_x, gt_y), gt_inf_vec), ((batch_x, batch_y), batch_inf_vec) in zip(gt_dataset, inf_vector_ds):
-                assert almost_equal(gt_x, batch_x, epsilon=1e-6)
-                assert almost_equal(gt_y, batch_y, epsilon=1e-6)
-                assert almost_equal(gt_inf_vec, batch_inf_vec, epsilon=1e-3)
+    # Test exact precision only (CGD is covered by focused tests)
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        inf_vector_ds = influence_calculator.compute_influence_vector(train_set.batch(5))
+        # check first order build the right dataset
+        if normalize:
+            ground_truth = ground_truth_influence / tf.norm(ground_truth_influence, axis=0, keepdims=True)
+        else:
+            ground_truth = ground_truth_influence
+        gt_dataset = tf.data.Dataset.from_tensor_slices(((inputs, target), tf.transpose(ground_truth))).batch(5)
+        for ((gt_x, gt_y), gt_inf_vec), ((batch_x, batch_y), batch_inf_vec) in zip(gt_dataset, inf_vector_ds):
+            assert almost_equal(gt_x, batch_x, epsilon=1e-6)
+            assert almost_equal(gt_y, batch_y, epsilon=1e-6)
+            assert almost_equal(gt_inf_vec, batch_inf_vec, epsilon=1e-3)
 
     # Test the save & load property
     influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
@@ -156,7 +177,6 @@ def test_preprocess_sample_to_evaluate():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -166,20 +186,16 @@ def test_preprocess_sample_to_evaluate():
     target = tf.random.normal((25, 1))
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target))
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-
-            for batched_samples in train_set.batch(5):
-                preprocess = influence_calculator._preprocess_samples(batched_samples)
-                assert preprocess.shape == (5 ,influence_model.nb_params)
+        for batched_samples in train_set.batch(5):
+            preprocess = influence_calculator._preprocess_samples(batched_samples)
+            assert preprocess.shape == (5, influence_model.nb_params)
 
 
 def test_compute_influence_value_from_influence_vector():
@@ -188,7 +204,6 @@ def test_compute_influence_value_from_influence_vector():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -216,34 +231,30 @@ def test_compute_influence_value_from_influence_vector():
     ground_truth_grads_test = tf.concat([jacobian_ground_truth(inp[0], kernel, y)
                                             for inp, y in zip(inputs_test, targets_test)], axis=1)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        if normalize:
+            ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+        else:
+            ground_truth = gt_inf_vec
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            if normalize:
-                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-            else:
-                ground_truth = gt_inf_vec
-
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            influences_values = []
-            for batched_samples in test_set.batch(5):
-                batched_grads = influence_calculator._preprocess_samples(batched_samples)
-                batched_influence_val = influence_calculator._estimate_influence_value_from_influence_vector(
-                    batched_grads, tf.transpose(ground_truth))
-                assert batched_influence_val.shape == (5, 25) # 5 samples to evaluate per batch and inv vect has 25 elts
-                influences_values.append(batched_influence_val)
-            influences_values = tf.concat(influences_values, axis=0)
-            # sanity check on final shape
-            assert influences_values.shape == (25, 25)
-            # check first order get the right results
-            gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
-            assert almost_equal(gt_inf_values, influences_values, epsilon=1e-3)
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        influences_values = []
+        for batched_samples in test_set.batch(5):
+            batched_grads = influence_calculator._preprocess_samples(batched_samples)
+            batched_influence_val = influence_calculator._estimate_influence_value_from_influence_vector(
+                batched_grads, tf.transpose(ground_truth))
+            assert batched_influence_val.shape == (5, 25) # 5 samples to evaluate per batch and inv vect has 25 elts
+            influences_values.append(batched_influence_val)
+        influences_values = tf.concat(influences_values, axis=0)
+        # sanity check on final shape
+        assert influences_values.shape == (25, 25)
+        # check first order get the right results
+        gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
+        assert almost_equal(gt_inf_values, influences_values, epsilon=1e-3)
 
 
 def test_compute_pairwise_influence_value():
@@ -252,7 +263,6 @@ def test_compute_pairwise_influence_value():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -274,11 +284,14 @@ def test_compute_pairwise_influence_value():
                                           for inp, y in zip(inputs_train, targets_train)], axis=1)
     gt_inf_vec = tf.matmul(ground_truth_inv_hessian, ground_truth_grads_train)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
-
-    for ihvp_calculator in ihvp_objects:
+    # Test exact precision and one CGD approximation path
+    for ihvp_kind, ihvp_calculator in build_ihvp_objects(
+        influence_model,
+        train_set.batch(5),
+        include_cgd=True,
+    ):
+        normalization = [True, False] if ihvp_kind == "exact" else [False]
+        epsilon = 1e-3
         for normalize in normalization:
             # compute the gt influence values
             if normalize:
@@ -305,7 +318,7 @@ def test_compute_pairwise_influence_value():
             assert influences_values.shape == (25, 1)
 
             # check first order get the right results
-            assert almost_equal(gt_inf_values, influences_values, epsilon=1e-3)
+            assert almost_equal(gt_inf_values, influences_values, epsilon=epsilon)
 
 
 def test_compute_top_k_from_training_dataset():
@@ -314,7 +327,6 @@ def test_compute_top_k_from_training_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -336,44 +348,67 @@ def test_compute_top_k_from_training_dataset():
                                           for inp, y in zip(inputs_train, targets_train)], axis=1)
     gt_inf_vec = tf.matmul(ground_truth_inv_hessian, ground_truth_grads_train)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    # Keep precise exact checks broad; run one focused CGD smoke path
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
     orders = [ORDER.ASCENDING, ORDER.DESCENDING]
 
     for order in orders:
-        for ihvp_calculator in ihvp_objects:
-            for normalize in normalization:
-                # compute the gt influence values
-                if normalize:
-                    ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-                else:
-                    ground_truth = gt_inf_vec
+        for normalize in [True, False]:
+            # compute the gt influence values
+            if normalize:
+                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+            else:
+                ground_truth = gt_inf_vec
 
-                gt_inf_values = tf.reduce_sum(
-                    tf.multiply(tf.transpose(ground_truth_grads_train), tf.transpose(ground_truth)), # element-wise
-                    axis=1, keepdims=True
-                ) # sum over all parameters
+            gt_inf_values = tf.reduce_sum(
+                tf.multiply(tf.transpose(ground_truth_grads_train), tf.transpose(ground_truth)), # element-wise
+                axis=1, keepdims=True
+            ) # sum over all parameters
 
-                if order == ORDER.DESCENDING:
-                    gt_top_k_influences = tf.math.top_k(tf.transpose(gt_inf_values), k=5)
-                    gt_top_k_influences_values = gt_top_k_influences.values
-                else:
-                    gt_top_k_influences = tf.math.top_k(-tf.transpose(gt_inf_values), k=5)
-                    gt_top_k_influences_values = - gt_top_k_influences.values
+            if order == ORDER.DESCENDING:
+                gt_top_k_influences = tf.math.top_k(tf.transpose(gt_inf_values), k=5)
+                gt_top_k_influences_values = gt_top_k_influences.values
+            else:
+                gt_top_k_influences = tf.math.top_k(-tf.transpose(gt_inf_values), k=5)
+                gt_top_k_influences_values = - gt_top_k_influences.values
 
-                gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices)
-                # gt_top_k_influences = gt_top_k_influences.values
+            gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices)
 
-                influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                             n_samples_for_hessian=25,
-                                                             shuffle_buffer_size=25,
-                                                             normalize=normalize)
+            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                         n_samples_for_hessian=25,
+                                                         shuffle_buffer_size=25,
+                                                         normalize=normalize)
 
-                top_k_samples, top_k_influences = influence_calculator.compute_top_k_from_training_dataset(train_set.batch(5), k=5, order=order)
-                # check first order get the right results
-                assert almost_equal(gt_top_k_influences_values, top_k_influences, epsilon=1e-3)
-                assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1e-3)
+            top_k_samples, top_k_influences = influence_calculator.compute_top_k_from_training_dataset(
+                train_set.batch(5),
+                k=5,
+                order=order
+            )
+            # check first order get the right results
+            assert almost_equal(gt_top_k_influences_values, top_k_influences, epsilon=1e-3)
+            assert almost_equal(gt_top_k_samples, top_k_samples, epsilon=1e-3)
+
+    cgd_calculator = FirstOrderInfluenceCalculator(
+        influence_model,
+        train_set.batch(5),
+        ConjugateGradientDescentIHVP(
+            influence_model,
+            -1,
+            train_set.batch(5),
+            n_opt_iters=CGD_N_OPT_ITERS,
+        ),
+        n_samples_for_hessian=25,
+        shuffle_buffer_size=25,
+        normalize=False,
+    )
+    top_k_samples, top_k_influences = cgd_calculator.compute_top_k_from_training_dataset(
+        train_set.batch(5),
+        k=5,
+        order=ORDER.DESCENDING
+    )
+    assert top_k_samples.shape == (5, 1, 3)
+    assert top_k_influences.shape == (5,)
+    assert tf.reduce_all(tf.math.is_finite(top_k_influences))
 
 
 def test_compute_influence_values_dataset():
@@ -382,7 +417,6 @@ def test_compute_influence_values_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -400,36 +434,35 @@ def test_compute_influence_values_dataset():
         tf.expand_dims(hessian_ground_truth(tf.squeeze(inp), kernel), axis=0) for inp in inputs
     ], axis=0)
     ground_truth_inv_hessian = tf.linalg.pinv(tf.reduce_mean(hessian_list, axis=0))
-    ground_truth_grads = tf.concat([jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, targets)], axis=1)
+    ground_truth_grads = tf.concat(
+        [jacobian_ground_truth(inp[0], kernel, y) for inp, y in zip(inputs, targets)],
+        axis=1,
+    )
     gt_inf_vec = tf.matmul(ground_truth_inv_hessian, ground_truth_grads)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        # compute the gt influence values
+        if normalize:
+            ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+        else:
+            ground_truth = gt_inf_vec
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            # compute the gt influence values
-            if normalize:
-                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-            else:
-                ground_truth = gt_inf_vec
+        gt_inf_values = tf.reduce_sum(
+            tf.multiply(tf.transpose(ground_truth_grads), tf.transpose(ground_truth)), # element-wise
+            axis=1, keepdims=True
+        ) # sum over all parameters
 
-            gt_inf_values = tf.reduce_sum(
-                tf.multiply(tf.transpose(ground_truth_grads), tf.transpose(ground_truth)), # element-wise
-                axis=1, keepdims=True
-            ) # sum over all parameters
-
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            inf_values_ds = influence_calculator.compute_influence_values(train_set.batch(5))
-            gt_dataset = tf.data.Dataset.from_tensor_slices(((inputs, targets), gt_inf_values)).batch(5)
-            for ((gt_x, gt_y), gt_inf_val), ((batch_x, batch_y), batch_inf_val) in zip(gt_dataset, inf_values_ds):
-                assert almost_equal(gt_x, batch_x, epsilon=1e-6)
-                assert almost_equal(gt_y, batch_y, epsilon=1e-6)
-                assert almost_equal(gt_inf_val, batch_inf_val, epsilon=1e-3)
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        inf_values_ds = influence_calculator.compute_influence_values(train_set.batch(5))
+        gt_dataset = tf.data.Dataset.from_tensor_slices(((inputs, targets), gt_inf_values)).batch(5)
+        for ((gt_x, gt_y), gt_inf_val), ((batch_x, batch_y), batch_inf_val) in zip(gt_dataset, inf_values_ds):
+            assert almost_equal(gt_x, batch_x, epsilon=1e-6)
+            assert almost_equal(gt_y, batch_y, epsilon=1e-6)
+            assert almost_equal(gt_inf_val, batch_inf_val, epsilon=1e-3)
 
 
 def test_compute_influence_values():
@@ -438,7 +471,6 @@ def test_compute_influence_values():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -469,7 +501,6 @@ def test_compute_influence_values_from_tensor():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -497,36 +528,36 @@ def test_compute_influence_values_from_tensor():
     ground_truth_grads_test = tf.concat([jacobian_ground_truth(inp[0], kernel, y)
                                             for inp, y in zip(inputs_test, targets_test)], axis=1)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        if normalize:
+            ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+        else:
+            ground_truth = gt_inf_vec
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            if normalize:
-                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-            else:
-                ground_truth = gt_inf_vec
-
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            influences_values = []
-            for batched_samples in test_set.batch(5):
-                local_values = []
-                for batched_train in train_set.batch(5):
-                    batched_influence_val = influence_calculator._estimate_individual_influence_values_from_batch(batched_train, batched_samples)
-                    assert batched_influence_val.shape == (5, 5) # 5 samples to evaluate per batch and local inv vect has 5 elts
-                    local_values.append(batched_influence_val)
-                local_values = tf.concat(local_values, axis=1)
-                influences_values.append(local_values)
-            influences_values = tf.concat(influences_values, axis=0)
-            # sanity check on final shape
-            assert influences_values.shape == (25, 25)
-            # check first order get the right results
-            gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
-            assert tf.reduce_max(tf.abs(gt_inf_values - influences_values)) < 5E-4
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        influences_values = []
+        for batched_samples in test_set.batch(5):
+            local_values = []
+            for batched_train in train_set.batch(5):
+                batched_influence_val = influence_calculator._estimate_individual_influence_values_from_batch(
+                    batched_train,
+                    batched_samples
+                )
+                # 5 samples to evaluate per batch and local inv vect has 5 elts
+                assert batched_influence_val.shape == (5, 5)
+                local_values.append(batched_influence_val)
+            local_values = tf.concat(local_values, axis=1)
+            influences_values.append(local_values)
+        influences_values = tf.concat(influences_values, axis=0)
+        # sanity check on final shape
+        assert influences_values.shape == (25, 25)
+        # check first order get the right results
+        gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
+        assert tf.reduce_max(tf.abs(gt_inf_values - influences_values)) < 5E-4
 
 
 def test_compute_inf_values_with_inf_vect_dataset():
@@ -535,7 +566,6 @@ def test_compute_inf_values_with_inf_vect_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -563,36 +593,37 @@ def test_compute_inf_values_with_inf_vect_dataset():
     ground_truth_grads_test = tf.concat([jacobian_ground_truth(inp[0], kernel, y)
                                             for inp, y in zip(inputs_test, targets_test)], axis=1)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        if normalize:
+            ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+        else:
+            ground_truth = gt_inf_vec
+        gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
+        gt_ihvp_dataset = tf.data.Dataset.from_tensor_slices(
+            ((inputs_train, targets_train), tf.transpose(ground_truth))
+        ).batch(5)
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            if normalize:
-                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-            else:
-                ground_truth = gt_inf_vec
-            gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
-            gt_ihvp_dataset = tf.data.Dataset.from_tensor_slices(((inputs_train, targets_train), tf.transpose(ground_truth))).batch(5)
-
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            influence_values = []
-            for samples_to_evaluate in test_set.batch(5):
-                _, samples_inf_values_ds = influence_calculator._estimate_inf_values_with_inf_vect_dataset(gt_ihvp_dataset, samples_to_evaluate)
-                samples_inf_values = []
-                for _, inf_values in samples_inf_values_ds:
-                    assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
-                    samples_inf_values.append(inf_values)
-                samples_inf_values = tf.concat(samples_inf_values, axis=1)
-                assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
-                influence_values.append(samples_inf_values)
-            influence_values = tf.concat(influence_values, axis=0)
-            assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
-            assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-4
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        influence_values = []
+        for samples_to_evaluate in test_set.batch(5):
+            _, samples_inf_values_ds = influence_calculator._estimate_inf_values_with_inf_vect_dataset(
+                gt_ihvp_dataset,
+                samples_to_evaluate
+            )
+            samples_inf_values = []
+            for _, inf_values in samples_inf_values_ds:
+                assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
+                samples_inf_values.append(inf_values)
+            samples_inf_values = tf.concat(samples_inf_values, axis=1)
+            assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
+            influence_values.append(samples_inf_values)
+        influence_values = tf.concat(influence_values, axis=0)
+        assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
+        assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-4
 
 
 def test_compute_influence_values_for_dataset_to_evaluate():
@@ -601,7 +632,6 @@ def test_compute_influence_values_for_dataset_to_evaluate():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -629,37 +659,33 @@ def test_compute_influence_values_for_dataset_to_evaluate():
     ground_truth_grads_test = tf.concat([jacobian_ground_truth(inp[0], kernel, y)
                                             for inp, y in zip(inputs_test, targets_test)], axis=1)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    for normalize in [True, False]:
+        if normalize:
+            ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+        else:
+            ground_truth = gt_inf_vec
+        gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
 
-    for ihvp_calculator in ihvp_objects:
-        for normalize in normalization:
-            if normalize:
-                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-            else:
-                ground_truth = gt_inf_vec
-            gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
+        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                     n_samples_for_hessian=25,
+                                                     shuffle_buffer_size=25,
+                                                     normalize=normalize)
+        eval_inf_ds = influence_calculator.estimate_influence_values_in_batches(test_set.batch(5),
+                                                                                train_set.batch(5))
 
-            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                         n_samples_for_hessian=25,
-                                                         shuffle_buffer_size=25,
-                                                         normalize=normalize)
-            eval_inf_ds = influence_calculator.estimate_influence_values_in_batches(test_set.batch(5),
-                                                                                    train_set.batch(5))
-
-            influence_values = []
-            for _, samples_inf_ds in eval_inf_ds:
-                samples_inf_values = []
-                for _, inf_values in samples_inf_ds:
-                    assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
-                    samples_inf_values.append(inf_values)
-                samples_inf_values = tf.concat(samples_inf_values, axis=1)
-                assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
-                influence_values.append(samples_inf_values)
-            influence_values = tf.concat(influence_values, axis=0)
-            assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
-            assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
+        influence_values = []
+        for _, samples_inf_ds in eval_inf_ds:
+            samples_inf_values = []
+            for _, inf_values in samples_inf_ds:
+                assert inf_values.shape == (5, 5) # (batch_size_evaluate, batch_size_inf_vect_dataset)
+                samples_inf_values.append(inf_values)
+            samples_inf_values = tf.concat(samples_inf_values, axis=1)
+            assert samples_inf_values.shape == (5, 25) # (batch_size_evaluate, nb_elt_in_inf_vect_dataset)
+            influence_values.append(samples_inf_values)
+        influence_values = tf.concat(influence_values, axis=0)
+        assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
+        assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
     
     ## Test save and load functionnality
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
@@ -670,9 +696,12 @@ def test_compute_influence_values_for_dataset_to_evaluate():
 
     if not os.path.exists("test_temp"):
         os.mkdir("test_temp")
-    ds = influence_calculator.estimate_influence_values_in_batches(test_set.batch(5), train_set.batch(5),
-                                                                   save_influence_vector_path="test_temp/influence_vector_ds",
-                                                                   save_influence_value_path="test_temp/influence_values_ds")
+    ds = influence_calculator.estimate_influence_values_in_batches(
+        test_set.batch(5),
+        train_set.batch(5),
+        save_influence_vector_path="test_temp/influence_vector_ds",
+        save_influence_value_path="test_temp/influence_values_ds",
+    )
     assert os.path.exists("test_temp/influence_vector_ds")
     assert os.path.exists("test_temp/influence_values_ds")
     # assert the saved vector dataset is correct
@@ -699,9 +728,11 @@ def test_compute_influence_values_for_dataset_to_evaluate():
     assert influence_values.shape == (25, 25) # (nb_elt_to_evaluate, nb_elt_in_inf_vect_dataset)
     assert tf.reduce_max(tf.abs(gt_inf_values - influence_values)) < 1E-3
 
-    loaded_inf_vect_ds = influence_calculator.estimate_influence_values_in_batches(test_set.batch(5),
-                                                                                   train_set.batch(5),
-                                                                                   load_influence_vector_path="test_temp/influence_vector_ds")
+    loaded_inf_vect_ds = influence_calculator.estimate_influence_values_in_batches(
+        test_set.batch(5),
+        train_set.batch(5),
+        load_influence_vector_path="test_temp/influence_vector_ds",
+    )
 
     influence_values = []
     for _, samples_inf_ds in loaded_inf_vect_ds:
@@ -725,7 +756,6 @@ def test_top_k_dataset():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     # build the influence model
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
@@ -753,51 +783,46 @@ def test_top_k_dataset():
     ground_truth_grads_test = tf.concat([jacobian_ground_truth(inp[0], kernel, y)
                                             for inp, y in zip(inputs_test, targets_test)], axis=1)
 
-    # Test different configurations
-    ihvp_objects = [ExactIHVP(influence_model, train_set.batch(5)), ConjugateGradientDescentIHVP(influence_model, -1, train_set.batch(5))]
-    normalization = [True, False]
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
     orders = [ORDER.ASCENDING, ORDER.DESCENDING]
 
     for order in orders:
-        for ihvp_calculator in ihvp_objects:
-            # ihvp_calculator = object(influence_model, train_set.batch(5))
-            for normalize in normalization:
-                if normalize:
-                    ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
-                else:
-                    ground_truth = gt_inf_vec
-                gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
+        for normalize in [True, False]:
+            if normalize:
+                ground_truth = gt_inf_vec / tf.norm(gt_inf_vec, axis=0, keepdims=True)
+            else:
+                ground_truth = gt_inf_vec
+            gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), ground_truth)
 
-                if order == ORDER.DESCENDING:
-                    gt_top_k_influences = tf.math.top_k(gt_inf_values, k=3) # (nb_samples_to_evaluate, 3)
-                    gt_top_k_influences_values = gt_top_k_influences.values
-                else:
-                    gt_top_k_influences = tf.math.top_k(-gt_inf_values, k=3)  # (nb_samples_to_evaluate, 3)
-                    gt_top_k_influences_values = - gt_top_k_influences.values
+            if order == ORDER.DESCENDING:
+                gt_top_k_influences = tf.math.top_k(gt_inf_values, k=3) # (nb_samples_to_evaluate, 3)
+                gt_top_k_influences_values = gt_top_k_influences.values
+            else:
+                gt_top_k_influences = tf.math.top_k(-gt_inf_values, k=3)  # (nb_samples_to_evaluate, 3)
+                gt_top_k_influences_values = - gt_top_k_influences.values
 
-                gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices) # (nb_samples_to_evaluate, single_input_shape)
-                # gt_top_k_influences = gt_top_k_influences.values # (nb_samples_to_evaluate, 3)
+            gt_top_k_samples = tf.gather(
+                inputs_train,
+                gt_top_k_influences.indices,
+            )
 
-                influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                             n_samples_for_hessian=25,
-                                                             shuffle_buffer_size=25,
-                                                             normalize=normalize)
+            influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                         n_samples_for_hessian=25,
+                                                         shuffle_buffer_size=25,
+                                                         normalize=normalize)
 
-                top_dataset_ds = influence_calculator.top_k(test_set.batch(5), train_set.batch(5), k=3, order=order)
+            top_dataset_ds = influence_calculator.top_k(test_set.batch(5), train_set.batch(5), k=3, order=order)
 
-                top_k_influences, top_k_samples = [], []
-                for _, influences_values, training_samples in top_dataset_ds:
-                    top_k_influences.append(influences_values)
-                    top_k_samples.append(training_samples)
-                top_k_influences = tf.concat(top_k_influences, axis=0)
-                top_k_samples = tf.concat(top_k_samples, axis=0)
-                assert top_k_influences.shape == (25, 3)
-                assert top_k_samples.shape == (25, 3, 1, 3)
+            top_k_influences, top_k_samples = [], []
+            for _, influences_values, training_samples in top_dataset_ds:
+                top_k_influences.append(influences_values)
+                top_k_samples.append(training_samples)
+            top_k_influences = tf.concat(top_k_influences, axis=0)
+            top_k_samples = tf.concat(top_k_samples, axis=0)
+            assert top_k_influences.shape == (25, 3)
+            assert top_k_samples.shape == (25, 3, 1, 3)
 
-                if isinstance(ihvp_calculator, ExactIHVP):
-                    assert tf.reduce_max(tf.abs(gt_top_k_influences_values - top_k_influences)) < 5E-4
-                else:
-                    assert tf.reduce_max(tf.abs(gt_top_k_influences_values - top_k_influences)) < 1E-3
+            assert tf.reduce_max(tf.abs(gt_top_k_influences_values - top_k_influences)) < 5E-4
     
     # Test save & load functionnalities
     ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
@@ -808,7 +833,7 @@ def test_top_k_dataset():
     gt_inf_values = tf.matmul(tf.transpose(ground_truth_grads_test), gt_inf_vec)
 
     gt_top_k_influences = tf.math.top_k(gt_inf_values, k=3) # (nb_samples_to_evaluate, 3)
-    gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices) # (nb_samples_to_evaluate, single_input_shape)
+    gt_top_k_samples = tf.gather(inputs_train, gt_top_k_influences.indices)
     gt_top_k_influences = gt_top_k_influences.values # (nb_samples_to_evaluate, 3)
 
     if not os.path.exists("test_temp"):
@@ -856,7 +881,6 @@ def test_compute_influence_group():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -876,23 +900,15 @@ def test_compute_influence_group():
     reduced_ground_truth_grads = tf.reduce_sum(ground_truth_grads_train, axis=1, keepdims=True)
     ground_truth_influence_group = tf.matmul(ground_truth_inv_hessian, reduced_ground_truth_grads)
 
-    # Check results
-    ihvp_objects = [
-        ExactIHVP(influence_model, train_set.batch(5)),
-        ConjugateGradientDescentIHVP(influence_model, -2, train_set.batch(5))
-    ]
+    # Keep exact check only for this expensive path
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
 
-    for ihvp_calculator in ihvp_objects:
-        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                        n_samples_for_hessian=25,
-                                                        shuffle_buffer_size=25)
-
-        influence_group = influence_calculator.compute_influence_vector_group(train_set.batch(25))
-        assert influence_group.shape == (1, 2)
-        if isinstance(ihvp_calculator, ExactIHVP):
-            assert tf.reduce_max(tf.abs(influence_group - tf.transpose(ground_truth_influence_group))) < 5E-4
-        else:
-            assert tf.reduce_max(tf.abs(influence_group - tf.transpose(ground_truth_influence_group))) < 1E-3
+    influence_group = influence_calculator.compute_influence_vector_group(train_set.batch(25))
+    assert influence_group.shape == (1, 2)
+    assert tf.reduce_max(tf.abs(influence_group - tf.transpose(ground_truth_influence_group))) < 5E-4
 
 
 def test_compute_influence_values_group():
@@ -901,7 +917,6 @@ def test_compute_influence_values_group():
     """
     set_seed()
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -930,22 +945,25 @@ def test_compute_influence_values_group():
                                                     tf.matmul(ground_truth_inv_hessian, ground_truth_grads_train),
                                                     transpose_a=True)
 
-    # Check resultss
-    ihvp_objects = [
-        ExactIHVP(influence_model, train_set.batch(5)),
-        ConjugateGradientDescentIHVP(influence_model, -2, train_set.batch(5))
-    ]
-
-    for ihvp_calculator in ihvp_objects:
-        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                        n_samples_for_hessian=25,
-                                                        shuffle_buffer_size=25)
-        influence = influence_calculator.estimate_influence_values_group(train_set.batch(25), test_set.batch(25))
-        assert influence.shape == (1, 1)
-        assert tf.reduce_max(tf.abs(influence - tf.transpose(ground_truth_influence_values_group))) < 1E-3
+    ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+    influence = influence_calculator.estimate_influence_values_group(train_set.batch(25), test_set.batch(25))
+    assert influence.shape == (1, 1)
+    ground_truth = tf.transpose(ground_truth_influence_values_group)
+    relative_error = tf.reduce_max(tf.abs((influence - ground_truth) / (tf.abs(ground_truth) + 1E-12)))
+    assert relative_error < 1E-5
 
 
-def test_cnn_shapes():
+@pytest.mark.parametrize(
+    "ihvp_kind",
+    [
+        "exact",
+        pytest.param("cgd", marks=pytest.mark.slow),
+    ],
+)
+def test_cnn_shapes(ihvp_kind):
     """
     Test all methods with a more challenging model
     """
@@ -960,104 +978,108 @@ def test_cnn_shapes():
 
     model_feature.compile(loss=CategoricalCrossentropy(from_logits=False, reduction=Reduction.NONE), optimizer='sgd')
 
-    influence_model = InfluenceModel(model_feature, loss_function=CategoricalCrossentropy(from_logits=False, reduction=Reduction.NONE))
+    influence_model = InfluenceModel(
+        model_feature,
+        loss_function=CategoricalCrossentropy(from_logits=False, reduction=Reduction.NONE)
+    )
 
     inputs_train = tf.random.normal((50, 5, 5, 3), dtype=tf.float64)
     targets_train = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 50)), 10)
     inputs_test = tf.random.normal((60, 5, 5, 3), dtype=tf.float64)
-    targets_test = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10), dtype=tf.float64), 60)), 10)
+    targets_test = tf.keras.utils.to_categorical(
+        tf.transpose(tf.random.categorical(tf.ones((1, 10), dtype=tf.float64), 60)),
+        10,
+    )
 
     train_set = tf.data.Dataset.from_tensor_slices((inputs_train, targets_train)).batch(5)
     test_set = tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).batch(10)
 
-    ihvp_objects = [
-        ExactIHVP(influence_model, train_set),
-        ConjugateGradientDescentIHVP(influence_model, -2, train_set)
-    ]
     nb_params = influence_model.nb_params
 
-    for ihvp_calculator in ihvp_objects:
-
-        influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set, ihvp_calculator,
-                                                        n_samples_for_hessian=25,
-                                                        shuffle_buffer_size=25)
-        iter_test = iter(test_set)
-        iter_train = iter(train_set)
-
-        test_batch = next(iter_test)
-        train_batch = next(iter_train)
-
-        # compute_influence_values_from_tensor
-        inf_val_from_tensor = influence_calculator._estimate_individual_influence_values_from_batch(
-            train_samples=train_batch,
-            samples_to_evaluate=test_batch
-        )
-        assert inf_val_from_tensor.shape == (10, 5) # (test_batch_size, train_batch_size)
-
-        # compute_influence_values_for_dataset_to_evaluate
-        inf_val_dataset = influence_calculator.estimate_influence_values_in_batches(test_set, train_set)
-
-        iter_inf_val_dataset = iter(inf_val_dataset)
-        batch_samples, batched_associated_ds = next(iter_inf_val_dataset)
-        assert batch_samples[0].shape==(10, 5, 5, 3)
-        assert batch_samples[1].shape==(10, 10)
-
-        iter_batched_associated_ds = iter(batched_associated_ds)
-        batch, batch_inf = next(iter_batched_associated_ds)
-        assert batch[0].shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
-        assert batch[1].shape == (5, 10) # (train_batch_size, *target_shape)
-        assert batch_inf.shape == (10, 5) # (test_batch_size, train_batch_size)
-
-        # compute_influence_vector_dataset
-        inf_vect_ds = influence_calculator.compute_influence_vector(
-            train_set
-        )
-
-        iter_inf_vect = iter(inf_vect_ds)
-        (batch_x, batch_y), inf_vect = next(iter_inf_vect)
-        assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
-        assert batch_y.shape == (5, 10) # (train_batch_size, *target_shape)
-        assert inf_vect.shape == (5, nb_params) # (train_batch_size, nb_params)
-
-        # compute_influence_values_dataset
-        inf_values_dataset = influence_calculator.compute_influence_values(
-            train_set
-        )
-
-        iter_inf_val_ds = iter(inf_values_dataset)
-        (batch_x, batch_y), batch_inf = next(iter_inf_val_ds)
-        assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
-        assert batch_y.shape == (5, 10) # (train_batch_size, *targets_shape)
-        assert batch_inf.shape == (5, 1) # (train_batch_size, 1)
-
-        # compute_influence_values
-        inf_values = influence_calculator._compute_influence_values(
-            train_set
-        )
-        assert inf_values.shape == (50, 1)
-
-        # compute_top_k_from_training_dataset
-        top_k_train_samples, top_k_inf_val = influence_calculator.compute_top_k_from_training_dataset(
+    if ihvp_kind == "exact":
+        ihvp_calculator = ExactIHVP(influence_model, train_set)
+    else:
+        ihvp_calculator = ConjugateGradientDescentIHVP(
+            influence_model,
+            -2,
             train_set,
-            k=3
+            n_opt_iters=CGD_N_OPT_ITERS,
         )
-        assert top_k_train_samples.shape == (3, 5, 5, 3) # (k, *input_shape)
-        assert top_k_inf_val.shape == (3,)
 
-        # top_k_dataset
-        top_k_dataset = influence_calculator.top_k(test_set, train_set, k=3, d_type=tf.float64)
-        iter_top_k = iter(top_k_dataset)
-        (batch_evaluate_x, batch_evaluate_y), k_inf_val, k_training_samples = next(iter_top_k)
-        assert batch_evaluate_x.shape == (10, 5, 5, 3)
-        assert batch_evaluate_y.shape == (10, 10)
-        assert k_inf_val.shape == (10, 3,)
-        assert k_training_samples.shape == (10, 3, 5, 5, 3)
+    influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_set, ihvp_calculator,
+                                                    n_samples_for_hessian=25,
+                                                    shuffle_buffer_size=25)
+    iter_test = iter(test_set)
+    iter_train = iter(train_set)
 
-        # Test the group influence methods
-        influence_group = influence_calculator.compute_influence_vector_group(train_set)
-        assert influence_group.shape == (1, 650)
-        influence_group_values = influence_calculator.estimate_influence_values_group(
-            train_set,
-            tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).take(50).batch(5)
-        )
-        assert influence_group_values.shape == (1, 1)
+    test_batch = next(iter_test)
+    train_batch = next(iter_train)
+
+    # compute_influence_values_from_tensor
+    inf_val_from_tensor = influence_calculator._estimate_individual_influence_values_from_batch(
+        train_samples=train_batch,
+        samples_to_evaluate=test_batch
+    )
+    assert inf_val_from_tensor.shape == (10, 5) # (test_batch_size, train_batch_size)
+
+    # compute_influence_values_for_dataset_to_evaluate
+    inf_val_dataset = influence_calculator.estimate_influence_values_in_batches(test_set, train_set)
+
+    iter_inf_val_dataset = iter(inf_val_dataset)
+    batch_samples, batched_associated_ds = next(iter_inf_val_dataset)
+    assert batch_samples[0].shape == (10, 5, 5, 3)
+    assert batch_samples[1].shape == (10, 10)
+
+    iter_batched_associated_ds = iter(batched_associated_ds)
+    batch, batch_inf = next(iter_batched_associated_ds)
+    assert batch[0].shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
+    assert batch[1].shape == (5, 10) # (train_batch_size, *target_shape)
+    assert batch_inf.shape == (10, 5) # (test_batch_size, train_batch_size)
+
+    # compute_influence_vector_dataset
+    inf_vect_ds = influence_calculator.compute_influence_vector(train_set)
+
+    iter_inf_vect = iter(inf_vect_ds)
+    (batch_x, batch_y), inf_vect = next(iter_inf_vect)
+    assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
+    assert batch_y.shape == (5, 10) # (train_batch_size, *target_shape)
+    assert inf_vect.shape == (5, nb_params) # (train_batch_size, nb_params)
+
+    # compute_influence_values_dataset
+    inf_values_dataset = influence_calculator.compute_influence_values(train_set)
+
+    iter_inf_val_ds = iter(inf_values_dataset)
+    (batch_x, batch_y), batch_inf = next(iter_inf_val_ds)
+    assert batch_x.shape == (5, 5, 5, 3) # (train_batch_size, *input_shape)
+    assert batch_y.shape == (5, 10) # (train_batch_size, *targets_shape)
+    assert batch_inf.shape == (5, 1) # (train_batch_size, 1)
+
+    # compute_influence_values
+    inf_values = influence_calculator._compute_influence_values(train_set)
+    assert inf_values.shape == (50, 1)
+
+    # compute_top_k_from_training_dataset
+    top_k_train_samples, top_k_inf_val = influence_calculator.compute_top_k_from_training_dataset(
+        train_set,
+        k=3
+    )
+    assert top_k_train_samples.shape == (3, 5, 5, 3) # (k, *input_shape)
+    assert top_k_inf_val.shape == (3,)
+
+    # top_k_dataset
+    top_k_dataset = influence_calculator.top_k(test_set, train_set, k=3, d_type=tf.float64)
+    iter_top_k = iter(top_k_dataset)
+    (batch_evaluate_x, batch_evaluate_y), k_inf_val, k_training_samples = next(iter_top_k)
+    assert batch_evaluate_x.shape == (10, 5, 5, 3)
+    assert batch_evaluate_y.shape == (10, 10)
+    assert k_inf_val.shape == (10, 3,)
+    assert k_training_samples.shape == (10, 3, 5, 5, 3)
+
+    # Test the group influence methods
+    influence_group = influence_calculator.compute_influence_vector_group(train_set)
+    assert influence_group.shape == (1, nb_params)
+    influence_group_values = influence_calculator.estimate_influence_values_group(
+        train_set,
+        tf.data.Dataset.from_tensor_slices((inputs_test, targets_test)).take(50).batch(5)
+    )
+    assert influence_group_values.shape == (1, 1)

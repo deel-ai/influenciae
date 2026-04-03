@@ -14,16 +14,13 @@ the computation can be written as a matrix-vector product with a matrix that can
 """
 from abc import abstractmethod
 from enum import Enum
-from os import path
+from typing import Any, Optional, Tuple
 from warnings import warn
-from xml.dom import NotFoundErr
 
-import tensorflow as tf
-
-from ..utils import BatchSort, BaseNearestNeighbors, LinearNearestNeighbors, ORDER
-from ..utils import assert_batched_dataset
-from ..types import Optional, Tuple
-from ..utils.tf_operations import map_to_device, get_device
+from .backend import BaseBackend
+from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
+from ..utils.sorted_dict import BatchSort, ORDER
+from ..types import DType, DatasetLike, Tensor
 
 
 class CACHE(Enum):
@@ -41,10 +38,25 @@ class SelfInfluenceCalculator:
     decomposed into an inner product between an "influence vector" reflecting the influence
     of the training points and another vector related to a test point. In particular, it will
     be used for RepresenterPointL2 and [WIP] the techniques based on adversarial attacks.
+
+    Attributes
+    ----------
+    backend
+        The framework-specific backend for operations.
     """
 
+    # Backend is set by subclasses that have access to a model.
+    backend: BaseBackend
+
+    @property
+    def _backend(self) -> BaseBackend:
+        """Return initialized backend instance."""
+        if self.backend is None:
+            raise ValueError("Backend is not initialized. Instantiate a calculator with a valid model first.")
+        return self.backend
+
     @abstractmethod
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -60,17 +72,17 @@ class SelfInfluenceCalculator:
         """
         raise NotImplementedError()
 
-    def compute_influence_values(self, train_set: tf.data.Dataset, device: Optional[str] = None) -> tf.data.Dataset:
+    def compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> DatasetLike:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
 
-        If only looking for the values, consider using the utility in deel.influenciae.utils.tf_operations:
-        extract_only_values for converting this result into a tensor.
+        If only looking for the values, use `_compute_influence_values`,
+        which returns a tensor directly.
 
         Parameters
         ----------
         train_set
-            A TF dataset with the (full or partial) model's training dataset.
+            A dataset with the (full or partial) model's training dataset.
         device
             Device where the computation will be executed
 
@@ -79,12 +91,13 @@ class SelfInfluenceCalculator:
         train_set
             A dataset containing the tuple: (batch of training samples, influence score)
         """
-        train_set = map_to_device(train_set, lambda *batch_data: (
-            batch_data, self._compute_influence_value_from_batch(batch_data)), device)
+        return self._backend.map_dataset(
+            train_set,
+            lambda *batch_data: (batch_data, self._compute_influence_value_from_batch(batch_data)),
+            device
+        )
 
-        return train_set
-
-    def _compute_influence_values(self, train_set: tf.data.Dataset, device: Optional[str] = None) -> tf.Tensor:
+    def _compute_influence_values(self, train_set: DatasetLike, device: Optional[str] = None) -> Optional[Tensor]:
         """
         Compute the influence score for each sample of the provided (full or partial) model's training dataset.
         This version returns a tensor instead of a dataset.
@@ -93,28 +106,33 @@ class SelfInfluenceCalculator:
         Parameters
         ----------
         train_set
-            A TF dataset with the (full or partial) model's training dataset.
+            A dataset with the (full or partial) model's training dataset.
         Returns
         -------
         influence score
             A tensor with the sample's influence scores.
         """
         influences_values = self.compute_influence_values(train_set, device)
-        influences_values = influences_values.map(
-            lambda _, inf_val: inf_val
-        )
-        inf_val = None
-        for batch_inf in influences_values:
-            inf_val = batch_inf if inf_val is None else tf.concat([inf_val, batch_inf], axis=0)
 
-        return inf_val
+        # Extract just the influence values
+        inf_val_list = []
+        for item in influences_values:
+            if isinstance(item, (list, tuple)):
+                # item is (batch_data, inf_val)
+                inf_val_list.append(item[-1])
+            else:
+                inf_val_list.append(item)
+
+        if inf_val_list:
+            return self._backend.concat(inf_val_list, axis=0)
+        return None
 
     def compute_top_k_from_training_dataset(
             self,
-            train_set: tf.data.Dataset,
+            train_set: DatasetLike,
             k: int,
             order: ORDER = ORDER.DESCENDING
-    ) -> Tuple[tf.Tensor, tf.Tensor]:
+    ) -> Tuple[Tensor, Tensor]:
         """
         Compute the k most influential data-points of the model's training dataset by computing
         Cook's distance for each point individually.
@@ -122,7 +140,7 @@ class SelfInfluenceCalculator:
         Parameters
         ----------
         train_set
-            A TF dataset containing the points on which the model was trained.
+            A dataset containing the points on which the model was trained.
         k
             An integer with the number of most important samples we wish to keep
         order
@@ -137,28 +155,60 @@ class SelfInfluenceCalculator:
             provided.
             - influences_values: The influence score corresponding to these k most influential samples.
         """
-        assert_batched_dataset(train_set)
-        elt_spec = train_set.element_spec[0]
-        batch_sorted_dict = BatchSort(elt_spec.shape[1:], (1, k), dtype=elt_spec.dtype, order=order)
+        self._backend.assert_batched_dataset(train_set)
+
+        # Get element spec for BatchSort initialization
+        elt_spec = self._backend.get_dataset_element_spec(train_set)
+        if isinstance(elt_spec, (list, tuple)):
+            first_spec = elt_spec[0]
+        else:
+            first_spec = elt_spec
+
+        # Get shape and dtype from spec
+        shape = None
+        dtype = None
+        if hasattr(first_spec, 'shape'):
+            shape = first_spec.shape[1:]  # Remove batch dimension
+            dtype = first_spec.dtype
+        elif isinstance(first_spec, dict):
+            shape = first_spec['shape'][1:]
+            dtype = first_spec['dtype']
+
+        # Fallback: get from first batch if not available from spec
+        if shape is None:
+            for batch in train_set:
+                first_tensor = batch[0] if isinstance(batch, (list, tuple)) else batch
+                shape = self._backend.tensor_shape(first_tensor)[1:]
+                dtype = first_tensor.dtype
+                break
+
+        if shape is None:
+            raise ValueError("Could not determine tensor shape from dataset")
+
+        batch_sorted_dict = BatchSort(shape, (1, k), dtype=dtype, order=order)
 
         for batch in train_set:
             influence_values = self._compute_influence_value_from_batch(batch)
-            if len(influence_values.shape) == 1:
-                influence_values = tf.expand_dims(influence_values, axis=-1)
-            batch_sorted_dict.add_all(tf.expand_dims(batch[0], axis=0), tf.transpose(influence_values))
+            if self._backend.tensor_ndim(influence_values) == 1:
+                influence_values = self._backend.expand_dims(influence_values, axis=-1)
+
+            batch_input = batch[0] if isinstance(batch, (list, tuple)) else batch
+            batch_sorted_dict.add_all(
+                self._backend.expand_dims(batch_input, axis=0),
+                self._backend.transpose(influence_values)
+            )
 
         best_samples, best_values = batch_sorted_dict.get()
-        influence_values = tf.stack(best_values)
-        training_samples = tf.concat(
-            [tf.expand_dims(v, axis=0) for v in best_samples], axis=0
-        )
-        training_samples, influence_values = tf.squeeze(training_samples, axis=0), tf.squeeze(influence_values, axis=0)
+        # best_values is already a tensor of shape (1, k), just squeeze the first dimension
+        influence_values = self._backend.squeeze(best_values, axis=0)
+        # best_samples is of shape (1, k, ...), squeeze the first dimension
+        training_samples = self._backend.squeeze(best_samples, axis=0)
 
         return training_samples, influence_values
 
-    def _save_dataset(self, dataset: tf.data.Dataset, load_or_save_path: str) -> None:
+    def _save_dataset(self, dataset: DatasetLike, load_or_save_path: str) -> None:
         """
-        Save a dataset in the TF dataset format in the specified path.
+        Save a dataset in the appropriate format for the backend.
 
         Parameters
         ----------
@@ -167,11 +217,11 @@ class SelfInfluenceCalculator:
         load_or_save_path
             The path to save the dataset
         """
-        tf.data.experimental.save(dataset, load_or_save_path)
+        self._backend.save_dataset(dataset, load_or_save_path)
 
-    def _load_dataset(self, dataset_path: str) -> tf.data.Dataset:
+    def _load_dataset(self, dataset_path: str) -> DatasetLike:
         """
-        Loads a dataset in the TF format from the specified path.
+        Loads a dataset from the specified path.
 
         Parameters
         ----------
@@ -183,11 +233,7 @@ class SelfInfluenceCalculator:
         dataset
             The target dataset
         """
-        if path.exists(dataset_path):
-            dataset = tf.data.experimental.load(dataset_path)
-        else:
-            raise NotFoundErr(f"The dataset path: {dataset_path} was not found")
-        return dataset
+        return self._backend.load_dataset(dataset_path)
 
 
 class BaseInfluenceCalculator(SelfInfluenceCalculator):
@@ -205,7 +251,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     """
 
     @abstractmethod
-    def _preprocess_samples(self, samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Any:
         """
         Preprocess a sample to evaluate
 
@@ -220,7 +266,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         raise NotImplementedError()
 
     @abstractmethod
-    def _compute_influence_vector(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Any:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -239,17 +285,17 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def compute_influence_vector(
             self,
-            train_set: tf.data.Dataset,
+            train_set: DatasetLike,
             save_influence_vector_ds_path: Optional[str] = None,
             device: Optional[str] = None
-    ) -> tf.data.Dataset:
+    ) -> DatasetLike:
         """
         Compute the influence vector for each sample of the provided (full or partial) model's training dataset.
 
         Parameters
         ----------
         train_set
-            A TF dataset with the (full or partial) model's training dataset.
+            A dataset with the (full or partial) model's training dataset.
         save_influence_vector_ds_path
             The path to save or load the influence vector of the training dataset. If specified,
             load the dataset if it has already been computed, otherwise, compute the influence vector and
@@ -262,23 +308,35 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         inf_vect_ds
             A dataset containing the tuple: (batch of training samples, influence vector)
         """
-        inf_vect_ds = map_to_device(train_set, lambda *batch: (batch, self._compute_influence_vector(batch)), device)
+        inf_vect_ds = self._backend.map_dataset(
+            train_set,
+            lambda *batch: (batch, self._compute_influence_vector(batch)),
+            device
+        )
+
         if save_influence_vector_ds_path is not None:
-            inf_vect = inf_vect_ds.map(lambda *batch: batch[-1])
-            self._save_dataset(inf_vect.unbatch(), save_influence_vector_ds_path)
+            # Explicit cache boundary: we save and return the same computed dataset.
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
+            inf_vect_only_ds = self._backend.map_dataset(
+                inf_vect_ds,
+                lambda *item: item[-1],
+                device
+            )
+            unbatched_inf_vect = self._backend.unbatch_dataset(inf_vect_only_ds)
+            self._save_dataset(unbatched_inf_vect, save_influence_vector_ds_path)
 
         return inf_vect_ds
 
     def estimate_influence_values_in_batches(
             self,
-            dataset_to_evaluate: tf.data.Dataset,
-            train_set: tf.data.Dataset,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
             load_influence_vector_path: Optional[str] = None,
             save_influence_vector_path: Optional[str] = None,
             save_influence_value_path: Optional[str] = None,
             device: Optional[str] = None
-    ) -> tf.data.Dataset:
+    ) -> DatasetLike:
         """
         Estimates the influence that each point in the provided training dataset has on each of the test points.
         This can provide some insights as to what makes the model predict a certain way for the given test points,
@@ -287,10 +345,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         Parameters
         ----------
         dataset_to_evaluate
-            A TF dataset containing the test samples for which to compute the effect of removing each of the provided
+            A dataset containing the test samples for which to compute the effect of removing each of the provided
             training points (individually).
         train_set
-            A TF dataset containing the model's training dataset (partial or full).
+            A dataset containing the model's training dataset (partial or full).
         influence_vector_in_cache
             An enum indicating if intermediary values are to be cached (either in memory or on the disk) or not.
             Options include CACHE.MEMORY (0) for caching in memory, CACHE.DISK (1) for the disk and CACHE.NO_CACHE (2)
@@ -320,17 +378,24 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         if load_influence_vector_path is not None and influence_vector_in_cache == CACHE.DISK:
             inf_vect_ds = self._load_dataset(load_influence_vector_path)
-            batch_size = train_set._batch_size  # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((train_set, inf_vect_ds.batch(batch_size)))
+            batch_size = self._backend.get_dataset_batch_size(train_set)
+            inf_vect_ds = self._backend.zip_datasets(
+                train_set,
+                self._backend.batch_dataset(inf_vect_ds, batch_size)
+            )
         else:
             inf_vect_ds = self.compute_influence_vector(train_set, save_influence_vector_path, device)
 
         if influence_vector_in_cache == CACHE.MEMORY:
-            inf_vect_ds = inf_vect_ds.cache()
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
 
-        influence_value_dataset = map_to_device(dataset_to_evaluate,
-                                                lambda *batch_evaluate: self._estimate_inf_values_with_inf_vect_dataset(
-                                                    inf_vect_ds, batch_evaluate), device)
+        influence_value_dataset = self._backend.map_dataset(
+            dataset_to_evaluate,
+            lambda *batch_evaluate: self._estimate_inf_values_with_inf_vect_dataset(
+                inf_vect_ds, batch_evaluate, device
+            ),
+            device
+        )
 
         if save_influence_value_path is not None:
             for batch_idx, (_, samples_inf_val_dataset) in enumerate(influence_value_dataset):
@@ -340,18 +405,18 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def top_k(  # pylint: disable=R0913
             self,
-            dataset_to_evaluate: tf.data.Dataset,
-            train_set: tf.data.Dataset,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
             k: int = 5,
-            nearest_neighbors: BaseNearestNeighbors = LinearNearestNeighbors(),
+            nearest_neighbors: Optional[BaseNearestNeighbors] = None,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
             load_influence_vector_ds_path: Optional[str] = None,
             save_influence_vector_ds_path: Optional[str] = None,
             save_top_k_ds_path: Optional[str] = None,
             order: ORDER = ORDER.DESCENDING,
-            d_type: tf.DType = tf.float32,
+            d_type: Optional[DType] = None,
             device: Optional[str] = None
-    ) -> tf.data.Dataset:
+    ) -> DatasetLike:
         """
         Find the top-k closest elements for each element of dataset to evaluate in the training dataset
         The method will return a dataset containing a tuple of:
@@ -381,7 +446,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             Either ORDER.DESCENDING or ORDER.ASCENDING depending on if we wish to find the top-k or
             bottom-k samples, respectively.
         d_type
-            The data-type of the tensors.
+            The data-type of the tensors. If None, will be inferred.
         device
             Device where the computation will be executed
 
@@ -397,20 +462,38 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         if not influence_vector_in_cache and load_influence_vector_ds_path is None:
             warn("Warning: The computation is not efficient thinks to use cache or disk save")
 
+        # Create nearest_neighbors with the correct backend if not provided
+        if nearest_neighbors is None:
+            nearest_neighbors = LinearNearestNeighbors(backend=self._backend)
+
         if influence_vector_in_cache == CACHE.MEMORY:
             load_influence_vector_ds_path = None
 
         if load_influence_vector_ds_path is not None and influence_vector_in_cache == CACHE.DISK:
             inf_vect_ds = self._load_dataset(load_influence_vector_ds_path)
-            batch_size = train_set._batch_size  # pylint: disable=W0212
-            inf_vect_ds = tf.data.Dataset.zip((train_set, inf_vect_ds.batch(batch_size)))
+            batch_size = self._backend.get_dataset_batch_size(train_set)
+            inf_vect_ds = self._backend.zip_datasets(
+                train_set,
+                self._backend.batch_dataset(inf_vect_ds, batch_size)
+            )
         else:
             inf_vect_ds = self.compute_influence_vector(train_set, save_influence_vector_ds_path, device)
 
         if influence_vector_in_cache == CACHE.MEMORY:
-            inf_vect_ds = inf_vect_ds.cache()
+            inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
 
-        batch_size_eval = int(dataset_to_evaluate._batch_size)  # pylint: disable=W0212
+        batch_size_eval = self._backend.get_dataset_batch_size(dataset_to_evaluate)
+
+        # Infer dtype if not provided
+        if d_type is None:
+            # Get dtype from first batch of inf_vect_ds
+            for item in inf_vect_ds:
+                if isinstance(item, (list, tuple)):
+                    d_type = item[-1].dtype
+                else:
+                    d_type = item.dtype
+                break
+
         nearest_neighbors.build(
             inf_vect_ds,
             self._estimate_influence_value_from_influence_vector,
@@ -420,7 +503,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             order=order,
         )
 
-        top_k_dataset = dataset_to_evaluate.map(
+        top_k_dataset = self._backend.map_dataset(
+            dataset_to_evaluate,
             lambda *batch_evaluate: self._top_k_with_inf_vect_dataset_train(
                 batch_evaluate, nearest_neighbors, batch_size_eval, device
             )
@@ -433,10 +517,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _estimate_inf_values_with_inf_vect_dataset(
             self,
-            inf_vect_dataset: tf.data.Dataset,
-            samples_to_evaluate: Tuple[tf.Tensor, ...],
+            inf_vect_dataset: DatasetLike,
+            samples_to_evaluate: Tuple[Tensor, ...],
             device: Optional[str] = None
-    ) -> Tuple[Tuple[tf.Tensor, ...], tf.data.Dataset]:
+    ) -> Tuple[Tuple[Tensor, ...], DatasetLike]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -446,7 +530,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         Parameters
         ----------
         inf_vect_dataset
-            A TF dataset with the influence vectors computed using some of the model's training data-points.
+            A dataset with the influence vectors computed using some of the model's training data-points.
         samples_to_evaluate
             A tensor containing a single batch of samples of which we wish to estimate the influence of
              leaving out the training points corresponding to the influence vectors.
@@ -458,18 +542,28 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             batch of the training dataset
             influence scores
         """
-        samples_inf_val_dataset = map_to_device(inf_vect_dataset, lambda *batch:
-                    (batch[:-1][0],
-                     self._estimate_influence_values_from_influence_vector(samples_to_evaluate, batch[-1])), device)
+        preproc_samples_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        samples_inf_val_dataset = self._backend.map_dataset(
+            inf_vect_dataset,
+            lambda *batch: (
+                batch[:-1][0],
+                self._estimate_influence_values_from_influence_vector(
+                    samples_to_evaluate,
+                    batch[-1],
+                    preproc_samples_to_evaluate
+                )
+            ),
+            device
+        )
         return samples_to_evaluate, samples_inf_val_dataset
 
     def _top_k_with_inf_vect_dataset_train(
             self,
-            sample_to_evaluate: Tuple[tf.Tensor, ...],
+            sample_to_evaluate: Tuple[Tensor, ...],
             nearest_neighbor: BaseNearestNeighbors,
             batch_size_eval: Optional[int] = None,
             device: Optional[str] = None
-    ) -> Tuple[Tuple[tf.Tensor, ...], tf.Tensor, Tuple[tf.Tensor, ...]]:
+    ) -> Tuple[Tuple[Tensor, ...], Tensor, Tuple[Tensor, ...]]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -481,8 +575,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             A batched tensor containing the samples which will be compare to the training dataset
         nearest_neighbor
             The nearest neighbor method
-        k
-            the number of most influence samples to retain in training dataset
+        batch_size_eval
+            The batch size for evaluation
         device
             Device where the computation will be executed
         Returns
@@ -494,21 +588,21 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         training_samples
             Top-k training sample for each sample to evaluate.
         """
-        device = get_device(device)
-        with tf.device(device):
-            v_to_evaluate = self._preprocess_samples(sample_to_evaluate)
-            if batch_size_eval is None:
-                influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)
-            else:
-                influences_values, training_samples = nearest_neighbor.query(v_to_evaluate, batch_size_eval)
+        _ = device
+        v_to_evaluate = self._preprocess_samples(sample_to_evaluate)
+        if batch_size_eval is None:
+            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)
+        else:
+            influences_values, training_samples = nearest_neighbor.query(v_to_evaluate, batch_size_eval)
 
         return sample_to_evaluate, influences_values, training_samples
 
     def _estimate_influence_values_from_influence_vector(
             self,
-            samples_to_evaluate: Tuple[tf.Tensor, ...],
-            inf_vect: tf.Tensor
-    ) -> tf.Tensor:
+            samples_to_evaluate: Tuple[Tensor, ...],
+            inf_vect: Tensor,
+            preproc_samples_to_evaluate: Optional[Tensor] = None
+    ) -> Tensor:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -522,6 +616,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             data-points corresponding to the influence vector.
         inf_vect
             A tensor with one influence vector
+        preproc_samples_to_evaluate
+            Optional preprocessed representation of ``samples_to_evaluate`` to avoid recomputing jacobians.
 
         Returns
         -------
@@ -529,17 +625,19 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             batch of the training dataset
             influence vector
         """
-        v_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        if preproc_samples_to_evaluate is None:
+            v_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        else:
+            v_to_evaluate = preproc_samples_to_evaluate
         value = self._estimate_influence_value_from_influence_vector(v_to_evaluate, inf_vect)
 
         return value
 
-    @tf.function
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[tf.Tensor, ...],
-            samples_to_evaluate: Tuple[tf.Tensor, ...]
-    ) -> tf.Tensor:
+            train_samples: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Tensor, ...]
+    ) -> Tensor:
         """
         Estimates the influence value of leaving out a single training sample on the provided test sample.
 
@@ -564,9 +662,9 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     @abstractmethod
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: tf.Tensor,
-            influence_vector: tf.Tensor
-    ) -> tf.Tensor:
+            preproc_test_sample: Any,
+            influence_vector: Any
+    ) -> Any:
         """
         Estimates the influence score of leaving out the influence vector corresponding to a given training
         data-point on a test sample that has already been pre-processed.

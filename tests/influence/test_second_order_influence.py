@@ -11,12 +11,15 @@ from deel.influenciae.influence.second_order_influence_calculator import SecondO
 
 from ..utils_test import almost_equal, jacobian_ground_truth, hessian_ground_truth
 
+
+pytestmark = pytest.mark.tensorflow
+
+
 def test__compute_additive_term():
     """ 
     Test the _compute_additive_term method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -63,7 +66,6 @@ def test__compute_pairwise_interactions():
     Test the _compute_pairwise_interactions method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
     inputs_train = tf.random.normal((25, 1, 3))
@@ -108,7 +110,6 @@ def test_compute_influence_group():
     Test the compute_influence_group method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
 
@@ -158,7 +159,6 @@ def test_compute_influence_values_group():
     Test the compute_influence_values_group method
     """
     model = Sequential([Input(shape=(1, 3)), Dense(2, use_bias=False), Dense(1, use_bias=False)])
-    model.build(input_shape=(1, 3))
 
     influence_model = InfluenceModel(model, start_layer=-1, loss_function=MeanSquaredError(reduction=Reduction.NONE))
     kernel = tf.reshape(tf.concat([tf.reshape(layer.weights[0], -1) for layer in influence_model.layers], axis=0), -1)
@@ -215,15 +215,14 @@ def test_compute_influence_values_group():
         assert self_influence_group.shape == (1, 1)
         assert almost_equal(self_influence_group, ground_truth_self_influence, epsilon=1e-3)
 
-
-def test_cnn_shapes():
+@pytest.mark.parametrize("ihvp_name", ["exact", "conjugate_gradient"])
+def test_cnn_shapes(ihvp_name):
     """
-    Test all methods with a more challenging model
+    Test all methods with a more challenging model, running each IHVP separately.
     """
     model = Sequential()
     model.add(Input(shape=(5, 5, 3)))
-    model.add(Conv2D(4, kernel_size=(2, 2),
-                     activation='relu'))
+    model.add(Conv2D(4, kernel_size=(2, 2), activation='relu'))
     model.add(Flatten())
     model.add(Dense(10))
     model.add(Dense(10))
@@ -231,24 +230,26 @@ def test_cnn_shapes():
 
     influence_model = InfluenceModel(model)
 
-    x_train = tf.random.normal((50, 5, 5, 3))
-    y_train = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 50)), 10)
-    x_test = tf.random.normal((50, 5, 5, 3))
-    y_test = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 50)), 10)
+    x_train = tf.random.normal((20, 5, 5, 3))
+    y_train = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 20)), 10)
+    x_test = tf.random.normal((20, 5, 5, 3))
+    y_test = tf.keras.utils.to_categorical(tf.transpose(tf.random.categorical(tf.ones((1, 10)), 20)), 10)
     train_set = tf.data.Dataset.from_tensor_slices((x_train, y_train))
     test_set = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
-    # Check the shapes
-    calculators = [
-        ExactIHVP(influence_model, train_set.batch(5)),
-        ConjugateGradientDescentIHVP(influence_model, -2, train_set.batch(5))
-    ]
+    # Choose IHVP implementation per parameter
+    if ihvp_name == "exact":
+        ihvp_calculator = ExactIHVP(influence_model, train_set.batch(5))
+    else:
+        ihvp_calculator = ConjugateGradientDescentIHVP(influence_model, -2, train_set.batch(5))
 
-    for ihvp_calculator in calculators:
-        influence_calculator = SecondOrderInfluenceCalculator(influence_model, train_set.batch(5), ihvp_calculator,
-                                                            n_samples_for_hessian=25,
-                                                            shuffle_buffer_size=25)
-        influence = influence_calculator.compute_influence_vector_group(train_set.batch(5))
-        assert influence.shape == (1, 650)
-        influence_values = influence_calculator.estimate_influence_values_group(train_set.batch(5), test_set.batch(5))
-        assert influence_values.shape == (1, 1)
+    influence_calculator = SecondOrderInfluenceCalculator(
+        influence_model, train_set.batch(5), ihvp_calculator,
+        n_samples_for_hessian=25, shuffle_buffer_size=25
+    )
+
+    influence = influence_calculator.compute_influence_vector_group(train_set.batch(5))
+    # InfluenceModel defaults to only the last layer with weights: Dense(10) has 10*10 + 10 = 110 params
+    assert influence.shape == (1, 110)
+    influence_values = influence_calculator.estimate_influence_values_group(train_set.batch(5), test_set.batch(5))
+    assert influence_values.shape == (1, 1)

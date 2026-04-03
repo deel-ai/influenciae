@@ -6,29 +6,51 @@
 Module implementing a Nearest Neighbors interface and a Linear Nearest Neighbors
 algorithm. It will prove itself useful for finding the top-k most influential
 examples of datasets, as implemented in the influence calculator interface.
+
+This module is backend-agnostic and supports both TensorFlow and PyTorch.
 """
 from abc import abstractmethod
+from typing import Any, Callable, Optional, Tuple, Union
+from warnings import warn
 
-import tensorflow as tf
-
+from .._optional_imports import import_optional_module
 from .sorted_dict import BatchSort, ORDER
-from ..types import Callable, Optional, Tuple
+from ..common.backend import (
+    BaseBackend,
+    Framework,
+    get_backend,
+)
+
+
+def _ensure_reiterable_dataset(dataset: Any, context: str = "dataset") -> Any:
+    """Materialize one-pass iterators to preserve multi-pass behavior."""
+    try:
+        if iter(dataset) is dataset:
+            warn(
+                f"{context} is a one-pass iterator; materializing it to preserve multi-pass behavior.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return list(dataset)
+    except TypeError:
+        pass
+    return dataset
 
 
 class BaseNearestNeighbors:
     """
     A Nearest Neighbors interface for efficiently searching for specific data-points
-    in a dataset.
+    in a dataset. This class is backend-agnostic and supports both TensorFlow and PyTorch.
     """
 
     @abstractmethod
     def build(
         self,
-        dataset: tf.data.Dataset,
-        dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
+        dataset: Any,
+        dot_product_fun: Callable[[Any, Any], Any],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32,
+        d_type: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING
     ) -> None:
         """
@@ -38,7 +60,8 @@ class BaseNearestNeighbors:
         Parameters
         ----------
         dataset
-            A TF dataset containing the points which shall be indexed.
+            A dataset containing the points which shall be indexed.
+            (tf.data.Dataset for TensorFlow, DataLoader or list of tuples for PyTorch)
         dot_product_fun
             The dot product function used to compute the distance between 2 points
         k
@@ -46,14 +69,14 @@ class BaseNearestNeighbors:
         query_batch_size
             An integer for the query's batch size
         d_type
-            The dataset's element's data-type
+            The dataset's element's data-type. If None, will be inferred.
         order
             Either descending or ascending for the top or bottom results as per the similarity metric
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None) -> Tuple[tf.Tensor, tf.Tensor]:
+    def query(self, vector_to_find: Any, batch_size: Optional[int] = None) -> Tuple[Any, Any]:
         """
         Find the k closest points to the provided vector in the object's dataset.
 
@@ -78,29 +101,111 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
     An implementation of a Linear Nearest Neighbors search algorithm using a given similarity metric and
     doing as much lazy computations as possible for scalability.
 
+    This class is backend-agnostic and supports both TensorFlow and PyTorch.
+
     Attributes
     ----------
     dataset
-        A TF dataset with the points from which the nearest neighbors will be searched.
+        A dataset with the points from which the nearest neighbors will be searched.
     dot_product_fun
         A callable taking in two vectors and returning a notion of similarity between them.
     batched_sorted_dict
         A BatchSort instance that takes care of keeping the top/bottom most similar examples from
         the batch.
+    backend
+        The backend to use for tensor operations. If None, it will be inferred from the first batch
+        or default to TensorFlow if available.
     """
 
-    def __init__(self):
-        self.dataset = None
-        self.dot_product_fun = None
-        self.batched_sorted_dict = None
+    def __init__(self, backend: Optional[Union[BaseBackend, Framework]] = None):
+        """
+        Initialize the LinearNearestNeighbors.
+
+        Parameters
+        ----------
+        backend
+            The backend to use for tensor operations. Can be a BaseBackend instance,
+            a Framework enum (TENSORFLOW or PYTORCH), or None to infer from data.
+        """
+        self.dataset: Optional[Any] = None
+        self.dot_product_fun: Optional[Callable[[Any, Any], Any]] = None
+        self.batched_sorted_dict: Optional[BatchSort] = None
+        self._backend_param = backend
+        self._backend: Optional[BaseBackend] = None
+
+    @property
+    def backend(self) -> BaseBackend:
+        """Return the backend used for tensor operations."""
+        if self._backend is None:
+            # Determine the backend
+            if self._backend_param is None:
+                # Default to TensorFlow if available, otherwise PyTorch
+                try:
+                    self._backend = get_backend(Framework.TENSORFLOW)
+                except ImportError:
+                    self._backend = get_backend(Framework.PYTORCH)
+            elif isinstance(self._backend_param, BaseBackend):
+                self._backend = self._backend_param
+            else:
+                # backend_param is a Framework enum
+                self._backend = get_backend(self._backend_param)
+        return self._backend
+
+    @staticmethod
+    def _get_first_element(value: Any) -> Any:
+        """Return the first element for tuple/list containers."""
+        if isinstance(value, (list, tuple)):
+            return value[0]
+        return value
+
+    def _infer_batch_shape_from_spec(self, element_spec: Any) -> Tuple[int, ...]:
+        """Infer batch sample shape from a dataset element specification."""
+        first_spec = self._get_first_element(element_spec)
+        first_spec = self._get_first_element(first_spec)
+
+        if hasattr(first_spec, "shape"):
+            return tuple(first_spec.shape[1:])
+        if isinstance(first_spec, dict) and "shape" in first_spec:
+            return tuple(first_spec["shape"][1:])
+        return ()
+
+    def _infer_batch_shape_from_dataset(self, dataset: Any) -> Tuple[int, ...]:
+        """Infer batch sample shape by peeking at the first dataset element."""
+        for item in dataset:
+            first_tensor = self._get_first_element(item)
+            first_tensor = self._get_first_element(first_tensor)
+            return tuple(self.backend.tensor_shape(first_tensor)[1:])
+        return ()
+
+    def _extract_batch_samples_and_ihvp(self, batch_data: Any) -> Tuple[Any, Any]:
+        """Extract sample tensors and IHVP values from a dataset batch entry."""
+        if isinstance(batch_data, tuple):
+            batch_seq = list(batch_data)
+        elif isinstance(batch_data, list):
+            batch_seq = batch_data
+        else:
+            batch_seq = None
+
+        if batch_seq is not None:
+            if len(batch_seq) >= 2:
+                batch, ihvp = batch_seq[0], batch_seq[-1]
+            elif len(batch_seq) == 1:
+                batch, ihvp = batch_seq[0], batch_seq[0]
+            else:
+                raise ValueError("Encountered empty batch data while querying nearest neighbors.")
+        else:
+            batch, ihvp = batch_data, batch_data
+
+        batch_samples = self._get_first_element(batch)
+        return batch_samples, ihvp
 
     def build(
         self,
-        dataset: tf.data.Dataset,
-        dot_product_fun: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
+        dataset: Any,
+        dot_product_fun: Callable[[Any, Any], Any],
         k: int,
         query_batch_size: int,
-        d_type: tf.DType = tf.float32,
+        d_type: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING
         ) -> None:
         """
@@ -110,7 +215,8 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         Parameters
         ----------
         dataset
-            A TF dataset containing the points which shall be indexed.
+            A dataset containing the points which shall be indexed.
+            (tf.data.Dataset for TensorFlow, DataLoader or list of tuples for PyTorch)
         dot_product_fun
             The dot product function used to compute the distance between 2 points
         k
@@ -118,16 +224,40 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         query_batch_size
             An integer for the query's batch size
         d_type
-            The dataset's element's data-type
+            The dataset's element's data-type. If None, will be inferred from the backend's default.
         order
             Either descending or ascending for the top or bottom results as per the similarity metric
         """
-        self.dataset = dataset
+        self.dataset = _ensure_reiterable_dataset(dataset, context="nearest-neighbor dataset")
         self.dot_product_fun = dot_product_fun
-        batch_shape = self.dataset.element_spec[0][0].shape[1:]
-        self.batched_sorted_dict = BatchSort(batch_shape, [query_batch_size, k], dtype=d_type, order=order)
 
-    def query(self, vector_to_find: tf.Tensor, batch_size: Optional[int] = None) -> Tuple[tf.Tensor, tf.Tensor]:
+        element_spec = self.backend.get_dataset_element_spec(self.dataset)
+        batch_shape = self._infer_batch_shape_from_spec(element_spec)
+
+        if not batch_shape:
+            if self.dataset is None:
+                raise ValueError("Nearest neighbors dataset is not initialized.")
+            batch_shape = self._infer_batch_shape_from_dataset(self.dataset)
+
+        # Use backend default dtype if not provided
+        if d_type is None:
+            d_type = self.backend.float32_dtype()
+
+        self.batched_sorted_dict = BatchSort(
+            batch_shape,
+            (query_batch_size, k),
+            dtype=d_type,
+            order=order,
+            backend=self.backend
+        )
+
+    def _require_built(self) -> Tuple[Any, Callable[[Any, Any], Any], BatchSort]:
+        """Ensure the index is initialized before queries."""
+        if self.dataset is None or self.dot_product_fun is None or self.batched_sorted_dict is None:
+            raise ValueError("Nearest neighbors index is not built. Call 'build(...)' before querying.")
+        return self.dataset, self.dot_product_fun, self.batched_sorted_dict
+
+    def query(self, vector_to_find: Any, batch_size: Optional[int] = None) -> Tuple[Any, Any]:
         """
         Find the k closest points to the provided vector in the object's dataset.
 
@@ -145,28 +275,98 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             (distances, points)
         """
         if batch_size is None:
-            batch_size = tf.shape(vector_to_find)[0]
+            batch_size = self.backend.get_batch_size(vector_to_find)
 
-        dataset_iterator = iter(self.dataset)
-        self.batched_sorted_dict.reset()
+        if self.backend.framework == Framework.TENSORFLOW:
+            return self._query_tensorflow(vector_to_find, batch_size)
+        return self._query_pytorch(vector_to_find, batch_size)
 
-        def body_func(i):
-            batch, ihvp = next(dataset_iterator)
-            influence_values = self.dot_product_fun(vector_to_find, ihvp)
+    def _query_tensorflow(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
+        """TensorFlow-specific query using reduce for lazy evaluation within graph."""
+        tf = import_optional_module("tensorflow", extra="tensorflow")
+        dataset, dot_product_fun, batched_sorted_dict = self._require_built()
 
-            self.batched_sorted_dict.add_all(
-                tf.repeat(tf.expand_dims(batch[0], axis=0), batch_size, axis=0),
-                influence_values
+        k = batched_sorted_dict.k
+        order = batched_sorted_dict.order
+        batch_shape = tuple(batched_sorted_dict.shape[2:])  # Remove (1, k) prefix
+
+        # Initialize state tensors
+        if order == ORDER.DESCENDING:
+            init_values = tf.fill((batch_size, k), float('-inf'))
+        else:
+            init_values = tf.fill((batch_size, k), float('inf'))
+
+        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=batched_sorted_dict.dtype)
+
+        # Cast to the appropriate dtype
+        init_values = tf.cast(init_values, batched_sorted_dict.dtype)
+
+        def reduce_func(state, batch_data):
+            best_values, best_samples = state
+            batch_samples, ihvp = self._extract_batch_samples_and_ihvp(batch_data)
+
+            # Compute influence values
+            influence_values = dot_product_fun(vector_to_find, ihvp)
+
+            # Expand batch_samples to match query batch size
+            expanded_batch = tf.repeat(
+                tf.expand_dims(batch_samples, axis=0),
+                batch_size,
+                axis=0
             )
 
-            return (i+1, )
+            # Concatenate with current best
+            current_score = tf.concat([best_values, influence_values], axis=1)
+            current_batch = tf.concat([best_samples, expanded_batch], axis=1)
 
-        tf.while_loop(
-            cond=lambda i: i < self.dataset.cardinality(),
-            body=body_func,
-            loop_vars=[tf.constant(0, dtype=tf.int64)]
-        )
+            # Sort and take top k
+            descending = order == ORDER.DESCENDING
+            if descending:
+                indexes = tf.argsort(current_score, axis=1, direction='DESCENDING')
+            else:
+                indexes = tf.argsort(current_score, axis=1, direction='ASCENDING')
+            indexes = indexes[:, :k]
 
-        training_samples, influences_values = self.batched_sorted_dict.get()
+            # Gather top k values and samples
+            new_best_values = tf.gather(current_score, indexes, axis=1, batch_dims=1)
+            new_best_samples = tf.gather(current_batch, indexes, axis=1, batch_dims=1)
+
+            return (new_best_values, new_best_samples)
+
+        if hasattr(dataset, "reduce"):
+            final_values, final_samples = dataset.reduce(
+                (init_values, init_samples),
+                reduce_func
+            )
+        else:
+            state = (init_values, init_samples)
+            for batch_data in dataset:
+                state = reduce_func(state, batch_data)
+            final_values, final_samples = state
+
+        return final_values, final_samples
+
+    def _query_pytorch(self, vector_to_find: Any, batch_size: int) -> Tuple[Any, Any]:
+        """PyTorch-specific query using BatchSort."""
+        dataset, dot_product_fun, batched_sorted_dict = self._require_built()
+        batched_sorted_dict.reset()
+
+        # Iterate through the dataset
+        for batch_data in dataset:
+            batch_samples, ihvp = self._extract_batch_samples_and_ihvp(batch_data)
+
+            # Compute influence values using the dot product function
+            influence_values = dot_product_fun(vector_to_find, ihvp)
+
+            # Expand batch_samples to match query batch size and add to sorted dict
+            expanded_batch = self.backend.repeat(
+                self.backend.expand_dims(batch_samples, axis=0),
+                batch_size,
+                axis=0
+            )
+
+            batched_sorted_dict.add_all(expanded_batch, influence_values)
+
+        training_samples, influences_values = batched_sorted_dict.get()
 
         return influences_values, training_samples

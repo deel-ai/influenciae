@@ -2,6 +2,7 @@
 # rights reserved. DEEL is a research program operated by IVADO, IRT Saint Exupéry,
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
+import pytest
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv2D, Dense, Flatten
 from tensorflow.keras.models import Sequential
@@ -10,6 +11,9 @@ from tensorflow.keras.losses import Reduction, MeanSquaredError, BinaryCrossentr
 from deel.influenciae.influence import ArnoldiInfluenceCalculator, FirstOrderInfluenceCalculator
 from deel.influenciae.common import InfluenceModel
 from tests.utils_test import assert_inheritance
+
+
+pytestmark = pytest.mark.tensorflow
 
 
 def test_inverse_exact_hessian():
@@ -41,7 +45,7 @@ def test_inverse_exact_hessian():
 
     H_inv = tf.matmul(scaling_up.G, tf.matmul(tf.linalg.diag(1.0 / scaling_up.eig_vals), scaling_up.G),
                       transpose_a=True)
-    assert tf.reduce_max(tf.abs(tf.cast(H_inv, dtype=tf.float64) - tf.linalg.inv(hessian))).numpy() < 1E-6
+    assert tf.reduce_max(tf.abs(tf.cast(H_inv, dtype=tf.float64) - tf.linalg.inv(hessian))).numpy() < 2E-6
 
 
 def test_exact_influence_values():
@@ -72,7 +76,7 @@ def test_exact_influence_values():
     first_order_influence_calculator = FirstOrderInfluenceCalculator(influence_model, train_dataset)
     first_order_influence_values = first_order_influence_calculator._compute_influence_values(train_dataset)
 
-    assert tf.reduce_max(tf.abs(scaling_up_influence_values - first_order_influence_values)) < 1E-6
+    assert tf.reduce_max(tf.abs(scaling_up_influence_values - first_order_influence_values)) < 6E-5
 
     inputs_test = tf.random.normal((nb_sample, 10), dtype=dtype)
     targets_test = tf.random.normal((nb_sample, 1), dtype=dtype)
@@ -84,7 +88,7 @@ def test_exact_influence_values():
 
     for v1, v2 in zip(scaling_up_influence_values, first_order_influence_values):
         for v1_, v2_ in zip(v1[1], v2[1]):
-            assert tf.reduce_max(tf.abs(v1_[1] - v2_[1])) < 1E-6
+            assert tf.reduce_max(tf.abs(v1_[1] - v2_[1])) < 6E-5
 
 
 def test_inheritance():

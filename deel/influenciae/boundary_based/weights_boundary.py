@@ -12,15 +12,16 @@ Unlike other influence calculators, this one cannot be used to estimate
 the influence of a point on another.
 
 This boundary deformation process is performed using deep fool on the target weights.
+
+Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-import tensorflow as tf
-from tensorflow.keras import Model  # pylint:  disable=E0611
+from typing import Any, List, Tuple
 
-from ..common import SelfInfluenceCalculator
-from ..types import Tuple, List
+from ..common import SelfInfluenceCalculator, BaseBackend, get_backend_for_model
+from ._base_boundary import _BaseBoundaryCalculatorMixin
 
 
-class WeightsBoundaryCalculator(SelfInfluenceCalculator):
+class WeightsBoundaryCalculator(_BaseBoundaryCalculatorMixin, SelfInfluenceCalculator):
     """
     A class implementing an influence score based on the distance of a sample to the boundary of its classifier.
     The distance to the boundary is estimated by deforming the boundary of the model to move a given sample
@@ -29,6 +30,8 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
     the distance on the sample space).
     [https://arxiv.org/abs/1511.04599]
 
+    Supports both TensorFlow and PyTorch models through the backend abstraction layer.
+
     Notes
     -----
     This method has better mislabeled-sample-detection performance when the model overfits.
@@ -36,7 +39,7 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
     Parameters
     ----------
     model
-        A TF2 model that has already been trained
+        A TensorFlow or PyTorch model that has already been trained
     step_nbr
         Number of the iterations to find the closest adversarial problem
     norm_type
@@ -45,15 +48,17 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         Difference between two logits to assume that the logits have the same values
     """
 
-    def __init__(self, model: Model, step_nbr: int = 100, norm_type: int = 2, eps: float = 1E-6):
-        self.weights_init = [tf.identity(w) for w in model.trainable_variables]
+    def __init__(self, model: Any, step_nbr: int = 100, norm_type: int = 2, eps: float = 1E-6):
+        self.backend: BaseBackend = get_backend_for_model(model)
+        self.weights_init = [self.backend.clone_variable(w)
+                            for w in self.backend.get_model_weights(model)]
         self.model = model
 
         self.step_nbr = step_nbr
         self.norm_type = norm_type
         self.eps = eps
 
-    def __compute_norm(self, weights: List[tf.Tensor]) -> tf.float32:
+    def _compute_norm(self, weights: List[Any]) -> Any:
         """
         Compute the norm of a list of weights
 
@@ -67,38 +72,15 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         weights_norm
             The norm of the weights
         """
-        weights_flatten = tf.concat([tf.reshape(w, (-1,)) for w in weights], axis=0)
-        weights_norm = tf.norm(weights_flatten, ord=self.norm_type)
+        weights_flatten = self.backend.concat(
+            [self.backend.reshape(w, (-1,)) for w in weights],
+            axis=0
+        )
+        weights_norm = self.backend.norm(weights_flatten, ord=self.norm_type)
 
         return weights_norm
 
-    def __delta_to_index(self, indexes_1: tf.Tensor, indexes_2: tf.Tensor, x: tf.Tensor) -> tf.Tensor:
-        """
-        Compute the difference between the logit of a given class and the other logits
-
-        Parameters
-        ----------
-        indexes_1
-            The logits of other classes
-        indexes_2
-            The logits of the predicted class
-        x
-            The logits
-
-        Returns
-        -------
-        delta_x
-            The difference between the logits
-        """
-        x1 = tf.gather(x, indexes_1, batch_dims=1)
-        x2 = tf.gather(x, tf.expand_dims(indexes_2, axis=1), batch_dims=1)
-
-        delta_x = x1 - tf.repeat(x2, tf.shape(x1)[1], axis=1)
-
-        return delta_x
-
-    @tf.function
-    def _step(self, x: tf.Tensor, y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def _step(self, x: Any, y_pred: Any) -> Tuple[Any, Any]:
         """
         The optimization step to find the distance between the boundary and a given sample x.
         To see more details about the optimization procedure for multi-class classifiers,
@@ -123,55 +105,106 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         loss_value
             The loss of the optimization procedure
         """
-        y_pred = tf.argmax(y_pred, axis=1)
+        y_pred_class = self.backend.argmax(y_pred, axis=1)
 
-        with tf.GradientTape() as tape:
-            y = self.model(x)
+        model_weights = self.backend.get_model_weights(self.model)
 
-        y_computed = tf.argmax(y, axis=1)
+        # Compute output and jacobian with respect to weights
+        y, jac = self.backend.compute_output_jacobian_wrt_weights(self.model, model_weights, x)
 
-        def update_grads():
-            model_weights = self.model.trainable_variables
-            jac = tape.jacobian(y, self.model.trainable_variables)
+        y_shape = self.backend.tensor_shape(y)
+        computation = self._compute_step_condition(y, y_pred_class, self.eps)
 
-            indexes_all = tf.repeat(tf.expand_dims(tf.range(0, tf.shape(y)[1]), axis=0), tf.shape(y)[0], axis=0)
-            indexes_class = tf.cast(tf.repeat(tf.expand_dims(y_pred, axis=1), tf.shape(y)[1], axis=1), dtype=tf.int32)
-            indexes_other = tf.reshape(indexes_all[indexes_all != indexes_class], (-1, tf.shape(y)[1] - 1))
+        # Default loss value
+        x_dtype = self.backend.get_dtype(x)
+        default_loss = self.backend.constant(0.0, dtype=x_dtype)
 
-            delta_y = self.__delta_to_index(indexes_other, y_pred, y)
-            delta_y = tf.abs(tf.reduce_mean(delta_y, axis=0))
-
-            jac_delta = [tf.reduce_mean(self.__delta_to_index(indexes_other, y_pred, j), axis=0) for j in jac]
-
-            jac_norm = tf.concat([tf.reshape(j, (tf.shape(j)[0], -1)) for j in jac_delta], axis=1)
-            jac_norm = tf.norm(jac_norm, axis=1, ord=self.norm_type)
-
-            coeff = delta_y / jac_norm
-
-            best_class = tf.argmin(coeff, axis=0)
-
-            loss = (coeff / tf.pow(jac_norm, self.norm_type - 1))[best_class]
-
-            weights = [w + loss * tf.pow(tf.abs(g[best_class]), self.norm_type - 1) * tf.sign(g[best_class]) for w, g in
-                       zip(model_weights, jac_delta)]
-
-            for m, w in zip(model_weights, weights):
-                m.assign(w)
-
-            return loss
-
-        computation = tf.reduce_any(y_computed == y_pred)
-
-        top_k, _ = tf.math.top_k(tf.squeeze(y, axis=0), k=2)
-        is_close_enough = tf.abs(top_k[0] - top_k[1]) > self.eps
-
-        computation = tf.logical_and(computation, is_close_enough)
-
-        loss_value = tf.cond(computation, update_grads, lambda: tf.constant(0.0))
+        if computation:
+            loss_value = self._compute_weight_update(y, jac, y_pred_class, y_shape, model_weights)
+        else:
+            loss_value = default_loss
 
         return computation, loss_value
 
-    def __delta_weights(self) -> tf.float32:
+    def _compute_weight_update(
+        self,
+        y: Any,
+        jac: List[Any],
+        y_pred_class: Any,
+        y_shape: Tuple,
+        model_weights: List[Any]
+    ) -> Any:
+        """
+        Compute the DeepFool update step for weights.
+
+        Parameters
+        ----------
+        y
+            Model output logits
+        jac
+            List of Jacobians of model output with respect to each weight tensor
+        y_pred_class
+            Original predicted class
+        y_shape
+            Shape of the output tensor
+        model_weights
+            Current model weights
+
+        Returns
+        -------
+        loss
+            The loss value for this step
+        """
+        indexes_other = self._build_other_class_indices(y_pred_class, y_shape)
+
+        # Compute delta in logits
+        delta_y = self._compute_delta_y(indexes_other, y_pred_class, y)
+
+        # Compute delta in jacobian for each weight tensor
+        jac_delta = [
+            self.backend.reduce_mean(self._delta_to_index(indexes_other, y_pred_class, j), axis=0)
+            for j in jac
+        ]
+
+        # Compute norm of jacobian difference
+        jac_norm = self.backend.concat(
+            [self.backend.reshape(j, (self.backend.tensor_shape(j)[0], -1)) for j in jac_delta],
+            axis=1
+        )
+        jac_norm = self.backend.norm(jac_norm, ord=self.norm_type, axis=1)
+
+        # Compute coefficient for each class
+        coeff = delta_y / jac_norm
+
+        # Find best class to attack
+        best_class = self.backend.argmin(coeff, axis=0)
+
+        # Compute loss using gather (graph-compatible, no to_numpy)
+        loss = self.backend.gather_along_axis(
+            coeff / self.backend.pow(jac_norm, self.norm_type - 1),
+            self.backend.expand_dims(best_class, axis=0),
+            axis=0
+        )
+        loss = self.backend.squeeze(loss)
+
+        # Update weights using gather for best class
+        for w, g in zip(model_weights, jac_delta):
+            g_best = self.backend.gather_along_axis(
+                g,
+                self.backend.expand_dims(best_class, axis=0),
+                axis=0
+            )
+            g_best = self.backend.squeeze(g_best, axis=0)
+            new_value = (
+                w + loss
+                * self.backend.pow(self.backend.abs(g_best), self.norm_type - 1)
+                * self.backend.sign(g_best)
+            )
+            self.backend.assign_variable(w, new_value)
+
+        return loss
+
+    def _delta_weights(self) -> Any:
         """
         Compute the norm between the trained weights of the model and the current modified weights of the model.
 
@@ -180,19 +213,21 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         norm
             The distance between the initial model and the current model
         """
-        weights = [w1 - w2 for w1, w2 in zip(self.weights_init, self.model.trainable_variables)]
-        norm = self.__compute_norm(weights)
+        model_weights = self.backend.get_model_weights(self.model)
+        weights = [w1 - w2 for w1, w2 in zip(self.weights_init, model_weights)]
+        norm = self._compute_norm(weights)
 
         return norm
 
-    def __reset_weights(self) -> None:
+    def _reset_weights(self) -> None:
         """
         Set the weights of the model to the initial trained weights.
         """
-        for m, w in zip(self.model.trainable_variables, self.weights_init):
-            m.assign(w)
+        model_weights = self.backend.get_model_weights(self.model)
+        for w, w_init in zip(model_weights, self.weights_init):
+            self.backend.assign_variable(w, w_init)
 
-    def __compute_single_sample_score(self, x: tf.Tensor) -> tf.Tensor:
+    def _compute_single_sample_score(self, x: Any) -> Any:
         """
         Computes the influence score (self-influence) for a single training samples.
 
@@ -206,21 +241,36 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         score
             The influence score of the sample.
         """
+        x = self.backend.expand_dims(x, axis=0)
+        y_pred = self.backend.forward(self.model, x)
 
-        x = tf.expand_dims(x, axis=0)
-        y_pred = self.model(x)
+        # Use while_loop for graph-compatible iteration
+        def cond_fn(cond, idx):
+            return self.backend.logical_and(cond, idx < self.step_nbr)
 
-        tf.while_loop(lambda cond, index: tf.logical_and(cond, index < self.step_nbr),
-                      lambda cond, index: (self._step(x, y_pred)[0], index + 1),
-                      [tf.constant(True), tf.constant(0, dtype=tf.int32)])
+        def body_fn(_cond, idx):
+            new_cond, _ = self._step(x, y_pred)
+            return [new_cond, idx + 1]
 
-        score = self.__delta_weights()
+        # Initial loop variables
+        init_cond = self.backend.constant(True)
+        init_idx = self.backend.constant(0, dtype=self.backend.int32_dtype())
 
-        self.__reset_weights()
+        # Run the loop
+        self.backend.while_loop(
+            cond_fn,
+            body_fn,
+            [init_cond, init_idx],
+            maximum_iterations=self.step_nbr
+        )
+
+        score = self._delta_weights()
+
+        self._reset_weights()
 
         return score
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[tf.Tensor, ...]) -> tf.Tensor:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Computes the influence score (self-influence) for a single batch of training samples.
 
@@ -234,7 +284,10 @@ class WeightsBoundaryCalculator(SelfInfluenceCalculator):
         influence_values
             The influence score of each sample in the batch train_samples.
         """
-        scores = tf.map_fn(self.__compute_single_sample_score, train_samples[:-1][0], parallel_iterations=1)
-        scores = - tf.expand_dims(scores, axis=1)
+        # Get the input samples (first element of tuple, excluding last which is typically labels)
+        inputs = train_samples[:-1][0] if len(train_samples) > 1 else train_samples[0]
+
+        scores = self.backend.map_fn(self._compute_single_sample_score, inputs)
+        scores = - self.backend.expand_dims(scores, axis=1)
 
         return scores

@@ -15,6 +15,16 @@ from deel.influenciae.common import BaseInfluenceModel, InfluenceModel
 from ..utils_test import generate_model, assert_tensor_equal, almost_equal
 
 
+pytestmark = pytest.mark.tensorflow
+
+
+def _assert_weights_match(actual_weights, expected_weights):
+    """Compare two weight lists by tensor values instead of object identity."""
+    assert len(actual_weights) == len(expected_weights)
+    for actual_weight, expected_weight in zip(actual_weights, expected_weights):
+        assert_tensor_equal(actual_weight, expected_weight)
+
+
 def test_loss_reduction():
     # Ensure we raise a proper error when a loss with reduction is passed
     # and we can instantiate with proper loss
@@ -142,8 +152,7 @@ def test_jacobian_calculation():
     assert almost_equal(real_jacobian, jacobian2)
 
 def test_weights_default_targeting():
-    # Ensure we target the correct theta / weights by default -- last layer with
-    # weights before the logits
+    # Ensure we target the correct theta / weights by default -- last layer with weights
     model = Sequential()
     model.add(Input(shape=(5, 5, 1)))
     model.add(Conv2D(4, kernel_size=(2, 2),
@@ -154,7 +163,7 @@ def test_weights_default_targeting():
     model.add(Flatten())
     model.compile(loss='categorical_crossentropy', optimizer='sgd')
 
-    # should skip the last flatten layer
+    # should skip the last flatten layer (no weights) and target Dense(10)
     theta = model.layers[-2].weights
     influence_model = InfluenceModel(model)
 
@@ -171,8 +180,8 @@ def test_weights_default_targeting():
     model2.add(Dense(10))
     model2.compile(loss='categorical_crossentropy', optimizer='sgd')
 
-    # default target layer should be the Dense(20)
-    theta2 = model2.layers[-3].weights
+    # default target layer should be the Dense(10) (last layer with weights)
+    theta2 = model2.layers[-1].weights
     influence_model2 = InfluenceModel(model2)
 
     for w, theta_w in zip(influence_model2.weights, theta2):
@@ -192,7 +201,7 @@ def test_weights_targeting():
     theta = model.get_layer('target').weights
     influence_model = InfluenceModel(model, start_layer='target')
 
-    assert influence_model.weights==theta
+    _assert_weights_match(influence_model.weights, theta)
 
 def test_targeting_multiple_layers():
     """
@@ -207,53 +216,54 @@ def test_targeting_multiple_layers():
     ## only start_layer is passed
     # first layer only
     influence_model = InfluenceModel(model, start_layer=0)
-    assert influence_model.weights == layer_0.weights
+    _assert_weights_match(influence_model.weights, layer_0.weights)
 
     influence_model = InfluenceModel(model, start_layer="d_test_0")
-    assert influence_model.weights == layer_0.weights
+    _assert_weights_match(influence_model.weights, layer_0.weights)
 
     # second layer only
     influence_model = InfluenceModel(model, start_layer=1)
-    assert influence_model.weights == layer_1.weights
+    _assert_weights_match(influence_model.weights, layer_1.weights)
 
     influence_model = InfluenceModel(model, start_layer="d_test_1")
-    assert influence_model.weights == layer_1.weights
+    _assert_weights_match(influence_model.weights, layer_1.weights)
 
     # last layer only
     influence_model = InfluenceModel(model, start_layer=2)
-    assert influence_model.weights == layer_2.weights
+    _assert_weights_match(influence_model.weights, layer_2.weights)
 
     influence_model = InfluenceModel(model, start_layer="d_test_2")
-    assert influence_model.weights == layer_2.weights
+    _assert_weights_match(influence_model.weights, layer_2.weights)
 
     with pytest.raises(ValueError):
         influence_model = InfluenceModel(model, start_layer="whatev")
 
     # ## only last_layer is passed
 
-    # should have last layer & layer before logits (default start)
+    # should have last layer only (default start is last layer with weights)
     influence_model = InfluenceModel(model, last_layer=2)
-    theoric_weights = [layer_1.weights, layer_2.weights]
-    theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    theoric_weights = layer_2.weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, last_layer="d_test_2")
-    theoric_weights = [layer_1.weights, layer_2.weights]
-    theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    theoric_weights = layer_2.weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, last_layer=-1)
-    theoric_weights = [layer_1.weights, layer_2.weights]
-    theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    theoric_weights = layer_2.weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
-    # should raise an error
+    # should raise an error (start_layer defaults to last layer, so last_layer can't be before it)
     with pytest.raises(AssertionError):
         influence_model = InfluenceModel(model, last_layer=0)
     with pytest.raises(AssertionError):
         influence_model = InfluenceModel(model, last_layer="d_test_0")
     with pytest.raises(AssertionError):
         influence_model = InfluenceModel(model, last_layer=-3)
+    with pytest.raises(AssertionError):
+        influence_model = InfluenceModel(model, last_layer=1)
+    with pytest.raises(AssertionError):
+        influence_model = InfluenceModel(model, last_layer="d_test_1")
 
     ## use of both
     influence_model = InfluenceModel(model, start_layer=0, last_layer=1)
@@ -271,39 +281,39 @@ def test_targeting_multiple_layers():
     influence_model = InfluenceModel(model, start_layer="d_test_0", last_layer="d_test_1")
     theoric_weights = [layer_0.weights, layer_1.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer=0, last_layer="d_test_1")
     theoric_weights = [layer_0.weights, layer_1.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer=0, last_layer=-1)
     theoric_weights = [layer_0.weights, layer_1.weights, layer_2.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer=0, last_layer="d_test_2")
     theoric_weights = [layer_0.weights, layer_1.weights, layer_2.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer="d_test_0", last_layer="d_test_2")
     theoric_weights = [layer_0.weights, layer_1.weights, layer_2.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer=0, last_layer=-2)
     theoric_weights = [layer_0.weights, layer_1.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer=1, last_layer="d_test_2")
     theoric_weights = [layer_1.weights, layer_2.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
 
     influence_model = InfluenceModel(model, start_layer="d_test_1", last_layer="d_test_2")
     theoric_weights = [layer_1.weights, layer_2.weights]
     theoric_weights = list(itertools.chain(*theoric_weights))
-    assert influence_model.weights == theoric_weights
+    _assert_weights_match(influence_model.weights, theoric_weights)
