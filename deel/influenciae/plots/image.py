@@ -6,17 +6,17 @@
 Module implementing plotting functions for image-type data.
 """
 from math import ceil
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 from matplotlib import pyplot as plt
 
-from .._optional_imports import import_optional_module
+if TYPE_CHECKING:
+    import tensorflow as tf
 
-tf = import_optional_module("tensorflow", extra="tensorflow")
 
 
-def _normalize(image: Union[tf.Tensor, np.ndarray]) -> np.ndarray:
+def _normalize(image: Union["tf.Tensor", np.ndarray]) -> np.ndarray:
     """
     Normalize an image to the range [0, 1].
 
@@ -39,7 +39,7 @@ def _normalize(image: Union[tf.Tensor, np.ndarray]) -> np.ndarray:
 
 
 def plot_most_influential_images(
-        influential_images: tf.data.Dataset,
+        influential_images: "tf.data.Dataset",
         cols: int = 5,
         img_size: float = 2.,
         save_path: Optional[str] = None
@@ -108,8 +108,8 @@ def plot_most_influential_images(
 
 
 def plot_datacentric_explanations(
-        image: Union[tf.Tensor, np.ndarray],
-        explanations: tf.data.Dataset,
+        image: Union["tf.Tensor", np.ndarray],
+        explanations: "tf.data.Dataset",
         cols: int = 5,
         img_size: float = 2.,
         save_path: Optional[str] = None

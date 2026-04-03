@@ -45,7 +45,7 @@ def _build_tensorflow_backtracking_line_search() -> type:  # pylint: disable=too
     Optimizer = import_optional_attr("tensorflow.keras.optimizers", "Optimizer", extra="tensorflow")
     SGD = import_optional_attr("tensorflow.keras.optimizers", "SGD", extra="tensorflow")
 
-    class TensorFlowBacktrackingLineSearch(Optimizer):
+    class TensorFlowBacktrackingLineSearch(Optimizer):  # type: ignore[valid-type, misc]
         """
         Implementation of a batched Backtracking Line Search optimizer with SGD steps.
         TensorFlow-specific implementation using Keras Optimizer interface.
@@ -219,8 +219,8 @@ def _build_tensorflow_backtracking_line_search() -> type:  # pylint: disable=too
         def attempt_step(
                 self,
                 model: "Model",
-                curr_weights: "tf.Tensor",
-                gradients: "tf.Tensor",
+                curr_weights: "tf.Tensor",  # type: ignore[name-defined]
+                gradients: "tf.Tensor",  # type: ignore[name-defined]
                 closure: Callable,
         ):
             """
