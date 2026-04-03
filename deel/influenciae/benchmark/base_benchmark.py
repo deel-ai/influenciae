@@ -348,7 +348,7 @@ class MislabelingDetectorEvaluator:
 
         shuffled_dataset = self.backend.shuffle_dataset(noisy_training_dataset, 1000)
         influence_dataset = self.backend.batch_dataset(shuffled_dataset, self.influence_batch_size)
-        influence_calculator = influence_factory.build(influence_dataset, model, data_train)
+        influence_calculator = influence_factory.build(model, training_dataset=influence_dataset, train_info=data_train)
         scoring_dataset = self.backend.batch_dataset(noisy_training_dataset, self.influence_batch_size)
         influences_values = influence_calculator._compute_influence_values(scoring_dataset)  # pylint: disable=W0212
 

@@ -99,8 +99,11 @@ class CGDIHVPFactory(InverseHessianVectorProductFactory):
             self.extractor_layer: Union[str, int] = feature_extractor
             self.feature_extractor: Optional[Model] = None
         else:
-            assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
-                                                "provide the id of the last extracted layer"
+            if extractor_layer is None:
+                raise ValueError(
+                    "If you provide a model as a feature extractor, you should also "
+                    "provide the id of the last extracted layer"
+                )
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
@@ -165,8 +168,11 @@ class LissaIHVPFactory(InverseHessianVectorProductFactory):
             self.extractor_layer: Union[str, int] = feature_extractor
             self.feature_extractor: Optional[Model] = None
         else:
-            assert extractor_layer is not None, "If you provide a model as a feature extractor, you should also" \
-                                                "provide the id of the last extracted layer"
+            if extractor_layer is None:
+                raise ValueError(
+                    "If you provide a model as a feature extractor, you should also "
+                    "provide the id of the last extracted layer"
+                )
             self.extractor_layer = extractor_layer
             self.feature_extractor = feature_extractor
 
