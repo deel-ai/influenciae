@@ -104,7 +104,7 @@ def test_cgd_factory():
 
     # case 3: model feature extractor without layer position
     feature_extractor = nn.Sequential(model[0])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         cgd_factory = CGDIHVPFactory(feature_extractor, n_cgd_iters)
 
 
@@ -158,5 +158,5 @@ def test_lissa_factory():
 
     # case 3: model feature extractor without layer position
     feature_extractor = nn.Sequential(model[0])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
