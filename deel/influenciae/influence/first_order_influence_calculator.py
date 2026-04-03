@@ -91,7 +91,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             shuffle_buffer_size
         )
 
-        self.normalize = normalize
+        self.normalize: bool = normalize
 
     def _normalize_if_needed(self, v: Tensor) -> Tensor:
         """

@@ -91,7 +91,7 @@ class BaseGroupInfluenceCalculator:
             taken = self._backend.take_dataset(shuffled, n_samples_for_hessian)
             dataset_to_estimate_hessian = self._backend.batch_dataset(taken, batch_size)
 
-        self.train_set = dataset_to_estimate_hessian
+        self.train_set: DatasetLike = dataset_to_estimate_hessian
         self.ihvp_calculator: InverseHessianVectorProduct
 
         # load ivhp calculator from str, IHVPcalculator enum or InverseHessianVectorProduct object

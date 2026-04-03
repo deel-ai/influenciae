@@ -78,7 +78,7 @@ class SecondOrderInfluenceCalculator(BaseGroupInfluenceCalculator):
             shuffle_buffer_size
         )
 
-        self.train_size = self._backend.get_dataset_size(dataset)
+        self.train_size: int = self._backend.get_dataset_size(dataset)
 
     def compute_influence_vector_group(
             self,

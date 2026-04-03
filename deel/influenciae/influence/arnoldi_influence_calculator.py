@@ -53,20 +53,23 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
             k_largest_eig_vals: int,
             dtype: DType = None
     ):
-        self.subspace_dim = subspace_dim
-        self.force_hermitian = force_hermitian
-        self.k_largest_eig_vals = k_largest_eig_vals
-        self.model = model
+        self.subspace_dim: int = subspace_dim
+        self.force_hermitian: bool = force_hermitian
+        self.k_largest_eig_vals: int = k_largest_eig_vals
+        self.model: InfluenceModel = model
         self.backend: BaseBackend = model.backend
-        self.hvp_calculator = ForwardOverBackwardHVP(model, train_dataset)
+        self.hvp_calculator: ForwardOverBackwardHVP = ForwardOverBackwardHVP(model, train_dataset)
 
         # Set default dtype based on backend
+        self.dtype: DType
         if dtype is None:
             self.dtype = self.backend.float32_dtype()
         else:
             self.dtype = dtype
 
-        self.eig_vals, self.G = self.arnoldi(self.model.nb_params)
+        eig_vals, projection = self.arnoldi(self.model.nb_params)
+        self.eig_vals: Tensor = eig_vals
+        self.G: Tensor = projection
 
     def arnoldi(self, dim: int) -> Tuple[Tensor, Tensor]:
         """
@@ -179,10 +182,10 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         A0 = self.backend.zeros((self.subspace_dim, self.subspace_dim + 1), dtype=self.dtype)
 
         # Use backend's while_loop for efficiency (especially for TensorFlow graph compilation)
-        def cond_fn(_W, _A, index):
+        def cond_fn(_W: Tensor, _A: Tensor, index: int) -> bool:
             return index < self.subspace_dim
 
-        def body_fn(W, A, index):
+        def body_fn(W: Tensor, A: Tensor, index: int) -> Tuple[Tensor, Tensor, int]:
             return self._build_orthogonal_basis_iter(W, A, index)
 
         W, A, _ = self.backend.while_loop(

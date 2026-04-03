@@ -9,10 +9,10 @@ https://arxiv.org/abs/1811.09720
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 from .base_representer_point import BaseRepresenterPoint
-from ..types import DatasetLike
+from ..types import DatasetLike, LossFunction, Model, Tensor
 from ..utils.model_surgery import (
     compute_l2_alpha,
     create_surrogate_linear_model,
@@ -56,9 +56,9 @@ class RepresenterPointL2(BaseRepresenterPoint):
 
     def __init__(
             self,
-            model: Any,
+            model: Model,
             train_set: DatasetLike,
-            loss_function: Union[Callable, Any],
+            loss_function: LossFunction,
             lambda_regularization: float,
             scaling_factor: float = 0.1,
             epochs: int = 100,
@@ -70,7 +70,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         self.lambda_regularization = lambda_regularization
         self.scaling_factor = scaling_factor
         self.epochs = epochs
-        self.linear_layer: Optional[Any] = None
+        self.linear_layer: Optional[Model] = None
         self._train_last_layer(self.epochs)
 
     def _train_last_layer(self, epochs: int) -> None:
@@ -94,7 +94,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
             epochs=epochs,
         )
 
-    def _create_surrogate_model(self) -> Any:
+    def _create_surrogate_model(self) -> Model:
         """
         Create an L2-regularized linear surrogate with the right input and output sizes.
 
@@ -110,7 +110,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
             self.lambda_regularization,
         )
 
-    def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
+    def _compute_alpha(self, z_batch: Tensor, y_batch: Tensor) -> Tensor:
         """
         Compute the alpha factor for the kernel approximation.
 
@@ -137,7 +137,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
             lambda_regularization=self.lambda_regularization,
         )
 
-    def predict_with_kernel(self, samples_to_evaluate: Tuple[Any, ...]) -> Any:
+    def predict_with_kernel(self, samples_to_evaluate: Tuple[Tensor, ...]) -> Tensor:
         """
         Use the learned kernel to approximate the model's predictions on a batch of samples.
 
@@ -155,7 +155,7 @@ class RepresenterPointL2(BaseRepresenterPoint):
         influence_vectors = self.compute_influence_vector(self.train_set)
         _, dataset_influence = self._estimate_inf_values_with_inf_vect_dataset(influence_vectors, samples_to_evaluate)
 
-        predictions = None
+        predictions: Optional[Tensor] = None
         for _, influence_values in dataset_influence:
             batch_pred = self.backend.reduce_sum(influence_values, axis=1)
             if predictions is None:
@@ -163,4 +163,5 @@ class RepresenterPointL2(BaseRepresenterPoint):
             else:
                 predictions = predictions + batch_pred
 
+        assert predictions is not None, "dataset_influence must not be empty"
         return predictions

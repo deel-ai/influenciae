@@ -8,10 +8,10 @@ Module containing the base class for representer point theorem-based influence c
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
 from abc import abstractmethod
-from typing import Any, Callable, Tuple, Union
+from typing import Tuple, Union
 
 from ..common import BaseInfluenceCalculator, BaseBackend, get_backend_for_model, get_backend_for_tensor
-from ..types import DatasetLike
+from ..types import DatasetLike, LossFunction, Model, Tensor
 from ..utils.model_surgery import split_batch_inputs_targets
 
 
@@ -37,9 +37,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
     def __init__(
             self,
-            model: Any,
+            model: Model,
             train_set: DatasetLike,
-            loss_function: Union[Callable, Any],
+            loss_function: LossFunction,
             target_layer: Union[str, int] = -1
     ):
         # Get the backend for the model
@@ -55,14 +55,14 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         # Validate that the model's last layer is appropriate for representer point methods
         self._validate_last_layer(model)
 
-        self.loss_function = loss_function
-        self.model = model
+        self.loss_function: LossFunction = loss_function
+        self.model: Model = model
         self.target_layer = target_layer
 
         # Cut the model in two (feature extractor and head)
         self.feature_extractor, self.original_head = self.backend.split_model(model, target_layer)
 
-    def _validate_loss_function(self, loss_function: Any) -> None:
+    def _validate_loss_function(self, loss_function: LossFunction) -> None:
         """
         Validate that the loss function doesn't have reduction.
 
@@ -73,7 +73,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         """
         self.backend.validate_loss_no_reduction(loss_function)
 
-    def _validate_last_layer(self, model: Any) -> None:
+    def _validate_last_layer(self, model: Model) -> None:
         """
         Validate that the model's last layer is a Dense/Linear layer with no bias.
 
@@ -87,22 +87,22 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
             raise ValueError('The last layer of the model must be a Dense/Linear layer with no bias.')
 
     @staticmethod
-    def _normalize_binary_targets(y_batch: Any, logits: Any) -> Any:
+    def _normalize_binary_targets(y_batch: Tensor, logits: Tensor) -> Tensor:
         """Normalize binary classification targets to match logits shape."""
         return get_backend_for_tensor(logits).normalize_binary_targets(y_batch, logits)
 
     @staticmethod
-    def _ensure_per_sample_loss(loss: Any) -> Any:
+    def _ensure_per_sample_loss(loss: Tensor) -> Tensor:
         """Ensure framework losses are represented as per-sample vectors."""
         return get_backend_for_tensor(loss).ensure_per_sample_loss(loss)
 
     @staticmethod
-    def _split_batch_inputs_targets(samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+    def _split_batch_inputs_targets(samples: Tuple[Tensor, ...]) -> Tuple[Tensor, Tensor]:
         """Split a batch into inputs and targets."""
         return split_batch_inputs_targets(samples)
 
     @abstractmethod
-    def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
+    def _compute_alpha(self, z_batch: Tensor, y_batch: Tensor) -> Tensor:
         """
         Compute the alpha vector for a given input-output pair (z, y).
 
@@ -120,7 +120,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
         """
         raise NotImplementedError()
 
-    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tuple[Tensor, Tensor]:
         """
         Preprocess a single batch of samples.
 
@@ -141,7 +141,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
         return x_batch, y_t
 
-    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Tuple[Any, Any]:
+    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Tuple[Tensor, Tensor]:
         """
         Compute an equivalent of the influence vector for a sample of training points.
 
@@ -169,9 +169,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
     def _estimate_individual_influence_values_from_batch(
             self,
-            train_samples: Tuple[Any, ...],
-            samples_to_evaluate: Tuple[Any, ...]
-    ) -> Any:
+            train_samples: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Tensor, ...]
+    ) -> Tensor:
         """
         Estimate the (individual) influence scores of a single batch of samples with respect to
         a batch of samples belonging to the model's training dataset.
@@ -196,9 +196,9 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
     def _estimate_influence_value_from_influence_vector(
             self,
-            preproc_test_sample: Tuple[Any, Any],
-            influence_vector: Tuple[Any, Any]
-    ) -> Any:
+            preproc_test_sample: Tuple[Tensor, Tensor],
+            influence_vector: Tuple[Tensor, Tensor]
+    ) -> Tensor:
         """
         Compute the influence score for a (batch of) preprocessed test sample(s) and a training "influence vector".
 
@@ -247,7 +247,7 @@ class BaseRepresenterPoint(BaseInfluenceCalculator):
 
         return influence_values
 
-    def _compute_influence_value_from_batch(self, train_samples: Tuple[Any, ...]) -> Any:
+    def _compute_influence_value_from_batch(self, train_samples: Tuple[Tensor, ...]) -> Tensor:
         """
         Compute the influence score for a batch of training samples (i.e. self-influence).
 

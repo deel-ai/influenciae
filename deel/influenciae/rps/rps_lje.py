@@ -9,11 +9,11 @@ https://proceedings.neurips.cc/paper/2021/file/c460dc0f18fc309ac07306a4a55d2fd6-
 
 Supports both TensorFlow and PyTorch models through the backend abstraction layer.
 """
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 from .base_representer_point import BaseRepresenterPoint
-from ..common import InfluenceModel, InverseHessianVectorProductFactory
-from ..types import DatasetLike
+from ..common import InfluenceModel, InverseHessianVectorProduct, InverseHessianVectorProductFactory
+from ..types import DatasetLike, Model, Tensor
 from ..utils.model_surgery import compute_lje_alpha, perturb_head_single_sgd_step
 
 
@@ -61,6 +61,7 @@ class RepresenterPointLJE(BaseRepresenterPoint):
         super().__init__(influence_model.model, dataset, influence_model.loss_function, target_layer)
         self.epsilon = epsilon
 
+        self.perturbed_head: Model
         self.perturbed_head, dataset_to_estimate_hessian = perturb_head_single_sgd_step(
             backend=self.backend,
             original_head=self.original_head,
@@ -76,9 +77,12 @@ class RepresenterPointLJE(BaseRepresenterPoint):
             start_layer=None,
             loss_function=influence_model.loss_function,
         )
-        self.ihvp_calculator = ihvp_calculator_factory.build(perturbed_model, dataset_to_estimate_hessian)
+        self.ihvp_calculator: InverseHessianVectorProduct = ihvp_calculator_factory.build(
+            perturbed_model,
+            dataset_to_estimate_hessian,
+        )
 
-    def _compute_alpha(self, z_batch: Any, y_batch: Any) -> Any:
+    def _compute_alpha(self, z_batch: Tensor, y_batch: Tensor) -> Tensor:
         """
         Compute the alpha vector for the Local Jacobian Expansion approximation.
 
