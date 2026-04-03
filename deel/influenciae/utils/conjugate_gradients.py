@@ -134,11 +134,13 @@ def conjugate_gradients_solve(
             is_converged = residual_norm > tol
 
         if hasattr(is_converged, 'item'):
-            is_converged = bool(is_converged.item())
+            converged_flag = bool(is_converged.item())
         elif hasattr(is_converged, 'numpy'):
-            is_converged = bool(is_converged.numpy())
+            converged_flag = bool(is_converged.numpy())
+        else:
+            converged_flag = bool(is_converged)
 
-        if not is_converged:
+        if not converged_flag:
             break
 
         # Update search direction: p = r + (rs_new / rs_old) * p

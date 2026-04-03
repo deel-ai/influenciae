@@ -112,7 +112,7 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def get_layer_io_features(self, layer: nn.Module) -> Tuple[int, int]:
         """Return input/output feature sizes for a Linear layer."""
-        if not self.is_dense_linear_layer(layer):
+        if not isinstance(layer, nn.Linear):
             raise ValueError(f"Expected a Linear layer, got {type(layer)}")
         return int(layer.in_features), int(layer.out_features)
 
@@ -535,11 +535,12 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         children = list(model.children())
         if children:
             last_layer = children[-1]
-            if hasattr(last_layer, 'out_features'):
+            if isinstance(last_layer, nn.Linear):
                 return (None, last_layer.out_features)
         # Fallback: try to get from model attribute if available
-        if hasattr(model, 'output_shape'):
-            return model.output_shape
+        out_shape = getattr(model, 'output_shape', None)
+        if out_shape is not None:
+            return out_shape
         # If we can't determine, return a placeholder
         return (None,)
 
@@ -1217,7 +1218,8 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         # Compute HVP: sum of grad_i * v_i derivatives
         grad_v_product = sum(
-            (g * v_i).sum() for g, v_i in zip(grads, v)
+            ((g * v_i).sum() for g, v_i in zip(grads, v)),
+            loss.new_tensor(0.0),
         )
 
         hvp_list = torch.autograd.grad(grad_v_product, weights)

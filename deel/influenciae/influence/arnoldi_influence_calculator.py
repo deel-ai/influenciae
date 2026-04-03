@@ -234,6 +234,8 @@ class ArnoldiInfluenceCalculator(BaseInfluenceCalculator):
         else:
             eig_vals, eig_vectors = self.backend.eig(A)
 
+        assert eig_vectors is not None
+
         # Get top k eigenvalues by smallest absolute value
         neg_abs_eig_vals = -self.backend.abs(eig_vals)
         _, idx = self.backend.top_k(neg_abs_eig_vals, k=self.k_largest_eig_vals)

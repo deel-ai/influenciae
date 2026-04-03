@@ -3,7 +3,7 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """TensorFlow-specific helpers for RPS model surgery."""
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Tuple, cast
 
 import tensorflow as tf
 
@@ -35,32 +35,37 @@ def train_surrogate_linear_model_tensorflow(
     batches_per_epoch: int,
 ) -> Model:
     """Fit the surrogate linear model with TensorFlow's line-search optimizer."""
+    tf_surrogate_model = cast(tf.keras.Model, surrogate_model)
+    tf_feature_extractor = cast(tf.keras.Model, feature_extractor)
+    tf_original_head = cast(tf.keras.Model, original_head)
     mse_loss = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+    if BacktrackingLineSearch is None:
+        raise ImportError("TensorFlow support is required to use the backtracking line-search optimizer")
     optimizer = BacktrackingLineSearch(
         batches_per_epoch=batches_per_epoch,
         scaling_factor=scaling_factor,
     )
 
-    surrogate_model.compile(optimizer=optimizer, loss=mse_loss)
+    tf_surrogate_model.compile(optimizer=optimizer, loss=mse_loss)
     for _ in range(epochs):
         for batch in train_set:
             inputs, _ = _split_batch_inputs_targets(batch)
-            z_batch = backend.forward(feature_extractor, inputs)
-            y_target = backend.forward(original_head, z_batch)
+            z_batch = backend.forward(tf_feature_extractor, inputs)
+            y_target = backend.forward(tf_original_head, z_batch)
             with tf.GradientTape() as tape:
-                logits = surrogate_model(z_batch, training=True)
+                logits = tf_surrogate_model(z_batch, training=True)
                 loss = mse_loss(y_target, logits)
-                if surrogate_model.losses:
+                if tf_surrogate_model.losses:
                     regularization_loss = tf.add_n([
                         tf.cast(loss_term, loss.dtype)
-                        for loss_term in surrogate_model.losses
+                        for loss_term in tf_surrogate_model.losses
                     ])
                     loss = loss + regularization_loss
-            gradients = tape.gradient(loss, surrogate_model.trainable_weights)
-            optimizer.step(surrogate_model, loss, z_batch, y_target, gradients)
+            gradients = tape.gradient(loss, tf_surrogate_model.trainable_weights)
+            optimizer.step(tf_surrogate_model, loss, z_batch, y_target, gradients)
 
-    surrogate_model.compile(optimizer=optimizer, loss=loss_function)
-    return surrogate_model
+    tf_surrogate_model.compile(optimizer=optimizer, loss=loss_function)
+    return tf_surrogate_model
 
 
 def perturb_head_single_sgd_step_tensorflow(
@@ -72,12 +77,14 @@ def perturb_head_single_sgd_step_tensorflow(
     learning_rate: float = 1e-4,
 ) -> Model:
     """Apply one TensorFlow SGD step to the cloned head."""
-    if not perturbed_head.built and hasattr(feature_extractor, 'output_shape'):
-        perturbed_head.build(feature_extractor.output_shape)
+    tf_perturbed_head = cast(tf.keras.Model, perturbed_head)
+    tf_feature_extractor = cast(tf.keras.Model, feature_extractor)
+    if not tf_perturbed_head.built and hasattr(tf_feature_extractor, 'output_shape'):
+        tf_perturbed_head.build(tf_feature_extractor.output_shape)
 
-    trainable_vars = list(perturbed_head.trainable_variables)
+    trainable_vars = list(tf_perturbed_head.trainable_variables)
     if not trainable_vars:
-        return perturbed_head
+        return tf_perturbed_head
 
     optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate)
     accum_vars = [tf.Variable(tf.zeros_like(variable), trainable=False) for variable in trainable_vars]
@@ -86,7 +93,7 @@ def perturb_head_single_sgd_step_tensorflow(
 
     for feature_batch, target_batch in feature_dataset:
         with tf.GradientTape() as tape:
-            logits = backend.forward(perturbed_head, feature_batch)
+            logits = backend.forward(tf_perturbed_head, feature_batch)
             normalized_targets = backend.normalize_binary_targets(target_batch, logits)
             loss = loss_function(normalized_targets, logits)
             loss = -backend.reduce_mean(backend.ensure_per_sample_loss(loss))
@@ -101,7 +108,7 @@ def perturb_head_single_sgd_step_tensorflow(
 
     mean_grads = [accum_var / tf.cast(total_samples, accum_var.dtype) for accum_var in accum_vars]
     optimizer.apply_gradients(zip(mean_grads, trainable_vars))
-    return perturbed_head
+    return tf_perturbed_head
 
 
 def compute_lje_second_term_tensorflow(
@@ -110,11 +117,12 @@ def compute_lje_second_term_tensorflow(
     scaled_jacobian: Tensor,
 ) -> Tensor:
     """Compute the TensorFlow-specific IHVP term for RPS-LJE."""
+    tf_scaled_jacobian = cast(tf.Tensor, scaled_jacobian)
     second_term = backend.map_fn(
         lambda value: ihvp_calculator._compute_ihvp_single_batch(  # pylint: disable=protected-access
             tf.expand_dims(value, axis=0),
             use_gradient=False,
         ),
-        scaled_jacobian,
+        tf_scaled_jacobian,
     )
-    return tf.reshape(second_term, tf.shape(scaled_jacobian))
+    return tf.reshape(second_term, tf.shape(tf_scaled_jacobian))

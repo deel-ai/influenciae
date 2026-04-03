@@ -75,12 +75,12 @@ class TracIn(BaseInfluenceCalculator):
         influence_vectors
             A tensor with the influence for each sample.
         """
-        influence_vectors = []
+        influence_parts = []
         for model, lr in zip(self.models, self.learning_rates):
             g_train = model.batch_jacobian_tensor(train_samples)
             lr_sqrt = np.sqrt(lr)
-            influence_vectors.append(self.backend.multiply(g_train, lr_sqrt))
-        influence_vectors = self.backend.concat(influence_vectors, axis=1)
+            influence_parts.append(self.backend.multiply(g_train, lr_sqrt))
+        influence_vectors = self.backend.concat(influence_parts, axis=1)
 
         return influence_vectors
 
