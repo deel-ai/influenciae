@@ -24,13 +24,12 @@ import shutil
 import tempfile
 import warnings
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel
-
-from ..types import Any, Callable, Dict, List, Optional, Tuple
 
 
 def _chunk_layer_infos(layer_infos: List["LayerInfo"], chunk_size: int) -> List[List["LayerInfo"]]:

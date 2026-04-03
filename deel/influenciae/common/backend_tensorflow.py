@@ -8,7 +8,6 @@ TensorFlow backend implementation.
 # pylint: disable=too-many-lines
 import os
 from typing import Any, List, Tuple, Callable, Optional, Sequence, Iterable, cast
-from xml.dom import NotFoundErr
 
 import numpy as np
 import tensorflow as tf
@@ -921,10 +920,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                     tape_inner.watch(watched_weights)
                     predictions = model(batch[0])
                     loss = loss_function(batch[1], predictions)
-                    # Ensure per-sample scalar losses: collapse any trailing
-                    # dimensions (e.g. sequence/image axes) before Jacobian/Hessian.
-                    loss = tf.reshape(loss, (batch_size, -1))
-                    loss = tf.reduce_mean(loss, axis=1)
+                    loss = self.ensure_per_sample_loss(loss)
                 grads = tape_inner.jacobian(loss, watched_weights)
                 self._raise_if_disconnected('compute_hessian (inner jacobian)', grads, watched_weights)
                 grads = [tf.reshape(g, (batch_size, -1)) for g in grads]
@@ -957,7 +953,9 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 tape.watch(watched_weights)
                 predictions = model(inputs)
                 loss = loss_function(targets, predictions)
-            backward = tape.jacobian(loss, watched_weights)
+                loss = self.ensure_per_sample_loss(loss)
+                loss = tf.reduce_sum(loss)
+            backward = tape.gradient(loss, watched_weights)
         self._raise_if_disconnected('compute_hvp_single', backward, watched_weights)
 
         hvp_list = acc.jvp(backward)
@@ -986,6 +984,7 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 tape.watch(watched_weights)
                 predictions = model(inputs)
                 loss = loss_function(targets, predictions)
+                loss = self.ensure_per_sample_loss(loss)
                 loss = tf.reduce_sum(loss)
             grads = tape.gradient(loss, watched_weights)
         self._raise_if_disconnected('compute_hvp_batch', grads, watched_weights)

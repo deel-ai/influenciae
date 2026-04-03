@@ -136,7 +136,7 @@ def test_lissa_factory():
         lissa_factory = LissaIHVPFactory(feature_extractor, n_lissa_iters)
 
 
-def test_kfac_factory():
+def test_kfac_factory(tmp_path):
     tf.random.set_seed(42)
 
     model = Sequential([
@@ -155,6 +155,7 @@ def test_kfac_factory():
     target = tf.random.normal((10, 2), dtype=tf.float64)
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
 
+    factors_path = str(tmp_path / "kfac_factors")
     kfac_factory = KfacIHVPFactory(
         damping=1e-3,
         layer_collection="recursive",
@@ -162,6 +163,8 @@ def test_kfac_factory():
         offload_activations_to_cpu=True,
         data_partition_size=2,
         accumulator_offload_mode="memory",
+        factors_path=factors_path,
+        overwrite_factors=True,
     )
     assert isinstance(kfac_factory, InverseHessianVectorProductFactory)
 
@@ -172,9 +175,11 @@ def test_kfac_factory():
     assert ihvp_from_factory.factors.offload_activations_to_cpu
     assert ihvp_from_factory.factors.data_partition_size == 2
     assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"
+    assert ihvp_from_factory.factors_path == factors_path
+    assert ihvp_from_factory.overwrite_factors
 
 
-def test_ekfac_factory():
+def test_ekfac_factory(tmp_path):
     tf.random.set_seed(42)
 
     model = Sequential([
@@ -193,6 +198,7 @@ def test_ekfac_factory():
     target = tf.random.normal((10, 2), dtype=tf.float64)
     train_set = tf.data.Dataset.from_tensor_slices((inputs, target)).batch(5)
 
+    factors_path = str(tmp_path / "ekfac_factors")
     ekfac_factory = EkfacIHVPFactory(
         damping=1e-3,
         layer_collection="recursive",
@@ -200,6 +206,8 @@ def test_ekfac_factory():
         offload_activations_to_cpu=True,
         data_partition_size=2,
         accumulator_offload_mode="memory",
+        factors_path=factors_path,
+        overwrite_factors=True,
     )
     assert isinstance(ekfac_factory, InverseHessianVectorProductFactory)
 
@@ -210,3 +218,5 @@ def test_ekfac_factory():
     assert ihvp_from_factory.factors.offload_activations_to_cpu
     assert ihvp_from_factory.factors.data_partition_size == 2
     assert ihvp_from_factory.factors.accumulator_offload_mode == "memory"
+    assert ihvp_from_factory.factors_path == factors_path
+    assert ihvp_from_factory.overwrite_factors

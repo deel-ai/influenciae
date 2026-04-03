@@ -205,10 +205,6 @@ def test_compute_gradient(backend):
 
     gradient = backend.compute_gradient(model, weights, loss_fn, inputs, targets)
     expected_gradient = grads_mat.sum(dim=1)
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
-
-    gradient = backend.compute_gradient(simple_model, weights, loss_fn, inputs, targets)
 
     num_params = backend.get_num_params(weights)
     assert gradient.shape == (num_params,)
@@ -222,10 +218,6 @@ def test_compute_jacobian(backend):
 
     jacobian = backend.compute_jacobian(model, weights, loss_fn, inputs, targets)
     expected_jacobian = grads_mat.T
-    def loss_fn(pred, target):
-        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
-
-    jacobian = backend.compute_jacobian(simple_model, weights, loss_fn, inputs, targets)
 
     num_params = backend.get_num_params(weights)
     assert jacobian.shape == (inputs.shape[0], num_params)
@@ -337,133 +329,18 @@ def test_compute_jacobian_vmap_matches_loop_with_sample_weight(backend, simple_m
     """Weighted torch.func Jacobian path should match the loop reference."""
     inputs = torch.randn(4, 5)
     targets = torch.randn(4, 2)
-    sample_weight = torch.tensor([1.0, 2.0, 0.5, 1.5]).unsqueeze(-1)
+    sample_weight = torch.tensor([1.0, 2.0, 0.5, 1.5])
     weights = backend.get_model_weights(simple_model)
 
+    def loss_fn(pred, target):
+        return nn.functional.mse_loss(pred, target, reduction='none').mean(dim=-1)
 
-def test_kron(backend):
-    """Kronecker product should match torch.kron."""
-    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-    b = torch.tensor([[0.0, 5.0], [6.0, 7.0]], dtype=torch.float64)
+    jacobian = backend.compute_jacobian(simple_model, weights, loss_fn, inputs, targets, sample_weight)
+    expected = backend._compute_jacobian_loop(simple_model, weights, loss_fn, inputs, targets, sample_weight)
 
-    result = backend.kron(a, b)
-    expected = torch.kron(a, b)
-
-    assert torch.allclose(result, expected, atol=1e-12)
-    assert result.shape == (4, 4)
-
-
-def test_outer(backend):
-    """Outer product should match torch.outer."""
-    a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
-    b = torch.tensor([4.0, 5.0], dtype=torch.float64)
-
-    result = backend.outer(a, b)
-    expected = torch.outer(a, b)
-
-    assert torch.allclose(result, expected, atol=1e-12)
-    assert result.shape == (3, 2)
-
-
-def test_eye(backend):
-    """Identity helper should match torch.eye."""
-    identity = backend.eye(3, dtype=torch.float64)
-    assert torch.allclose(identity, torch.eye(3, dtype=torch.float64))
-
-
-def test_is_linear_layer(backend):
-    """Linear layers should be detected by the backend."""
-    assert backend.is_linear_layer(nn.Linear(3, 2))
-    assert not backend.is_linear_layer(nn.Conv2d(3, 16, 3))
-    assert not backend.is_linear_layer(nn.BatchNorm1d(3))
-
-
-def test_is_conv2d_layer(backend):
-    """Conv2d layers should be detected by the backend."""
-    assert backend.is_conv2d_layer(nn.Conv2d(3, 16, 3))
-    assert not backend.is_conv2d_layer(nn.Linear(3, 2))
-    assert not backend.is_conv2d_layer(nn.LayerNorm(3))
-
-
-def test_get_layer_weight_and_bias_linear_no_bias(backend):
-    """Weight extraction should return no bias when disabled."""
-    layer = nn.Linear(4, 3, bias=False)
-
-    weight, bias = backend.get_layer_weight_and_bias(layer)
-    assert weight is layer.weight
-    assert bias is None
-
-
-def test_get_layer_weight_and_bias_linear_with_bias(backend):
-    """Weight extraction should return module weight and bias."""
-    layer = nn.Linear(4, 3, bias=True)
-
-    weight, bias = backend.get_layer_weight_and_bias(layer)
-    assert weight is layer.weight
-    assert bias is layer.bias
-
-
-def test_forward_hook(backend):
-    """Forward hooks should receive module input and output."""
-    layer = nn.Linear(3, 2, dtype=torch.float64)
-    captured = {}
-
-    def hook(module, inp, out):
-        captured['input'] = inp
-        captured['output'] = out
-
-    handle = backend.register_forward_hook(layer, hook)
-    _ = layer(torch.randn(1, 3, dtype=torch.float64))
-
-    assert 'input' in captured
-    assert 'output' in captured
-    backend.remove_hook(handle)
-
-
-def test_backward_hook(backend):
-    """Backward hooks should be triggered on backprop."""
-    layer = nn.Linear(3, 2, dtype=torch.float64)
-    captured = {}
-
-    def hook(module, grad_input, grad_output):
-        captured['grad_output'] = grad_output
-
-    handle = backend.register_backward_hook(layer, hook)
-    x = torch.randn(1, 3, dtype=torch.float64, requires_grad=True)
-    y = layer(x)
-    y.sum().backward()
-
-    assert 'grad_output' in captured
-    backend.remove_hook(handle)
-
-
-def test_remove_hook_stops_capture(backend):
-    """Removing a hook should prevent further callbacks."""
-    layer = nn.Linear(3, 2, dtype=torch.float64)
-    call_count = {'value': 0}
-
-    def hook(module, inp, out):
-        call_count['value'] += 1
-
-    handle = backend.register_forward_hook(layer, hook)
-    _ = layer(torch.randn(1, 3, dtype=torch.float64))
-    assert call_count['value'] == 1
-
-    backend.remove_hook(handle)
-    _ = layer(torch.randn(1, 3, dtype=torch.float64))
-    assert call_count['value'] == 1
-
-
-def test_eigh(backend):
-    """Symmetric eigendecomposition should reconstruct the input matrix."""
-    matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]], dtype=torch.float64)
-
-    eigenvalues, eigenvectors = backend.eigh(matrix)
-    reconstructed = eigenvectors @ torch.diag(eigenvalues) @ eigenvectors.T
-
-    assert eigenvalues[0] < eigenvalues[1]
-    assert torch.allclose(reconstructed, matrix, atol=1e-10)
-    assert torch.allclose(eigenvectors.T @ eigenvectors, torch.eye(2, dtype=torch.float64), atol=1e-10)
+    assert jacobian.shape == expected.shape
+    assert torch.all(torch.isfinite(jacobian))
+    assert_allclose(jacobian, expected)
 
 
 def test_kron(backend):

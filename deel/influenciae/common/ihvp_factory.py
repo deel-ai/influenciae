@@ -266,7 +266,7 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
         self.factors_path = factors_path
         self.overwrite_factors = overwrite_factors
 
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of the KfacIHVP class for the provided model and its
         corresponding (full or partial) training dataset.
@@ -296,8 +296,6 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
             accumulator_offload_mode=self.accumulator_offload_mode,
             accumulator_offload_dir=self.accumulator_offload_dir,
             keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
-            factors_path=self.factors_path,
-            overwrite_factors=self.overwrite_factors,
             factors_path=self.factors_path,
             overwrite_factors=self.overwrite_factors,
         )
@@ -372,7 +370,7 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
         self.factors_path = factors_path
         self.overwrite_factors = overwrite_factors
 
-    def build(self, model_influence: InfluenceModel, dataset: Any) -> InverseHessianVectorProduct:
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
         """
         Creates an instance of the EkfacIHVP class for the provided model and its
         corresponding (full or partial) training dataset.
@@ -403,8 +401,6 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             accumulator_offload_mode=self.accumulator_offload_mode,
             accumulator_offload_dir=self.accumulator_offload_dir,
             keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
-            factors_path=self.factors_path,
-            overwrite_factors=self.overwrite_factors,
             factors_path=self.factors_path,
             overwrite_factors=self.overwrite_factors,
         )

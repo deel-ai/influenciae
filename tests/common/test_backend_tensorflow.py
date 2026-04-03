@@ -9,7 +9,7 @@ These tests verify the TensorFlow-specific functionality works correctly.
 import numpy as np
 import pytest
 import tensorflow as tf
-from tensorflow.keras.layers import BatchNormalization, Dense, Input, Flatten, ReLU
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Dense, Flatten, Input, LayerNormalization, ReLU
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import MeanSquaredError, CategoricalCrossentropy, Reduction
 
@@ -997,18 +997,42 @@ def test_assign_variable(backend, simple_model):
     assert tf.reduce_all(variable == 0.0)
 
 def test_compute_hessian(backend):
-    """Test Hessian computation shape and finiteness."""
-    model = Sequential([Input(shape=(2,)), Dense(1, name='output')])
-    weights = backend.get_model_weights(model)
+    """Test Hessian computation against the closed-form last-layer Hessian."""
+    model, weights, _, _, dataset, loss_fn, _, hessian_stack = _make_closed_form_last_layer_case_tf(backend)
     nb_params = backend.get_num_params(weights)
 
     hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
-    expected_hessian = tf.reduce_mean(expected_hessian_stack, axis=0)
+    expected_hessian = tf.reduce_mean(hessian_stack, axis=0)
 
     assert hessian.shape == (nb_params, nb_params)
     assert tf.reduce_all(tf.math.is_finite(hessian))
     assert np.allclose(backend.to_numpy(hessian), backend.to_numpy(tf.transpose(hessian)), atol=1e-5, rtol=1e-5)
     assert_allclose(hessian, expected_hessian)
+
+
+def test_second_order_ops_reduce_multidim_per_sample_losses(backend):
+    """Second-order helpers should collapse multi-dimensional per-sample losses consistently."""
+    model = Sequential([Input(shape=(2,)), Dense(2, name='output')])
+    _ = model(tf.zeros((1, 2), dtype=tf.float32))
+    weights = backend.get_model_weights(model)
+    nb_params = backend.get_num_params(weights)
+
+    inputs = tf.constant([[1.0, -0.5]], dtype=tf.float32)
+    targets = tf.constant([[0.3, -1.2]], dtype=tf.float32)
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, targets)).batch(1)
+    vector = [tf.ones_like(weight) for weight in weights]
+
+    def loss_fn(target, pred):
+        return tf.math.squared_difference(target, pred)
+
+    hessian = backend.compute_hessian(model, weights, loss_fn, dataset, nb_params)
+    hvp = backend.compute_hvp_single(model, weights, loss_fn, vector, inputs, targets)
+    vector_flat = backend.concat([backend.reshape(v, (-1,)) for v in vector], axis=0)
+    expected_hvp = backend.reshape(backend.matmul(hessian, backend.reshape(vector_flat, (-1, 1))), (-1,))
+
+    assert hvp.shape == (nb_params,)
+    assert tf.reduce_all(tf.math.is_finite(hvp))
+    assert_allclose(hvp, expected_hvp)
 
 
 def test_compute_hvp_single(backend):

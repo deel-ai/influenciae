@@ -15,7 +15,7 @@ from tensorflow.keras.layers import Conv2D, Dense, GlobalAveragePooling2D, Input
 from tensorflow.keras.models import Sequential as TFSequential
 from tensorflow.keras.losses import MeanSquaredError, Reduction
 
-from ..utils_test import allclose
+from ..utils_test import allclose, almost_equal
 
 
 pytestmark = pytest.mark.requires_both_backends
