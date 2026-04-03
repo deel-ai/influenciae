@@ -9,12 +9,11 @@ Supports both TensorFlow and PyTorch.
 # pylint: disable=too-many-lines
 from abc import ABC, abstractmethod
 from enum import Enum
-import importlib.util
 from typing import Any, List, Tuple, Callable, Optional, Union
 
 import numpy as np
 
-from .._optional_imports import import_optional_attr, import_optional_module
+from .._optional_imports import import_optional_attr, import_optional_module, is_module_available
 from ..types import DatasetLike, DType, ElementSpec, Layer, LossFunction, Model, Tensor, WeightVariable
 
 
@@ -34,10 +33,10 @@ def get_available_frameworks() -> List[Framework]:
         List of available frameworks.
     """
     available = []
-    if importlib.util.find_spec("tensorflow") is not None:
+    if is_module_available("tensorflow"):
         available.append(Framework.TENSORFLOW)
 
-    if importlib.util.find_spec("torch") is not None:
+    if is_module_available("torch"):
         available.append(Framework.PYTORCH)
 
     return available
