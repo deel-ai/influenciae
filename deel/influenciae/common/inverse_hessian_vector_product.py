@@ -138,6 +138,60 @@ class InverseHessianVectorProduct(ABC):
 
         return hvp_ds
 
+    @property
+    def supports_query_preconditioning(self) -> bool:
+        """
+        Return whether this IHVP implementation supports query-side preconditioning.
+
+        When ``True``, :meth:`precondition_gradient` can be called to apply the IHVP
+        to a pre-computed gradient vector instead of re-computing the gradient from data.
+        Subclasses that support this mode should override this property to return ``True``.
+        """
+        return False
+
+    def precondition_gradient(self, gradient: Tensor) -> Tensor:
+        """
+        Apply the IHVP to a pre-computed flat gradient vector.
+
+        This is a thin public wrapper around
+        :meth:`_compute_ihvp_single_batch` with ``use_gradient=False``.
+        It is provided as a convenience for the query-batched computation path.
+
+        Parameters
+        ----------
+        gradient
+            A tensor of shape ``(batch, nb_params)`` containing pre-computed
+            gradient vectors.
+
+        Returns
+        -------
+        ihvp
+            A tensor of shape ``(nb_params, batch)`` with the IHVP result.
+
+        Raises
+        ------
+        NotImplementedError
+            If :attr:`supports_query_preconditioning` is ``False``.
+        """
+        if not self.supports_query_preconditioning:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support query-side preconditioning."
+            )
+        return self._compute_ihvp_single_batch((gradient,), use_gradient=False)
+
+    def reshape_gradient_per_module(self, gradient: Tensor) -> Any:
+        """
+        Reshape flat gradients into per-module tensors when supported.
+
+        This helper is used by query-side score computation for methods whose
+        module structure is known (for example K-FAC / EK-FAC). Implementations
+        that do not expose a stable module layout should leave the default
+        ``NotImplementedError`` behavior.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose a per-module gradient layout."
+        )
+
 
 class ExactIHVP(InverseHessianVectorProduct):
     """
@@ -185,6 +239,11 @@ class ExactIHVP(InverseHessianVectorProduct):
             self.inv_hessian = self.backend.pinv(train_hessian)
         else:
             raise ArgumentError(None, "Either train_dataset or train_hessian can be set to None, but not both")
+
+    @property
+    def supports_query_preconditioning(self) -> bool:
+        """ExactIHVP supports query-side preconditioning."""
+        return True
 
     def _compute_inv_hessian(self, dataset: DatasetLike) -> Tensor:
         """
@@ -992,6 +1051,59 @@ class KfacIHVP(InverseHessianVectorProduct):
         """Return the symmetric part of a factor matrix."""
         return 0.5 * (factor + self.backend.transpose(factor))
 
+    @property
+    def supports_query_preconditioning(self) -> bool:
+        """KfacIHVP supports query-side preconditioning."""
+        return True
+
+    def precondition_gradient_per_module(self, gradient: Any) -> Any:
+        """
+        Apply the K-FAC IHVP to a flat gradient and return per-module tensors.
+
+        The result for each layer is a 2-D matrix in the framework's native
+        weight layout: ``(n_in_eff, n_out)`` for TensorFlow and
+        ``(n_out, n_in_eff)`` for PyTorch.
+
+        Parameters
+        ----------
+        gradient
+            Flat gradient tensor of shape ``(batch, nb_params)``.
+
+        Returns
+        -------
+        per_module
+            A dict mapping layer index to a tensor of shape
+            ``(batch, n_in_eff, n_out)`` (TF) or ``(batch, n_out, n_in_eff)``
+            (PyTorch) for each supported layer.
+        """
+        # Reuse the full IHVP computation path then slice per module
+        ihvp_full = self._compute_ihvp_single_batch((gradient,), use_gradient=False)
+        # ihvp_full has shape (nb_params, batch); transpose to (batch, nb_params)
+        ihvp_t = self.backend.transpose(ihvp_full)
+        return self.reshape_gradient_per_module(ihvp_t)
+
+    def reshape_gradient_per_module(self, gradient: Any) -> Any:
+        """Reshape flat gradients into K-FAC module tensors."""
+        grads = self.backend.reshape(gradient, (-1, self.model.nb_params))
+        batch_size = self.backend.get_batch_size(grads)
+
+        per_module: Any = {}
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.kron_inv_eigs:
+                continue
+
+            layer_slice = grads[:, info.flat_start:info.flat_end]
+            q_a = self.Q_A[idx]
+            q_g = self.Q_G[idx]
+            n_out = int(self.backend.tensor_shape(q_g)[0])
+            n_in_eff = int(self.backend.tensor_shape(q_a)[0])
+            if self.backend.framework.value == "tensorflow":
+                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_in_eff, n_out))
+            else:
+                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_out, n_in_eff))
+        return per_module
+
     def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
         """
         Compute K-FAC IHVP for a single batch.
@@ -1246,6 +1358,57 @@ class EkfacIHVP(InverseHessianVectorProduct):
             )
             if checkpoint_path is not None:
                 self.factors.save_to_dir(checkpoint_path)
+
+    @property
+    def supports_query_preconditioning(self) -> bool:
+        """EkfacIHVP supports query-side preconditioning."""
+        return True
+
+    def precondition_gradient_per_module(self, gradient: Any) -> Any:
+        """
+        Apply the EK-FAC IHVP to a flat gradient and return per-module tensors.
+
+        The result for each layer is a 2-D matrix in the framework's native
+        weight layout: ``(n_in_eff, n_out)`` for TensorFlow and
+        ``(n_out, n_in_eff)`` for PyTorch.
+
+        Parameters
+        ----------
+        gradient
+            Flat gradient tensor of shape ``(batch, nb_params)``.
+
+        Returns
+        -------
+        per_module
+            A dict mapping layer index to a tensor of shape
+            ``(batch, n_in_eff, n_out)`` (TF) or ``(batch, n_out, n_in_eff)``
+            (PyTorch) for each supported layer.
+        """
+        ihvp_full = self._compute_ihvp_single_batch((gradient,), use_gradient=False)
+        ihvp_t = self.backend.transpose(ihvp_full)
+        return self.reshape_gradient_per_module(ihvp_t)
+
+    def reshape_gradient_per_module(self, gradient: Any) -> Any:
+        """Reshape flat gradients into EK-FAC module tensors."""
+        grads = self.backend.reshape(gradient, (-1, self.model.nb_params))
+        batch_size = self.backend.get_batch_size(grads)
+
+        per_module: Any = {}
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.factors.Q_A or idx not in self.factors.Lambda_corrected:
+                continue
+
+            layer_slice = grads[:, info.flat_start:info.flat_end]
+            q_a = self.factors.Q_A[idx]
+            q_g = self.factors.Q_G[idx]
+            n_out = int(self.backend.tensor_shape(q_g)[0])
+            n_in_eff = int(self.backend.tensor_shape(q_a)[0])
+            if self.backend.framework.value == "tensorflow":
+                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_in_eff, n_out))
+            else:
+                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_out, n_in_eff))
+        return per_module
 
     def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
         """
