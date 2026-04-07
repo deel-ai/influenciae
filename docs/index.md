@@ -108,6 +108,28 @@ data_and_influence_dataset = influence_calculator.estimate_influence_values_in_b
 
 This is also explained more in depth in the [Getting Started tutorial](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) <sub> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1vQ6seX6KOr48zx4nLELoy9j1X4jzQv1p?usp=sharing) </sub>
 
+### Query-side batching for large training sets
+
+When the number of query points is small compared to the training set, `FirstOrderInfluenceCalculator`
+can precondition query gradients instead of training gradients:
+
+```python
+from deel.influenciae.common.query_batching import PreconditioningMode, QueryBatchingConfig
+
+data_and_influence_dataset = influence_calculator.estimate_influence_values_in_batches(
+    samples_to_explain,
+    train_dataset,
+    preconditioning_mode=PreconditioningMode.QUERY,
+    query_batching_config=QueryBatchingConfig(
+        query_gradient_accumulation_steps=2,
+        score_data_partitions=2,
+    ),
+)
+```
+
+This mode currently requires an IHVP implementation that supports query-side preconditioning such as
+`ExactIHVP`, `KfacIHVP`, or `EkfacIHVP`. See the [query batching guide](api/influence/query_batching.md).
+
 ### Determining the influence of groups of samples
 
 The previous examples use notions of influence that are applied individually to each data-point, but it is possible to extend this to groups. That is, answer the question of what would a model look like if it hadn't seen a whole group of data-points during training, for example. This can be computed namely using the `FirstOrderInfluenceCalculator` and `SecondOrderInfluenceCalculator`, for implementations where pairwise interactions between each of the data-points are not taken into account and do, respectively.

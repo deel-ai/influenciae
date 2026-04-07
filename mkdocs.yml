@@ -4,6 +4,7 @@ nav:
   - Home: index.md
   - Influence Functions:
       - First Order Influence Calculator: api/influence/first_order_influence_calculator.md
+      - Query Batching: api/influence/query_batching.md
       - Second Order Influence Calculator: api/influence/second_order_influence_calculator.md
       - Arnoldi Influence Calculator: api/influence/arnoldi.md
   - Representer Point Selection:

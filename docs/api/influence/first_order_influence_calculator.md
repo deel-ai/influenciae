@@ -26,6 +26,17 @@ training points (or groups) on other test points (or groups).
 It also implements the RelatIF technique, which can be computed by setting the `normalize` attribute
 to `True`.
 
+## Query Batching
+
+`FirstOrderInfluenceCalculator` also supports query-side preconditioning through
+`preconditioning_mode=PreconditioningMode.QUERY`.
+
+This mode applies the IHVP to query gradients instead of training gradients and is useful when
+the number of query points is much smaller than the number of training points.
+
+See [Query batching](query_batching.md) for the supported IHVP implementations, available
+configuration options, and usage examples.
+
 ## Reusing K-FAC / EK-FAC factors
 
 You can cache K-FAC/EK-FAC factors to disk and reuse them across runs by passing an IHVP factory:
