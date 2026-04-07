@@ -1515,3 +1515,31 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def remove_hook(self, handle: torch.utils.hooks.RemovableHandle) -> None:
         """Remove a previously registered hook."""
         handle.remove()
+
+    def svd_lowrank(self, matrix: torch.Tensor, rank: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Compute a low-rank truncated SVD via ``torch.svd_lowrank``.
+
+        Parameters
+        ----------
+        matrix
+            2-D tensor of shape ``(m, n)``.
+        rank
+            Number of singular triplets to retain.
+
+        Returns
+        -------
+        U
+            Left singular vectors, shape ``(m, rank)``.
+        S
+            Singular values, shape ``(rank,)``.
+        Vh
+            Right singular vectors (transposed), shape ``(rank, n)``.
+        """
+        u, s, v = torch.svd_lowrank(matrix, q=rank)
+        # torch.svd_lowrank returns V (not Vh); transpose to get Vh
+        return u, s, v.t()
+
+    def einsum(self, equation: str, *operands: torch.Tensor) -> torch.Tensor:
+        """Evaluate an Einstein summation using ``torch.einsum``."""
+        return torch.einsum(equation, *operands)

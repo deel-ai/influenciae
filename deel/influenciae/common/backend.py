@@ -1824,6 +1824,47 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
             :meth:`register_backward_hook`.
         """
 
+    @abstractmethod
+    def svd_lowrank(self, matrix: Tensor, rank: int) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Compute a low-rank truncated SVD of a 2-D matrix.
+
+        Parameters
+        ----------
+        matrix
+            2-D tensor of shape ``(m, n)``.
+        rank
+            Number of singular values / vectors to retain.
+
+        Returns
+        -------
+        U
+            Left singular vectors, shape ``(m, rank)``.
+        S
+            Singular values, shape ``(rank,)``.
+        Vh
+            Right singular vectors (transposed), shape ``(rank, n)``.
+        """
+
+    @abstractmethod
+    def einsum(self, equation: str, *operands: Tensor) -> Tensor:
+        """
+        Evaluate an Einstein summation on the provided operands.
+
+        Parameters
+        ----------
+        equation
+            The einsum subscript string (e.g. ``"ij,jk->ik"``).
+        *operands
+            Tensors corresponding to each operand in the equation.
+
+        Returns
+        -------
+        result
+            The resulting tensor.
+        """
+
+
 def get_backend(framework: Framework) -> BaseBackend:
     """
     Get the backend for a specific framework.

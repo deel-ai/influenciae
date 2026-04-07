@@ -1282,3 +1282,38 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
     def remove_hook(self, handle: Any) -> None:
         """Remove a previously registered hook."""
         handle.remove()
+
+    def svd_lowrank(self, matrix: Any, rank: int) -> Tuple[Any, Any, Any]:
+        """
+        Compute a low-rank truncated SVD using ``tf.linalg.svd``.
+
+        TensorFlow does not have a native randomised low-rank SVD, so this
+        implementation computes the full SVD and retains only the top *rank*
+        singular triplets.  For large matrices consider pre-projecting before
+        calling this method.
+
+        Parameters
+        ----------
+        matrix
+            2-D tensor of shape ``(m, n)``.
+        rank
+            Number of singular triplets to retain.
+
+        Returns
+        -------
+        U
+            Left singular vectors, shape ``(m, rank)``.
+        S
+            Singular values, shape ``(rank,)``.
+        Vh
+            Right singular vectors (transposed), shape ``(rank, n)``.
+        """
+        s_full, u_full, v_full = tf.linalg.svd(matrix, full_matrices=False)
+        u = u_full[:, :rank]
+        s = s_full[:rank]
+        vh = tf.transpose(v_full[:, :rank])
+        return u, s, vh
+
+    def einsum(self, equation: str, *operands: Any) -> Any:
+        """Evaluate an Einstein summation using ``tf.einsum``."""
+        return tf.einsum(equation, *operands)
