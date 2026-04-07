@@ -17,7 +17,7 @@ from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.losses import MeanSquaredError, Reduction
 
-from deel.influenciae.common import InfluenceModel, ExactIHVP, CACHE
+from deel.influenciae.common import InfluenceModel, ExactIHVP, KfacIHVP, EkfacIHVP, CACHE
 from deel.influenciae.common import ConjugateGradientDescentIHVP
 from deel.influenciae.common.query_batching import QueryBatchingConfig, PreconditioningMode
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
@@ -54,6 +54,31 @@ def _make_calc(normalize=False):
     return calc, train_ds, test_ds
 
 
+def _make_factorized_calc(ihvp_cls, normalize=False):
+    """Build a small two-layer setup for K-FAC/EK-FAC query-side tests."""
+    set_seed()
+    model = Sequential([
+        Input(shape=(4,), dtype=tf.float32),
+        Dense(3, use_bias=False),
+        Dense(2, use_bias=False),
+    ])
+    loss = MeanSquaredError(reduction=Reduction.NONE)
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss)
+
+    rng = np.random.default_rng(4)
+    x_train = rng.standard_normal((24, 4)).astype(np.float32)
+    y_train = rng.standard_normal((24, 2)).astype(np.float32)
+    x_test = rng.standard_normal((6, 4)).astype(np.float32)
+    y_test = rng.standard_normal((6, 2)).astype(np.float32)
+
+    train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(6)
+    test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test)).batch(3)
+
+    ihvp = ihvp_cls(influence_model, train_ds, damping=1e-3)
+    calc = FirstOrderInfluenceCalculator(influence_model, train_ds, ihvp, normalize=normalize)
+    return calc, train_ds, test_ds
+
+
 # ---------------------------------------------------------------------------
 # supports_query_preconditioning
 # ---------------------------------------------------------------------------
@@ -65,9 +90,12 @@ def test_exact_ihvp_supports_query_preconditioning():
 
 def test_iterative_ihvp_does_not_support_query_preconditioning():
     set_seed()
-    model = Sequential([Input(shape=(3,)), Dense(2, use_bias=False)])
+    # Two layers are required: IterativeIHVP splits the model at extractor_layer so
+    # layers[:extractor_layer_idx] must be non-empty (otherwise the feature extractor
+    # is an empty Sequential and Keras raises on the first forward pass).
+    model = Sequential([Input(shape=(3,)), Dense(4, use_bias=False), Dense(2, use_bias=False)])
     loss = MeanSquaredError(reduction=Reduction.NONE)
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss)
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss)
     rng = np.random.default_rng(1)
     x_train = rng.standard_normal((10, 3)).astype(np.float32)
     y_train = rng.standard_normal((10, 2)).astype(np.float32)
@@ -291,14 +319,44 @@ def test_low_rank_compression_shape():
 
 
 # ---------------------------------------------------------------------------
+# K-FAC / EK-FAC factorized query batching
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ihvp_cls", [KfacIHVP, EkfacIHVP])
+def test_factorized_query_batching_matches_standard_full_rank(ihvp_cls):
+    """Query-batched scores with K-FAC/EK-FAC must match the standard train-side path."""
+    calc, train_ds, test_ds = _make_factorized_calc(ihvp_cls, normalize=False)
+    standard = _collect_standard_scores(calc, test_ds, train_ds)
+    query_batched = _collect_query_batched_scores(calc, test_ds, train_ds)
+    np.testing.assert_allclose(query_batched, standard, atol=_ATOL)
+
+
+@pytest.mark.parametrize("ihvp_cls", [KfacIHVP, EkfacIHVP])
+def test_factorized_low_rank_and_partitioning_match_unpartitioned(ihvp_cls):
+    """Low-rank + partitioned scoring must match the unpartitioned baseline for K-FAC/EK-FAC."""
+    calc, train_ds, test_ds = _make_factorized_calc(ihvp_cls, normalize=False)
+    baseline = _collect_query_batched_scores(calc, test_ds, train_ds)
+    config = QueryBatchingConfig(
+        query_gradient_low_rank=3,
+        score_data_partitions=2,
+        score_module_partitions=2,
+    )
+    partitioned = _collect_query_batched_scores(calc, test_ds, train_ds, config)
+    # Low-rank compression (rank=3) introduces an approximation error that exceeds
+    # the module-level _ATOL; use a per-test tolerance appropriate for the approximation.
+    np.testing.assert_allclose(partitioned, baseline, atol=1e-2)
+
+
+# ---------------------------------------------------------------------------
 # Error raised when IHVP does not support preconditioning
 # ---------------------------------------------------------------------------
 
 def test_raises_when_ihvp_not_supported():
     set_seed()
-    model = Sequential([Input(shape=(3,)), Dense(2, use_bias=False)])
+    # Two layers are required: same reason as test_iterative_ihvp_does_not_support_query_preconditioning.
+    model = Sequential([Input(shape=(3,)), Dense(4, use_bias=False), Dense(2, use_bias=False)])
     loss = MeanSquaredError(reduction=Reduction.NONE)
-    influence_model = InfluenceModel(model, start_layer=-1, loss_function=loss)
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss)
     rng = np.random.default_rng(2)
     x_train = rng.standard_normal((10, 3)).astype(np.float32)
     y_train = rng.standard_normal((10, 2)).astype(np.float32)
