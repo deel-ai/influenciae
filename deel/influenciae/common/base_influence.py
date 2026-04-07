@@ -18,6 +18,7 @@ from typing import Any, Optional, Tuple
 from warnings import warn
 
 from .backend import BaseBackend
+from .query_batching import PreconditioningMode, QueryBatchingConfig
 from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 from ..utils.sorted_dict import BatchSort, ORDER
 from ..types import DType, DatasetLike, Tensor
@@ -253,15 +254,20 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     @abstractmethod
     def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Any:
         """
-        Preprocess a sample to evaluate
+        Preprocess one evaluation batch into the representation used for scoring.
 
         Parameters
         ----------
         samples
-            sample to evaluate
+            A single batch of samples to evaluate.
+
         Returns
         -------
-        The preprocessed sample to evaluate
+        preprocessed_samples
+            Backend-specific representation consumed by
+            :meth:`_estimate_influence_value_from_influence_vector`. For
+            first-order calculators this is typically the per-sample Jacobian
+            of the loss with respect to the watched weights.
         """
         raise NotImplementedError()
 
@@ -400,9 +406,19 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         preconditioning_mode
             Whether to precondition training gradients (default) or query gradients.
         query_batching_config
-            Optional configuration used when ``preconditioning_mode=QUERY``.
+            Optional configuration used only when
+            ``preconditioning_mode=PreconditioningMode.QUERY``.
         device
-            Device where the computation will be executed
+            Device where the computation will be executed.
+
+        Raises
+        ------
+        ValueError
+            If query-side preconditioning is combined with train-side
+            influence-vector caching arguments, or if
+            ``query_batching_config`` is provided while
+            ``preconditioning_mode`` is not
+            ``PreconditioningMode.QUERY``.
 
         Returns
         -------
@@ -412,8 +428,6 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             - samples_to_evaluate: The batch of sample to evaluate.
             - dataset: Dataset containing tuples of batch of the training dataset and their influence score.
         """
-        from .query_batching import PreconditioningMode
-
         preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
         if preconditioning_mode == PreconditioningMode.QUERY:
             if influence_vector_in_cache != CACHE.MEMORY:
@@ -497,20 +511,19 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             device: Optional[str] = None
     ) -> DatasetLike:
         """
-        Find the top-k closest elements for each element of dataset to evaluate in the training dataset
-        The method will return a dataset containing a tuple of:
-            (Top-k influence values for each sample to evaluate, Top-k training sample for each sample to evaluate)
+        Find the top-k most influential training samples for each evaluation sample.
 
         Parameters
         ----------
         dataset_to_evaluate
-            The dataset which contains the samples which will be compare to the training dataset
+            Dataset containing the samples to compare against the training
+            dataset.
         train_set
             The dataset used to train the model.
         k
-            the number of most influence samples to retain in training dataset
+            Number of most influential training samples to retain.
         nearest_neighbors
-            The nearest neighbor method. The default method is a linear search
+            The nearest-neighbor method. The default method is a linear search.
         influence_vector_in_cache
             An enum indicating if intermediary values are to be cached (either in memory or on the disk) or not.
             Options include CACHE.MEMORY (0) for caching in memory, CACHE.DISK (1) for the disk and CACHE.NO_CACHE (2)
@@ -529,9 +542,19 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         preconditioning_mode
             Whether to precondition training gradients (default) or query gradients.
         query_batching_config
-            Optional configuration used when ``preconditioning_mode=QUERY``.
+            Optional configuration used only when
+            ``preconditioning_mode=PreconditioningMode.QUERY``.
         device
-            Device where the computation will be executed
+            Device where the computation will be executed.
+
+        Raises
+        ------
+        ValueError
+            If query-side preconditioning is combined with train-side
+            influence-vector caching arguments, or if
+            ``query_batching_config`` is provided while
+            ``preconditioning_mode`` is not
+            ``PreconditioningMode.QUERY``.
 
         Returns
         -------
@@ -542,8 +565,6 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             - influence_values: Top-k influence values for each sample to evaluate.
             - training_samples: Top-k training sample for each sample to evaluate.
         """
-        from .query_batching import PreconditioningMode
-
         preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
         if preconditioning_mode == PreconditioningMode.QUERY:
             if influence_vector_in_cache != CACHE.MEMORY:
@@ -735,15 +756,16 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             A single batch of test samples for which we wish to compute the influence of leaving out the training
             data-points corresponding to the influence vector.
         inf_vect
-            A tensor with one influence vector
+            Tensor containing the influence vectors for one training batch.
         preproc_samples_to_evaluate
             Optional preprocessed representation of ``samples_to_evaluate`` to avoid recomputing jacobians.
 
         Returns
         -------
-        Tuple:
-            batch of the training dataset
-            influence vector
+        influence_values
+            Tensor containing the influence scores between
+            ``samples_to_evaluate`` and the training points represented by
+            ``inf_vect``.
         """
         if preproc_samples_to_evaluate is None:
             v_to_evaluate = self._preprocess_samples(samples_to_evaluate)

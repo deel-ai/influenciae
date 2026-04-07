@@ -1476,9 +1476,12 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         Returns
         -------
         outputs
-            The model outputs.
+            Model outputs for ``inputs``.
         jacobian
-            The Jacobian of outputs with respect to inputs.
+            Backend-native Jacobian of ``outputs`` with respect to ``inputs``.
+            The leading axes correspond to the output dimensions, and the
+            trailing axes correspond to the input tensor. Depending on the
+            backend, batch-to-batch derivatives may be preserved explicitly.
         """
 
     @abstractmethod
@@ -1496,16 +1499,19 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         model
             The model.
         weights
-            The weight tensors.
+            Weight tensors to differentiate with respect to.
         inputs
             The input tensor.
 
         Returns
         -------
         outputs
-            The model outputs.
+            Model outputs for ``inputs``.
         jacobian
-            List of Jacobians of outputs with respect to each weight tensor.
+            List aligned with ``weights``. Each entry is a backend-native
+            Jacobian of ``outputs`` with respect to the corresponding weight
+            tensor, with leading axes for the output dimensions and trailing
+            axes matching the weight shape.
         """
 
     @abstractmethod

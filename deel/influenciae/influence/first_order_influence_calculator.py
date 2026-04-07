@@ -140,16 +140,19 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
         """
-        Preprocess a sample to evaluate
+        Convert one evaluation batch to per-sample gradients for scoring.
 
         Parameters
         ----------
         samples
-            sample to evaluate
+            A single batch of samples to evaluate.
 
         Returns
         -------
-        The preprocessed sample to evaluate
+        sample_evaluate_grads
+            Tensor of shape ``(batch_size, nb_params)`` containing the
+            per-sample Jacobian of the loss with respect to the watched
+            weights.
         """
         sample_evaluate_grads = self.model.batch_jacobian_tensor(samples)
         return sample_evaluate_grads
@@ -186,20 +189,22 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             influence_vector: Tensor
     ) -> Tensor:
         """
-        Estimates the influence score of leaving out the influence vector corresponding to a given training
-        data-point on a test sample that has already been pre-processed.
+        Estimate influence scores from preprocessed query gradients and influence vectors.
 
         Parameters
         ----------
         preproc_test_sample
-            A single pre-processed test sample we wish to evaluate.
+            Tensor of shape ``(n_query, nb_params)`` containing the
+            preprocessed representation of the query batch.
         influence_vector
-            A single influence vector corresponding to a data-point from the training dataset.
+            Tensor of shape ``(n_train, nb_params)`` containing one influence
+            vector per training sample.
 
         Returns
         -------
         influence_values
-            A tensor with the resulting influence value.
+            Tensor of shape ``(n_query, n_train)`` whose ``(i, j)`` entry is
+            the influence score of training sample ``j`` on query sample ``i``.
         """
         influence_values = self._backend.matmul(
             preproc_test_sample,
@@ -690,14 +695,18 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             A batched dataset of training samples.
         config
             Optional :class:`QueryBatchingConfig`.  If ``None``, a default
-            configuration is used (no compression, no partitioning).
+            configuration is used with dense query gradients and no score
+            partitioning.
+        device
+            Optional device hint forwarded to backend dataset mapping helpers
+            when supported.
 
         Returns
         -------
         influence_value_dataset
-            A generator yielding ``(query_batch, scores_dataset)`` pairs where
-            *scores_dataset* yields ``(train_batch, scores)`` tuples.
-            *scores* has shape ``(n_query, n_train_batch)``.
+            Dataset-like iterable containing ``(query_batch, scores_dataset)``
+            pairs, where ``scores_dataset`` yields ``(train_batch, scores)``
+            tuples and ``scores`` has shape ``(n_query, n_train_batch)``.
 
         Raises
         ------

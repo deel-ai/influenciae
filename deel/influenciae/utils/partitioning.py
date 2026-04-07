@@ -71,7 +71,30 @@ def write_tensor_partition_to_disk(
     tensors: Dict[str, Dict[int, Tensor]],
     n_rows_per_layer: Dict[int, int],
 ) -> str:
-    """Serialize one tensor partition to a compressed ``.npz`` file."""
+    """Serialize one tensor partition to a compressed ``.npz`` file.
+
+    The archive stores the layer index list under ``layer_indices``, one row
+    count per layer under ``rows_{layer_idx}``, and one array per named tensor
+    under ``{tensor_name}_{layer_idx}``.
+
+    Parameters
+    ----------
+    backend
+        Backend used to convert tensors to NumPy arrays before serialization.
+    partition_dir
+        Directory in which the partition file is written.
+    partition_idx
+        Integer index used to name the partition file.
+    tensors
+        Mapping from tensor name to per-layer tensors for that partition.
+    n_rows_per_layer
+        Number of rows represented by this partition for each layer index.
+
+    Returns
+    -------
+    partition_path
+        Path to the written ``.npz`` archive.
+    """
     layer_indices_set = set(n_rows_per_layer.keys())
     for tensor_dict in tensors.values():
         layer_indices_set.update(tensor_dict.keys())
@@ -97,7 +120,32 @@ def merge_tensor_partitions_from_disk(
     partition_paths: List[str],
     tensor_names: Tuple[str, ...],
 ) -> Tuple[Dict[str, Dict[int, np.ndarray]], Dict[int, int]]:
-    """Load and merge serialized tensor partitions from disk."""
+    """Load and merge serialized tensor partitions from disk.
+
+    Partitions must follow the schema written by
+    :func:`write_tensor_partition_to_disk`. Tensors with the same name and
+    layer index are summed across partition files, while the per-layer row
+    counts are accumulated.
+
+    Parameters
+    ----------
+    partition_paths
+        Paths to partition archives to merge.
+    tensor_names
+        Tensor names expected in each archive.
+
+    Returns
+    -------
+    merged_tensors
+        Mapping from tensor name to merged per-layer NumPy arrays.
+    merged_rows
+        Mapping from layer index to the total number of accumulated rows.
+
+    Raises
+    ------
+    ValueError
+        If a partition archive does not contain the required metadata.
+    """
     merged_tensors: Dict[str, Dict[int, np.ndarray]] = {name: {} for name in tensor_names}
     merged_rows: Dict[int, int] = {}
 

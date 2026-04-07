@@ -24,7 +24,29 @@ class PreconditioningMode(Enum):
 
 @dataclass
 class QueryBatchingConfig:
-    """Configuration for query-side preconditioning and score computation."""
+    """Configuration for query-side preconditioning and score computation.
+
+    Parameters
+    ----------
+    query_gradient_low_rank
+        Optional rank used to compress preconditioned query gradients with a
+        truncated SVD. ``None`` disables low-rank compression.
+    query_gradient_svd_dtype
+        Optional dtype used for the SVD compression step. This can be used to
+        upcast query gradients before factorization for better numerical
+        stability.
+    query_gradient_accumulation_steps
+        Number of query batches to precondition and merge before scoring them
+        against the training set.
+    score_data_partitions
+        Number of contiguous partitions to split each training batch into while
+        computing scores. Larger values reduce peak memory usage at the cost of
+        more scoring passes.
+    score_module_partitions
+        Number of contiguous layer partitions used when scoring per-module
+        low-rank query representations. This has no effect for dense query
+        representations or for global low-rank compression.
+    """
 
     query_gradient_low_rank: Optional[int] = None
     query_gradient_svd_dtype: Optional[object] = None
