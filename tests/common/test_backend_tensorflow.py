@@ -1185,3 +1185,35 @@ def test_random_diag_eig_and_real(backend):
     assert eigvals.shape == (2,)
     assert eigvecs.shape == (2, 2)
     assert real_part.shape == (2,)
+
+
+def test_einsum_matmul(backend):
+    """einsum reproduces matmul."""
+    a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
+    b = tf.constant([[5.0, 6.0], [7.0, 8.0]])
+    result = backend.einsum("ij,jk->ik", a, b)
+    expected = a @ b
+    np.testing.assert_allclose(result.numpy(), expected.numpy())
+
+
+def test_einsum_dot(backend):
+    """einsum computes a dot product."""
+    a = tf.constant([1.0, 2.0, 3.0])
+    b = tf.constant([4.0, 5.0, 6.0])
+    result = backend.einsum("i,i->", a, b)
+    np.testing.assert_allclose(result.numpy(), np.dot(a.numpy(), b.numpy()))
+
+
+def test_einsum_three_operand(backend):
+    """einsum handles three operands as used in _einsum_low_rank."""
+    # equation: "qor,toi,qri->qt"
+    # q=2, o=3, r=4, t=5, i=6
+    rng = np.random.default_rng(11)
+    left = tf.constant(rng.standard_normal((2, 3, 4)), dtype=tf.float32)
+    train = tf.constant(rng.standard_normal((5, 3, 6)), dtype=tf.float32)
+    right = tf.constant(rng.standard_normal((2, 4, 6)), dtype=tf.float32)
+    result = backend.einsum("qor,toi,qri->qt", left, train, right)
+    assert result.shape == (2, 5)
+    # Verify against numpy reference
+    expected = np.einsum("qor,toi,qri->qt", left.numpy(), train.numpy(), right.numpy())
+    np.testing.assert_allclose(result.numpy(), expected, atol=1e-5)

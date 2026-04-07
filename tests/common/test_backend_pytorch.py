@@ -1294,3 +1294,32 @@ def test_random_diag_eig_and_real(backend):
     assert eigvals.shape == (2,)
     assert eigvecs.shape == (2, 2)
     assert real_part.shape == (2,)
+
+
+def test_einsum_matmul(backend):
+    """einsum reproduces matmul."""
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    b = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    result = backend.einsum("ij,jk->ik", a, b)
+    expected = a @ b
+    np.testing.assert_allclose(result.numpy(), expected.numpy())
+
+
+def test_einsum_dot(backend):
+    """einsum computes a dot product."""
+    a = torch.tensor([1.0, 2.0, 3.0])
+    b = torch.tensor([4.0, 5.0, 6.0])
+    result = backend.einsum("i,i->", a, b)
+    np.testing.assert_allclose(result.item(), float(torch.dot(a, b)))
+
+
+def test_einsum_three_operand(backend):
+    """einsum handles three operands as used in _einsum_low_rank."""
+    torch.manual_seed(11)
+    left = torch.randn(2, 3, 4)
+    train = torch.randn(5, 3, 6)
+    right = torch.randn(2, 4, 6)
+    result = backend.einsum("qor,toi,qri->qt", left, train, right)
+    assert result.shape == (2, 5)
+    expected = np.einsum("qor,toi,qri->qt", left.numpy(), train.numpy(), right.numpy())
+    np.testing.assert_allclose(result.numpy(), expected, atol=1e-5)
