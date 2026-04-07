@@ -327,6 +327,42 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
         return inf_vect_ds
 
+    @staticmethod
+    def _resolve_preconditioning_mode(preconditioning_mode: Optional[Any]) -> Any:
+        """Resolve the default preconditioning mode lazily."""
+        from .query_batching import PreconditioningMode
+
+        if preconditioning_mode is None:
+            return PreconditioningMode.TRAIN
+        return preconditioning_mode
+
+    def _estimate_influence_values_query_mode(
+            self,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
+            config: Optional[Any] = None,
+            device: Optional[str] = None,
+    ) -> DatasetLike:
+        """QUERY-mode adapter implemented by calculators that support it."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support query-side preconditioning."
+        )
+
+    def _top_k_query_mode(
+            self,
+            dataset_to_evaluate: DatasetLike,
+            train_set: DatasetLike,
+            k: int = 5,
+            order: ORDER = ORDER.DESCENDING,
+            d_type: Optional[DType] = None,
+            config: Optional[Any] = None,
+            device: Optional[str] = None,
+    ) -> DatasetLike:
+        """QUERY-mode top-k adapter implemented by supporting calculators."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support query-side top-k computation."
+        )
+
     def estimate_influence_values_in_batches(
             self,
             dataset_to_evaluate: DatasetLike,
@@ -335,6 +371,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             load_influence_vector_path: Optional[str] = None,
             save_influence_vector_path: Optional[str] = None,
             save_influence_value_path: Optional[str] = None,
+            preconditioning_mode: Optional["PreconditioningMode"] = None,
+            query_batching_config: Optional["QueryBatchingConfig"] = None,
             device: Optional[str] = None
     ) -> DatasetLike:
         """
@@ -359,6 +397,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             The path to save the computed influence vector.
         save_influence_value_path
             The path to save the computed influence values.
+        preconditioning_mode
+            Whether to precondition training gradients (default) or query gradients.
+        query_batching_config
+            Optional configuration used when ``preconditioning_mode=QUERY``.
         device
             Device where the computation will be executed
 
@@ -370,7 +412,42 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             - samples_to_evaluate: The batch of sample to evaluate.
             - dataset: Dataset containing tuples of batch of the training dataset and their influence score.
         """
-        if not influence_vector_in_cache and load_influence_vector_path is None:
+        from .query_batching import PreconditioningMode
+
+        preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
+        if preconditioning_mode == PreconditioningMode.QUERY:
+            if influence_vector_in_cache != CACHE.MEMORY:
+                raise ValueError(
+                    "influence_vector_in_cache is only supported with preconditioning_mode=TRAIN."
+                )
+            if load_influence_vector_path is not None:
+                raise ValueError(
+                    "load_influence_vector_path is only supported with preconditioning_mode=TRAIN."
+                )
+            if save_influence_vector_path is not None:
+                raise ValueError(
+                    "save_influence_vector_path is only supported with preconditioning_mode=TRAIN."
+                )
+
+            influence_value_dataset = self._estimate_influence_values_query_mode(
+                dataset_to_evaluate,
+                train_set,
+                config=query_batching_config,
+                device=device,
+            )
+
+            if save_influence_value_path is not None:
+                for batch_idx, (_, samples_inf_val_dataset) in enumerate(influence_value_dataset):
+                    self._save_dataset(samples_inf_val_dataset, f"{save_influence_value_path}/batch_{batch_idx:06d}")
+
+            return influence_value_dataset
+
+        if query_batching_config is not None:
+            raise ValueError(
+                "query_batching_config is only supported with preconditioning_mode=QUERY."
+            )
+
+        if influence_vector_in_cache == CACHE.NO_CACHE and load_influence_vector_path is None:
             warn("Warning: The computation is not efficient, thinks to use cache or disk save")
 
         if influence_vector_in_cache == CACHE.MEMORY:
@@ -415,6 +492,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             save_top_k_ds_path: Optional[str] = None,
             order: ORDER = ORDER.DESCENDING,
             d_type: Optional[DType] = None,
+            preconditioning_mode: Optional["PreconditioningMode"] = None,
+            query_batching_config: Optional["QueryBatchingConfig"] = None,
             device: Optional[str] = None
     ) -> DatasetLike:
         """
@@ -447,6 +526,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             bottom-k samples, respectively.
         d_type
             The data-type of the tensors. If None, will be inferred.
+        preconditioning_mode
+            Whether to precondition training gradients (default) or query gradients.
+        query_batching_config
+            Optional configuration used when ``preconditioning_mode=QUERY``.
         device
             Device where the computation will be executed
 
@@ -459,7 +542,44 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             - influence_values: Top-k influence values for each sample to evaluate.
             - training_samples: Top-k training sample for each sample to evaluate.
         """
-        if not influence_vector_in_cache and load_influence_vector_ds_path is None:
+        from .query_batching import PreconditioningMode
+
+        preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
+        if preconditioning_mode == PreconditioningMode.QUERY:
+            if influence_vector_in_cache != CACHE.MEMORY:
+                raise ValueError(
+                    "influence_vector_in_cache is only supported with preconditioning_mode=TRAIN."
+                )
+            if load_influence_vector_ds_path is not None:
+                raise ValueError(
+                    "load_influence_vector_ds_path is only supported with preconditioning_mode=TRAIN."
+                )
+            if save_influence_vector_ds_path is not None:
+                raise ValueError(
+                    "save_influence_vector_ds_path is only supported with preconditioning_mode=TRAIN."
+                )
+
+            top_k_dataset = self._top_k_query_mode(
+                dataset_to_evaluate,
+                train_set,
+                k=k,
+                order=order,
+                d_type=d_type,
+                config=query_batching_config,
+                device=device,
+            )
+
+            if save_top_k_ds_path is not None:
+                self._save_dataset(top_k_dataset, save_top_k_ds_path)
+
+            return top_k_dataset
+
+        if query_batching_config is not None:
+            raise ValueError(
+                "query_batching_config is only supported with preconditioning_mode=QUERY."
+            )
+
+        if influence_vector_in_cache == CACHE.NO_CACHE and load_influence_vector_ds_path is None:
             warn("Warning: The computation is not efficient thinks to use cache or disk save")
 
         # Create nearest_neighbors with the correct backend if not provided
