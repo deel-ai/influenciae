@@ -123,6 +123,29 @@ def _make_linear_exact_dataset(n_samples=64, n_features=4, seed=123, batch_size=
     return DataLoader(ds, batch_size=batch_size, shuffle=False)
 
 
+def _assert_query_module_shapes(ihvp, influence_model, batch):
+    """Assert that module reshape helpers preserve flat parameter counts."""
+    grads = influence_model.batch_jacobian_tensor(tuple(batch))
+    grads = grads.reshape(grads.shape[0], -1)
+
+    reshaped = ihvp.reshape_gradient_per_module(grads)
+    preconditioned = ihvp.precondition_gradient_per_module(grads)
+
+    assert ihvp.supports_query_preconditioning is True
+    assert reshaped.keys() == preconditioned.keys()
+    assert reshaped, "Expected at least one supported module."
+
+    for info in ihvp.layer_map.layers_info:
+        layer_idx = info.layer_idx
+        if layer_idx not in reshaped:
+            continue
+        expected_flat = info.flat_end - info.flat_start
+        assert int(np.prod(tuple(reshaped[layer_idx].shape[1:]))) == expected_flat
+        assert int(np.prod(tuple(preconditioned[layer_idx].shape[1:]))) == expected_flat
+        assert int(reshaped[layer_idx].shape[0]) == grads.shape[0]
+        assert int(preconditioned[layer_idx].shape[0]) == grads.shape[0]
+
+
 def _cosine_similarity(a, b):
     """Compute cosine similarity between two flat vectors (numpy)."""
     a = a.flatten().astype(np.float64)
@@ -288,6 +311,28 @@ def test_invalid_layer_collection_raises(seed):
 # ---------------------------------------------------------------------------
 
 
+def test_kfac_query_preconditioning_module_shapes(seed):
+    """K-FAC should expose per-module reshape helpers for query batching."""
+    model = _make_simple_mlp(seed)
+    train_loader = _make_dataset(n_samples=12, seed=seed, batch_size=4)
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=nn.MSELoss(reduction="none"))
+
+    kfac = KfacIHVP(influence_model, train_loader, damping=1e-3)
+    batch = next(iter(train_loader))
+    _assert_query_module_shapes(kfac, influence_model, batch)
+
+
+def test_ekfac_query_preconditioning_module_shapes(seed):
+    """EK-FAC should expose per-module reshape helpers for query batching."""
+    model = _make_simple_mlp(seed)
+    train_loader = _make_dataset(n_samples=12, seed=seed, batch_size=4)
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=nn.MSELoss(reduction="none"))
+
+    ekfac = EkfacIHVP(influence_model, train_loader, damping=1e-3, n_ekfac_samples=None)
+    batch = next(iter(train_loader))
+    _assert_query_module_shapes(ekfac, influence_model, batch)
+
+
 def test_kfac_matches_exact_on_linear_model(seed):
     """On a crafted linear setting, K-FAC should match ExactIHVP closely."""
     model = _make_single_layer_linear_model(seed=seed)
@@ -365,6 +410,54 @@ def test_kfac_enum_from_string():
     calc = IHVPCalculator.from_string('kfac')
     assert calc is IHVPCalculator.Kfac
     assert calc.value is KfacIHVP
+
+
+@pytest.mark.parametrize("ihvp_cls,kwargs", [
+    (KfacIHVP, {"damping": 1e-8, "fisher_type": "empirical"}),
+    (EkfacIHVP, {"damping": 1e-8, "fisher_type": "empirical", "n_ekfac_samples": 96}),
+])
+def test_precondition_gradient_per_module_correctness(ihvp_cls, kwargs, seed):
+    """precondition_gradient_per_module must agree with ExactIHVP on a linear model.
+
+    On the single-layer linear + constant-target dataset the empirical Fisher
+    equals the Hessian, so K-FAC / EK-FAC should match ExactIHVP closely.
+    The per-module preconditioned gradients are concatenated and compared
+    against the flat ExactIHVP result using cosine similarity and relative error.
+    """
+    model = _make_single_layer_linear_model(seed=seed)
+    loss_fn = nn.MSELoss(reduction="none")
+    train_loader = _make_linear_exact_dataset(n_samples=96, n_features=4, seed=123, batch_size=16)
+    batch = next(iter(train_loader))
+
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+    exact_ihvp = ExactIHVP(influence_model, train_loader)
+    approx_ihvp = ihvp_cls(influence_model, train_loader, **kwargs)
+
+    # Reference: flat IHVP from ExactIHVP — shape (n_params, batch_size)
+    exact_result = exact_ihvp._compute_ihvp_single_batch(batch)
+
+    # Compute flat gradients, then apply per-module preconditioning
+    grads = influence_model.batch_jacobian_tensor(tuple(batch))
+    grads_flat = grads.reshape(grads.shape[0], -1)
+    per_module = approx_ihvp.precondition_gradient_per_module(grads_flat)
+
+    # Re-assemble the per-module tensors into a single flat vector per sample.
+    # layer_map.layers_info is ordered by flat_start; concatenate slices in order.
+    ordered_infos = sorted(
+        [info for info in approx_ihvp.layer_map.layers_info if info.layer_idx in per_module],
+        key=lambda info: info.flat_start,
+    )
+    pieces = [
+        per_module[info.layer_idx].reshape(grads_flat.shape[0], -1)
+        for info in ordered_infos
+    ]
+    approx_flat = torch.cat(pieces, dim=1)  # (batch_size, n_params)
+    # Transpose to (n_params, batch_size) to match exact_result convention
+    approx_result = approx_flat.T
+
+    metrics = _compute_alignment_metrics(exact_result, approx_result)
+    assert metrics["median_cosine"] > 0.99, metrics
+    assert metrics["median_relative_error"] < 1.5e-1, metrics
 
 
 # ---------------------------------------------------------------------------
