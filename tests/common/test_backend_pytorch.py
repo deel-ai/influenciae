@@ -1296,6 +1296,134 @@ def test_random_diag_eig_and_real(backend):
     assert real_part.shape == (2,)
 
 
+def test_svd_lowrank_shape(backend):
+    """svd_lowrank returns tensors with the expected shapes."""
+    m, n, rank = 10, 8, 3
+    torch.manual_seed(0)
+    mat = torch.randn(m, n)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+
+
+def test_svd_lowrank_reconstruction(backend):
+    """Low-rank product U @ diag(S) @ Vh approximates the original matrix."""
+    m, n, rank = 20, 15, 5
+    torch.manual_seed(42)
+    a = torch.randn(m, rank)
+    b = torch.randn(rank, n)
+    mat = a @ b
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    reconstructed = u @ torch.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.detach().numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_singular_values_descending(backend):
+    """Singular values are returned in descending order."""
+    m, n, rank = 12, 10, 4
+    torch.manual_seed(7)
+    mat = torch.randn(m, n)
+    _, s, _ = backend.svd_lowrank(mat, rank)
+    s_np = s.detach().numpy()
+    assert np.all(s_np[:-1] >= s_np[1:] - 1e-6), f"Singular values not descending: {s_np}"
+
+
+def test_svd_lowrank_rank_clamp(backend):
+    """Rank is clamped by min(m, n)."""
+    m, n = 4, 3
+    mat = torch.eye(m, n)
+    u, s, vh = backend.svd_lowrank(mat, 10)
+    assert u.shape[1] <= min(m, n)
+    assert s.shape[0] <= min(m, n)
+    assert vh.shape[0] <= min(m, n)
+
+
+def test_svd_lowrank_orthonormal_columns(backend):
+    """U returned by svd_lowrank should have orthonormal columns."""
+    m, n, rank = 10, 8, 3
+    torch.manual_seed(5)
+    mat = torch.randn(m, n)
+    u, _, _ = backend.svd_lowrank(mat, rank)
+    gram = u.T @ u
+    np.testing.assert_allclose(gram.numpy(), np.eye(rank), atol=1e-5)
+
+
+def test_svd_lowrank_vh_orthonormal_rows(backend):
+    """Vh returned by svd_lowrank should have orthonormal rows (Vh @ Vh^T ≈ I)."""
+    m, n, rank = 10, 8, 3
+    torch.manual_seed(13)
+    mat = torch.randn(m, n)
+    _, _, vh = backend.svd_lowrank(mat, rank)
+    gram = vh @ vh.T
+    np.testing.assert_allclose(gram.numpy(), np.eye(rank), atol=1e-5)
+
+
+def test_svd_lowrank_tall_matrix(backend):
+    """svd_lowrank works correctly for tall-skinny matrices (m >> n)."""
+    m, n, rank = 50, 5, 3
+    torch.manual_seed(17)
+    a = torch.randn(m, rank)
+    b = torch.randn(rank, n)
+    mat = a @ b
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    reconstructed = u @ torch.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.detach().numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_wide_matrix(backend):
+    """svd_lowrank works correctly for wide matrices (m << n)."""
+    m, n, rank = 5, 50, 3
+    torch.manual_seed(19)
+    a = torch.randn(m, rank)
+    b = torch.randn(rank, n)
+    mat = a @ b
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    reconstructed = u @ torch.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.detach().numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_rank_one(backend):
+    """svd_lowrank with rank=1 returns correct shapes and reconstructs a rank-1 matrix."""
+    m, n = 8, 6
+    torch.manual_seed(23)
+    a = torch.randn(m, 1)
+    b = torch.randn(1, n)
+    mat = a @ b
+    u, s, vh = backend.svd_lowrank(mat, rank=1)
+    assert tuple(u.shape) == (m, 1)
+    assert tuple(s.shape) == (1,)
+    assert tuple(vh.shape) == (1, n)
+    reconstructed = u @ torch.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.detach().numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_zero_matrix(backend):
+    """svd_lowrank on an all-zeros matrix returns zero singular values without errors."""
+    m, n, rank = 6, 5, 3
+    mat = torch.zeros(m, n)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    np.testing.assert_allclose(s.numpy(), np.zeros(rank), atol=1e-6)
+
+
+def test_svd_lowrank_singular_values_nonnegative(backend):
+    """Singular values returned by svd_lowrank are non-negative."""
+    m, n, rank = 12, 9, 5
+    torch.manual_seed(29)
+    mat = torch.randn(m, n)
+    _, s, _ = backend.svd_lowrank(mat, rank)
+    assert np.all(s.detach().numpy() >= 0.0), f"Negative singular values found: {s.numpy()}"
+
+
 def test_einsum_matmul(backend):
     """einsum reproduces matmul."""
     a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])

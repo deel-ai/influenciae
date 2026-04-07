@@ -1187,6 +1187,136 @@ def test_random_diag_eig_and_real(backend):
     assert real_part.shape == (2,)
 
 
+def test_svd_lowrank_shape(backend):
+    """svd_lowrank returns tensors with the expected shapes."""
+    m, n, rank = 10, 8, 3
+    rng = np.random.default_rng(0)
+    mat = tf.constant(rng.standard_normal((m, n)), dtype=tf.float32)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+
+
+def test_svd_lowrank_reconstruction(backend):
+    """Low-rank product U @ diag(S) @ Vh approximates the original matrix."""
+    m, n, rank = 20, 15, 5
+    rng = np.random.default_rng(42)
+    # Build a rank-5 matrix so full reconstruction should be near-exact
+    a = rng.standard_normal((m, rank)).astype(np.float32)
+    b = rng.standard_normal((rank, n)).astype(np.float32)
+    mat = tf.constant(a @ b)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    s_diag = tf.linalg.diag(s)
+    reconstructed = u @ s_diag @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_singular_values_descending(backend):
+    """Singular values are returned in descending order."""
+    m, n, rank = 12, 10, 4
+    rng = np.random.default_rng(7)
+    mat = tf.constant(rng.standard_normal((m, n)), dtype=tf.float32)
+    _, s, _ = backend.svd_lowrank(mat, rank)
+    s_np = s.numpy()
+    assert np.all(s_np[:-1] >= s_np[1:] - 1e-6), f"Singular values not descending: {s_np}"
+
+
+def test_svd_lowrank_rank_clamp(backend):
+    """Rank is clamped by min(m, n)."""
+    m, n = 4, 3
+    rank = 10  # larger than both dimensions
+    mat = tf.constant(np.eye(m, n, dtype=np.float32))
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    # TF full SVD returns min(m,n) singular values
+    assert u.shape[1] <= min(m, n)
+
+
+def test_svd_lowrank_orthonormal_columns(backend):
+    """U returned by svd_lowrank should have orthonormal columns."""
+    m, n, rank = 10, 8, 3
+    rng = np.random.default_rng(5)
+    mat = tf.constant(rng.standard_normal((m, n)), dtype=tf.float32)
+    u, _, _ = backend.svd_lowrank(mat, rank)
+    gram = tf.transpose(u) @ u
+    np.testing.assert_allclose(gram.numpy(), np.eye(rank), atol=1e-5)
+
+
+def test_svd_lowrank_vh_orthonormal_rows(backend):
+    """Vh returned by svd_lowrank should have orthonormal rows (Vh @ Vh^T ≈ I)."""
+    m, n, rank = 10, 8, 3
+    rng = np.random.default_rng(13)
+    mat = tf.constant(rng.standard_normal((m, n)), dtype=tf.float32)
+    _, _, vh = backend.svd_lowrank(mat, rank)
+    gram = vh @ tf.transpose(vh)
+    np.testing.assert_allclose(gram.numpy(), np.eye(rank), atol=1e-5)
+
+
+def test_svd_lowrank_tall_matrix(backend):
+    """svd_lowrank works correctly for tall-skinny matrices (m >> n)."""
+    m, n, rank = 50, 5, 3
+    rng = np.random.default_rng(17)
+    a = rng.standard_normal((m, rank)).astype(np.float32)
+    b = rng.standard_normal((rank, n)).astype(np.float32)
+    mat = tf.constant(a @ b)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    reconstructed = u @ tf.linalg.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_wide_matrix(backend):
+    """svd_lowrank works correctly for wide matrices (m << n)."""
+    m, n, rank = 5, 50, 3
+    rng = np.random.default_rng(19)
+    a = rng.standard_normal((m, rank)).astype(np.float32)
+    b = rng.standard_normal((rank, n)).astype(np.float32)
+    mat = tf.constant(a @ b)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    reconstructed = u @ tf.linalg.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_rank_one(backend):
+    """svd_lowrank with rank=1 returns correct shapes and reconstructs a rank-1 matrix."""
+    m, n = 8, 6
+    rng = np.random.default_rng(23)
+    a = rng.standard_normal((m, 1)).astype(np.float32)
+    b = rng.standard_normal((1, n)).astype(np.float32)
+    mat = tf.constant(a @ b)
+    u, s, vh = backend.svd_lowrank(mat, rank=1)
+    assert tuple(u.shape) == (m, 1)
+    assert tuple(s.shape) == (1,)
+    assert tuple(vh.shape) == (1, n)
+    reconstructed = u @ tf.linalg.diag(s) @ vh
+    np.testing.assert_allclose(mat.numpy(), reconstructed.numpy(), atol=1e-4)
+
+
+def test_svd_lowrank_zero_matrix(backend):
+    """svd_lowrank on an all-zeros matrix returns zero singular values without errors."""
+    m, n, rank = 6, 5, 3
+    mat = tf.zeros((m, n), dtype=tf.float32)
+    u, s, vh = backend.svd_lowrank(mat, rank)
+    assert tuple(u.shape) == (m, rank)
+    assert tuple(s.shape) == (rank,)
+    assert tuple(vh.shape) == (rank, n)
+    np.testing.assert_allclose(s.numpy(), np.zeros(rank), atol=1e-6)
+
+
+def test_svd_lowrank_singular_values_nonnegative(backend):
+    """Singular values returned by svd_lowrank are non-negative."""
+    m, n, rank = 12, 9, 5
+    rng = np.random.default_rng(29)
+    mat = tf.constant(rng.standard_normal((m, n)), dtype=tf.float32)
+    _, s, _ = backend.svd_lowrank(mat, rank)
+    assert np.all(s.numpy() >= 0.0), f"Negative singular values found: {s.numpy()}"
+
+
 def test_einsum_matmul(backend):
     """einsum reproduces matmul."""
     a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
