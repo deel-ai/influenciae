@@ -21,6 +21,8 @@ from .base_group_influence import BaseGroupInfluenceCalculator
 from ..common import InfluenceModel
 from ..common import BaseInfluenceCalculator
 from ..common import InverseHessianVectorProduct, InverseHessianVectorProductFactory, IHVPCalculator
+from ..common.evaluation import EvaluationRepresentationProvider
+from ..common.payloads import TrainingPayloadExtractor
 from ..common.query_batching import (
     LowRankGradient,
     QueryBatchingConfig,
@@ -138,7 +140,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         influence_vector = self._backend.transpose(influence_vector)
         return influence_vector
 
-    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Tensor:
+    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Tensor:
         """
         Convert one evaluation batch to per-sample gradients for scoring.
 
@@ -257,21 +259,21 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         return config
 
     @staticmethod
-    def _as_query_batch(batch: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> Tuple[Tensor, ...]:
+    def _as_query_batch(batch: Union[Tensor, Tuple[Any, ...], List[Any]]) -> Tuple[Any, ...]:
         """Normalize dataset elements to a tuple of tensors."""
         if isinstance(batch, (list, tuple)):
             return tuple(batch)
         return (batch,)
 
-    def _slice_batch_rows(self, batch: Tuple[Tensor, ...], start: int, end: int) -> Tuple[Tensor, ...]:
+    def _slice_batch_rows(self, batch: Tuple[Any, ...], start: int, end: int) -> Tuple[Any, ...]:
         """Slice one contiguous row range from a batched sample tuple."""
         return tuple(tensor[start:end] for tensor in batch)
 
     def _split_batch_rows(
             self,
-            batch: Tuple[Tensor, ...],
+            batch: Tuple[Any, ...],
             num_partitions: int,
-    ) -> List[Tuple[Tensor, ...]]:
+    ) -> List[Tuple[Any, ...]]:
         """Split a training batch into contiguous row partitions."""
         if num_partitions <= 1:
             return [batch]
@@ -380,8 +382,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _precondition_query_batch(
             self,
-            query_batch: Tuple[Tensor, ...],
+            query_batch: Tuple[Any, ...],
             config: QueryBatchingConfig,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
     ) -> Union[Tensor, LowRankGradient]:
         """
         Compute the IHVP-preconditioned representation of a query batch.
@@ -405,7 +408,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         backend = self._backend
         # Compute per-sample gradients: (batch, nb_params)
         query_grads = backend.reshape(
-            self.model.batch_jacobian_tensor(query_batch),
+            self._get_evaluation_representation(query_batch, evaluation_representation_provider),
             (backend.get_batch_size(query_batch[0]), -1)
         )
 
@@ -604,12 +607,13 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _build_query_score_outputs(
             self,
-            query_batches: List[Tuple[Tensor, ...]],
+            query_batches: List[Tuple[Any, ...]],
             query_reps: List[Union[Tensor, LowRankGradient]],
             train_set: DatasetLike,
             config: QueryBatchingConfig,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
-    ) -> List[Tuple[Tuple[Tensor, ...], DatasetLike]]:
+    ) -> List[Tuple[Tuple[Any, ...], DatasetLike]]:
         """Build per-original-query-batch score datasets for one accumulated group."""
         backend = self._backend
         merged_rep = self._merge_query_representations(query_reps)
@@ -618,8 +622,12 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             full_scores_entries = []
             for train_batch_raw in train_set:
                 train_batch = self._as_query_batch(train_batch_raw)
-                full_scores_entries.append((
+                payload = train_batch if training_payload_extractor is None else self._extract_training_payload(
                     train_batch,
+                    training_payload_extractor,
+                )
+                full_scores_entries.append((
+                    payload,
                     self._compute_partial_scores(merged_rep, train_batch, config),
                 ))
 
@@ -642,7 +650,11 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         full_scores_ds = backend.map_dataset(
             train_set,
-            lambda *tb, qrep=merged_rep: (tb, self._compute_partial_scores(qrep, tuple(tb), config)),
+            lambda *tb, qrep=merged_rep: (
+                tuple(tb) if training_payload_extractor is None
+                else self._extract_training_payload(tuple(tb), training_payload_extractor),
+                self._compute_partial_scores(qrep, tuple(tb), config),
+            ),
             device,
         )
 
@@ -671,6 +683,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             dataset_to_evaluate: DatasetLike,
             train_set: DatasetLike,
             config: Optional[QueryBatchingConfig] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
     ) -> DatasetLike:
         """
@@ -717,22 +731,46 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         outputs = []
         query_reps: List[Union[Tensor, LowRankGradient]] = []
-        query_batches: List[Tuple[Tensor, ...]] = []
+        query_batches: List[Tuple[Any, ...]] = []
 
         for query_batch_raw in dataset_to_evaluate:
             query_batch = self._as_query_batch(query_batch_raw)
-            query_reps.append(self._precondition_query_batch(query_batch, config))
+            query_reps.append(
+                self._precondition_query_batch(
+                    query_batch,
+                    config,
+                    evaluation_representation_provider=evaluation_representation_provider,
+                )
+            )
             query_batches.append(query_batch)
 
             if len(query_batches) < config.query_gradient_accumulation_steps:
                 continue
 
-            outputs.extend(self._build_query_score_outputs(query_batches, query_reps, train_set, config, device))
+            outputs.extend(
+                self._build_query_score_outputs(
+                    query_batches,
+                    query_reps,
+                    train_set,
+                    config,
+                    training_payload_extractor=training_payload_extractor,
+                    device=device,
+                )
+            )
             query_reps = []
             query_batches = []
 
         if query_reps:
-            outputs.extend(self._build_query_score_outputs(query_batches, query_reps, train_set, config, device))
+            outputs.extend(
+                self._build_query_score_outputs(
+                    query_batches,
+                    query_reps,
+                    train_set,
+                    config,
+                    training_payload_extractor=training_payload_extractor,
+                    device=device,
+                )
+            )
 
         return outputs
 
@@ -741,36 +779,62 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             dataset_to_evaluate: DatasetLike,
             train_set: DatasetLike,
             config: Optional[QueryBatchingConfig] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
     ) -> DatasetLike:
-        """Public API adapter for query-side influence value computation."""
+        """
+        Public adapter for query-side influence-value computation.
+
+        Parameters
+        ----------
+        dataset_to_evaluate
+            Dataset containing the samples to score.
+        train_set
+            Dataset containing the training samples against which influence is
+            computed.
+        config
+            Optional configuration controlling query batching and
+            preconditioning.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to the
+            representation used when preconditioning evaluation batches. When
+            ``None``, the default preprocessing path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores. When ``None``,
+            ``default_training_payload_extractor`` is used.
+        device
+            Device where the computation will be executed.
+
+        Returns
+        -------
+        influence_value_dataset
+            Dataset-like object containing one influence-score dataset per
+            evaluation batch.
+        """
         return self.estimate_influence_values_query_batched(
             dataset_to_evaluate,
             train_set,
             config=config,
+            evaluation_representation_provider=evaluation_representation_provider,
+            training_payload_extractor=training_payload_extractor,
             device=device,
         )
 
-    def _infer_training_sample_shape(self, train_set: DatasetLike) -> Tuple[int, ...]:
-        """Infer the unbatched shape of the first tensor in *train_set*."""
-        elt_spec = self._backend.get_dataset_element_spec(train_set)
-        first_spec = elt_spec[0] if isinstance(elt_spec, (list, tuple)) else elt_spec
-
-        shape = None
-        if hasattr(first_spec, "shape"):
-            shape = tuple(first_spec.shape[1:])
-        elif isinstance(first_spec, dict):
-            shape = tuple(first_spec["shape"][1:])
-
-        if shape is None:
-            for batch in train_set:
-                first_tensor = batch[0] if isinstance(batch, (list, tuple)) else batch
-                shape = tuple(self._backend.tensor_shape(first_tensor)[1:])
-                break
-
-        if shape is None:
-            raise ValueError("Could not determine training sample shape from dataset")
-        return shape
+    def _infer_training_payload_shape_and_dtype(
+            self,
+            train_set: DatasetLike,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
+    ) -> Tuple[Tuple[int, ...], Any]:
+        """Infer the unbatched shape and dtype of the extracted training payload."""
+        for batch in train_set:
+            train_batch = self._as_query_batch(batch)
+            payload = self._extract_training_payload(train_batch, training_payload_extractor)
+            shape = tuple(self._backend.tensor_shape(payload)[1:])
+            dtype = self._backend.get_dtype(payload)
+            return shape, dtype
+        raise ValueError("Could not determine training payload shape from dataset")
 
     def _infer_query_rep_dtype(self, query_rep: Union[Tensor, LowRankGradient]) -> Any:
         """Infer a score dtype from a query representation."""
@@ -783,26 +847,35 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _build_query_top_k_outputs(
             self,
-            query_batches: List[Tuple[Tensor, ...]],
+            query_batches: List[Tuple[Any, ...]],
             query_reps: List[Union[Tensor, LowRankGradient]],
             train_set: DatasetLike,
             config: QueryBatchingConfig,
             k: int,
             order: ORDER,
             d_type: Optional[Any] = None,
-    ) -> List[Tuple[Tuple[Tensor, ...], Tensor, Tensor]]:
+            payload_dtype: Optional[Any] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
+    ) -> List[Tuple[Tuple[Any, ...], Tensor, Tensor]]:
         """Compute top-k results for one accumulated query group."""
         backend = self._backend
         merged_rep = self._merge_query_representations(query_reps)
         total_queries = sum(int(backend.get_batch_size(query_batch[0])) for query_batch in query_batches)
-        sample_shape = self._infer_training_sample_shape(train_set)
+        sample_shape, inferred_payload_dtype = self._infer_training_payload_shape_and_dtype(
+            train_set,
+            training_payload_extractor,
+        )
         if d_type is None:
             d_type = self._infer_query_rep_dtype(merged_rep)
+        if payload_dtype is None:
+            payload_dtype = inferred_payload_dtype
 
         batch_sorted = BatchSort(
             sample_shape,
             (total_queries, k),
             dtype=d_type,
+            batch_dtype=payload_dtype,
+            value_dtype=d_type,
             order=order,
             backend=backend,
         )
@@ -810,7 +883,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         for train_batch_raw in train_set:
             train_batch = self._as_query_batch(train_batch_raw)
             scores = self._compute_partial_scores(merged_rep, train_batch, config)
-            batch_input = train_batch[0]
+            batch_input = self._extract_training_payload(train_batch, training_payload_extractor)
             expanded_batch = backend.repeat(
                 backend.expand_dims(batch_input, axis=0),
                 total_queries,
@@ -866,31 +939,103 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             k: int = 5,
             order: ORDER = ORDER.DESCENDING,
             d_type: Optional[Any] = None,
+            payload_dtype: Optional[Any] = None,
             config: Optional[QueryBatchingConfig] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
     ) -> DatasetLike:
-        """Public API adapter for query-side top-k computation."""
+        """
+        Public adapter for query-side top-k computation.
+
+        Parameters
+        ----------
+        dataset_to_evaluate
+            Dataset containing the samples to score.
+        train_set
+            Dataset containing the training samples from which to retrieve the
+            most influential entries.
+        k
+            Number of most influential training samples to retain.
+        order
+            Either ``ORDER.DESCENDING`` or ``ORDER.ASCENDING`` depending on
+            whether the most or least influential samples are requested.
+        d_type
+            Data-type of the influence scores. If ``None``, it is inferred.
+        payload_dtype
+            Data-type used to store extracted training payloads in the sorted
+            structure. If ``None``, it is inferred.
+        config
+            Optional configuration controlling query batching and
+            preconditioning.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to the
+            representation used when preconditioning evaluation batches. When
+            ``None``, the default preprocessing path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            top-k influence scores. When ``None``,
+            ``default_training_payload_extractor`` is used.
+        device
+            Device where the computation will be executed.
+
+        Returns
+        -------
+        top_k_dataset
+            Dataset-like object containing the top-k influence scores and
+            payloads for each evaluation batch.
+        """
         _ = device
         config = self._validate_query_batched_config(config)
 
         outputs = []
         query_reps: List[Union[Tensor, LowRankGradient]] = []
-        query_batches: List[Tuple[Tensor, ...]] = []
+        query_batches: List[Tuple[Any, ...]] = []
 
         for query_batch_raw in dataset_to_evaluate:
             query_batch = self._as_query_batch(query_batch_raw)
-            query_reps.append(self._precondition_query_batch(query_batch, config))
+            query_reps.append(
+                self._precondition_query_batch(
+                    query_batch,
+                    config,
+                    evaluation_representation_provider=evaluation_representation_provider,
+                )
+            )
             query_batches.append(query_batch)
 
             if len(query_batches) < config.query_gradient_accumulation_steps:
                 continue
 
-            outputs.extend(self._build_query_top_k_outputs(query_batches, query_reps, train_set, config, k, order, d_type))
+            outputs.extend(
+                self._build_query_top_k_outputs(
+                    query_batches,
+                    query_reps,
+                    train_set,
+                    config,
+                    k,
+                    order,
+                    d_type,
+                    payload_dtype,
+                    training_payload_extractor,
+                )
+            )
             query_reps = []
             query_batches = []
 
         if query_reps:
-            outputs.extend(self._build_query_top_k_outputs(query_batches, query_reps, train_set, config, k, order, d_type))
+            outputs.extend(
+                self._build_query_top_k_outputs(
+                    query_batches,
+                    query_reps,
+                    train_set,
+                    config,
+                    k,
+                    order,
+                    d_type,
+                    payload_dtype,
+                    training_payload_extractor,
+                )
+            )
 
         return self._materialize_entries_dataset(outputs)
 

@@ -14,14 +14,18 @@ the computation can be written as a matrix-vector product with a matrix that can
 """
 from abc import abstractmethod
 from enum import Enum
-from typing import Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 from warnings import warn
 
 from .backend import BaseBackend
+from .evaluation import EvaluationRepresentationProvider
+from .payloads import TrainingPayloadExtractor, default_training_payload_extractor
 from .query_batching import PreconditioningMode, QueryBatchingConfig
-from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 from ..utils.sorted_dict import BatchSort, ORDER
 from ..types import DType, DatasetLike, Tensor
+
+if TYPE_CHECKING:
+    from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
 
 
 class CACHE(Enum):
@@ -252,7 +256,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     """
 
     @abstractmethod
-    def _preprocess_samples(self, samples: Tuple[Tensor, ...]) -> Any:
+    def _preprocess_samples(self, samples: Tuple[Any, ...]) -> Any:
         """
         Preprocess one evaluation batch into the representation used for scoring.
 
@@ -272,7 +276,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         raise NotImplementedError()
 
     @abstractmethod
-    def _compute_influence_vector(self, train_samples: Tuple[Tensor, ...]) -> Any:
+    def _compute_influence_vector(self, train_samples: Tuple[Any, ...]) -> Any:
         """
         Computes the influence vector (i.e. the delta of model's weights after a perturbation on the training
         dataset) for a single batch of training samples.
@@ -342,14 +346,101 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             return PreconditioningMode.TRAIN
         return preconditioning_mode
 
+    def _get_evaluation_representation(
+            self,
+            samples: Tuple[Any, ...],
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+    ) -> Any:
+        """
+        Return the representation used to score an evaluation batch.
+
+        Parameters
+        ----------
+        samples
+            A single batch of samples to evaluate.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, samples)`` to the
+            representation used for scoring. When ``None``, falls back to
+            ``_preprocess_samples``.
+
+        Returns
+        -------
+        representation
+            The tensor or structure used to score the evaluation batch.
+        """
+        if evaluation_representation_provider is None:
+            return self._preprocess_samples(samples)
+        return evaluation_representation_provider(self.model, samples)
+
+    def _extract_training_payload(
+            self,
+            train_batch: Tuple[Any, ...],
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
+    ) -> Tensor:
+        """
+        Extract the payload returned alongside influence scores.
+
+        Parameters
+        ----------
+        train_batch
+            A single batch from the training dataset.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores. When ``None``,
+            ``default_training_payload_extractor`` is used.
+
+        Returns
+        -------
+        payload
+            The extracted training payload.
+        """
+        extractor = default_training_payload_extractor if training_payload_extractor is None else training_payload_extractor
+        return extractor(train_batch)
+
     def _estimate_influence_values_query_mode(
             self,
             dataset_to_evaluate: DatasetLike,
             train_set: DatasetLike,
             config: Optional[Any] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
     ) -> DatasetLike:
-        """QUERY-mode adapter implemented by calculators that support it."""
+        """
+        Query-side adapter for batched influence-value computation.
+
+        Parameters
+        ----------
+        dataset_to_evaluate
+            Dataset containing the samples to score.
+        train_set
+            Dataset containing the training samples against which influence is
+            computed.
+        config
+            Optional configuration controlling query-side batching and
+            preconditioning.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to the
+            representation used when scoring evaluation batches. When
+            ``None``, the default preprocessing path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores. When ``None``,
+            ``default_training_payload_extractor`` is used.
+        device
+            Device where the computation will be executed.
+
+        Raises
+        ------
+        NotImplementedError
+            If the calculator does not implement query-side preconditioning.
+
+        Returns
+        -------
+        influence_value_dataset
+            A dataset-like object matching
+            :meth:`estimate_influence_values_in_batches`.
+        """
         raise NotImplementedError(
             f"{type(self).__name__} does not support query-side preconditioning."
         )
@@ -361,10 +452,56 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             k: int = 5,
             order: ORDER = ORDER.DESCENDING,
             d_type: Optional[DType] = None,
+            payload_dtype: Optional[DType] = None,
             config: Optional[Any] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None,
     ) -> DatasetLike:
-        """QUERY-mode top-k adapter implemented by supporting calculators."""
+        """
+        Query-side adapter for batched top-k computation.
+
+        Parameters
+        ----------
+        dataset_to_evaluate
+            Dataset containing the samples to score.
+        train_set
+            Dataset containing the training samples from which to retrieve the
+            most influential entries.
+        k
+            Number of most influential training samples to retain.
+        order
+            Either ``ORDER.DESCENDING`` or ``ORDER.ASCENDING`` depending on
+            whether the most or least influential samples are requested.
+        d_type
+            Data-type of the influence scores. If ``None``, it is inferred.
+        payload_dtype
+            Data-type used to store extracted training payloads in the sorted
+            structure. If ``None``, it is inferred.
+        config
+            Optional configuration controlling query-side batching and
+            preconditioning.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to the
+            representation used when scoring evaluation batches. When
+            ``None``, the default preprocessing path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            top-k influence scores. When ``None``,
+            ``default_training_payload_extractor`` is used.
+        device
+            Device where the computation will be executed.
+
+        Raises
+        ------
+        NotImplementedError
+            If the calculator does not implement query-side preconditioning.
+
+        Returns
+        -------
+        top_k_dataset
+            A dataset-like object matching :meth:`top_k`.
+        """
         raise NotImplementedError(
             f"{type(self).__name__} does not support query-side top-k computation."
         )
@@ -379,6 +516,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             save_influence_value_path: Optional[str] = None,
             preconditioning_mode: Optional["PreconditioningMode"] = None,
             query_batching_config: Optional["QueryBatchingConfig"] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None
     ) -> DatasetLike:
         """
@@ -408,6 +547,14 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         query_batching_config
             Optional configuration used only when
             ``preconditioning_mode=PreconditioningMode.QUERY``.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to a custom
+            representation used for scoring evaluation samples. When ``None``,
+            the default ``_preprocess_samples`` path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores for each training batch. When ``None``,
+            ``default_training_payload_extractor`` is used.
         device
             Device where the computation will be executed.
 
@@ -447,6 +594,8 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
                 dataset_to_evaluate,
                 train_set,
                 config=query_batching_config,
+                evaluation_representation_provider=evaluation_representation_provider,
+                training_payload_extractor=training_payload_extractor,
                 device=device,
             )
 
@@ -483,7 +632,11 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         influence_value_dataset = self._backend.map_dataset(
             dataset_to_evaluate,
             lambda *batch_evaluate: self._estimate_inf_values_with_inf_vect_dataset(
-                inf_vect_ds, batch_evaluate, device
+                inf_vect_ds,
+                batch_evaluate,
+                evaluation_representation_provider=evaluation_representation_provider,
+                training_payload_extractor=training_payload_extractor,
+                device=device,
             ),
             device
         )
@@ -499,15 +652,18 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             dataset_to_evaluate: DatasetLike,
             train_set: DatasetLike,
             k: int = 5,
-            nearest_neighbors: Optional[BaseNearestNeighbors] = None,
+            nearest_neighbors: Optional["BaseNearestNeighbors"] = None,
             influence_vector_in_cache: CACHE = CACHE.MEMORY,
             load_influence_vector_ds_path: Optional[str] = None,
             save_influence_vector_ds_path: Optional[str] = None,
             save_top_k_ds_path: Optional[str] = None,
             order: ORDER = ORDER.DESCENDING,
             d_type: Optional[DType] = None,
+            payload_dtype: Optional[DType] = None,
             preconditioning_mode: Optional["PreconditioningMode"] = None,
             query_batching_config: Optional["QueryBatchingConfig"] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None
     ) -> DatasetLike:
         """
@@ -539,11 +695,22 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             bottom-k samples, respectively.
         d_type
             The data-type of the tensors. If None, will be inferred.
+        payload_dtype
+            Data-type used to store extracted training payloads in the sorted
+            structure. If ``None``, it is inferred.
         preconditioning_mode
             Whether to precondition training gradients (default) or query gradients.
         query_batching_config
             Optional configuration used only when
             ``preconditioning_mode=PreconditioningMode.QUERY``.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to a custom
+            representation used for scoring evaluation samples. When ``None``,
+            the default ``_preprocess_samples`` path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            top-k influence scores for each training batch. When ``None``,
+            ``default_training_payload_extractor`` is used.
         device
             Device where the computation will be executed.
 
@@ -586,7 +753,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
                 k=k,
                 order=order,
                 d_type=d_type,
+                payload_dtype=payload_dtype,
                 config=query_batching_config,
+                evaluation_representation_provider=evaluation_representation_provider,
+                training_payload_extractor=training_payload_extractor,
                 device=device,
             )
 
@@ -623,6 +793,15 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         if influence_vector_in_cache == CACHE.MEMORY:
             inf_vect_ds = self._backend.cache_dataset(inf_vect_ds)
 
+        nn_dataset = self._backend.map_dataset(
+            inf_vect_ds,
+            lambda *item: (
+                self._extract_training_payload(item[0], training_payload_extractor),
+                item[-1],
+            ),
+            device,
+        )
+
         batch_size_eval = self._backend.get_dataset_batch_size(dataset_to_evaluate)
 
         # Infer dtype if not provided
@@ -636,18 +815,23 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
                 break
 
         nearest_neighbors.build(
-            inf_vect_ds,
+            nn_dataset,
             self._estimate_influence_value_from_influence_vector,
             k,
             query_batch_size=batch_size_eval,
             d_type=d_type,
+            payload_dtype=payload_dtype,
             order=order,
         )
 
         top_k_dataset = self._backend.map_dataset(
             dataset_to_evaluate,
             lambda *batch_evaluate: self._top_k_with_inf_vect_dataset_train(
-                batch_evaluate, nearest_neighbors, batch_size_eval, device
+                batch_evaluate,
+                nearest_neighbors,
+                batch_size_eval,
+                evaluation_representation_provider=evaluation_representation_provider,
+                device=device,
             )
         )
 
@@ -659,9 +843,11 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
     def _estimate_inf_values_with_inf_vect_dataset(
             self,
             inf_vect_dataset: DatasetLike,
-            samples_to_evaluate: Tuple[Tensor, ...],
+            samples_to_evaluate: Tuple[Any, ...],
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
+            training_payload_extractor: Optional[TrainingPayloadExtractor] = None,
             device: Optional[str] = None
-    ) -> Tuple[Tuple[Tensor, ...], DatasetLike]:
+    ) -> Tuple[Tuple[Any, ...], DatasetLike]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -675,19 +861,31 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         samples_to_evaluate
             A tensor containing a single batch of samples of which we wish to estimate the influence of
              leaving out the training points corresponding to the influence vectors.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to a custom
+            representation used for scoring evaluation samples. When ``None``,
+            the default ``_preprocess_samples`` path is used.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores for each training batch. When ``None``,
+            ``default_training_payload_extractor`` is used.
         device
             Device where the computation will be executed
         Returns
         -------
-        A dataset containing the tuple:
-            batch of the training dataset
-            influence scores
+        output
+            A tuple containing the original evaluation batch and a dataset of
+            ``(training_payload, influence_scores)`` pairs.
         """
-        preproc_samples_to_evaluate = self._preprocess_samples(samples_to_evaluate)
+        preproc_samples_to_evaluate = self._get_evaluation_representation(
+            samples_to_evaluate,
+            evaluation_representation_provider,
+        )
         samples_inf_val_dataset = self._backend.map_dataset(
             inf_vect_dataset,
             lambda *batch: (
-                batch[:-1][0],
+                batch[:-1][0] if training_payload_extractor is None
+                else self._extract_training_payload(batch[:-1][0], training_payload_extractor),
                 self._estimate_influence_values_from_influence_vector(
                     samples_to_evaluate,
                     batch[-1],
@@ -700,11 +898,12 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
 
     def _top_k_with_inf_vect_dataset_train(
             self,
-            sample_to_evaluate: Tuple[Tensor, ...],
-            nearest_neighbor: BaseNearestNeighbors,
+            sample_to_evaluate: Tuple[Any, ...],
+            nearest_neighbor: "BaseNearestNeighbors",
             batch_size_eval: Optional[int] = None,
+            evaluation_representation_provider: Optional[EvaluationRepresentationProvider] = None,
             device: Optional[str] = None
-    ) -> Tuple[Tuple[Tensor, ...], Tensor, Tuple[Tensor, ...]]:
+    ) -> Tuple[Tuple[Any, ...], Tensor, Tensor]:
         """
         Internal function to optimize computations when the influence vectors have already been calculated.
 
@@ -718,6 +917,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             The nearest neighbor method
         batch_size_eval
             The batch size for evaluation
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to a custom
+            representation used for scoring evaluation samples. When ``None``,
+            the default ``_preprocess_samples`` path is used.
         device
             Device where the computation will be executed
         Returns
@@ -730,7 +933,10 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             Top-k training sample for each sample to evaluate.
         """
         _ = device
-        v_to_evaluate = self._preprocess_samples(sample_to_evaluate)
+        v_to_evaluate = self._get_evaluation_representation(
+            sample_to_evaluate,
+            evaluation_representation_provider,
+        )
         if batch_size_eval is None:
             influences_values, training_samples = nearest_neighbor.query(v_to_evaluate)
         else:
