@@ -13,10 +13,10 @@ from .backend import BaseBackend, Framework, get_backend_for_model
 from ..types import DatasetLike, Layer, LossFunction, Model, Tensor, WeightVariable
 
 # Type aliases
-ProcessBatchTypeAlias = Callable[[Tuple[Any, ...]], Tuple[Tensor, Tensor, Optional[Tensor]]]
+ProcessBatchTypeAlias = Callable[[Tuple[Any, ...]], Tuple[Tensor, Any, Optional[Any]]]
 
 
-def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+def default_process_batch(batch: Tuple[Any, ...]) -> Tuple[Tensor, Any, Optional[Any]]:
     """
     Default batch processing function.
 

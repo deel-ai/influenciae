@@ -266,11 +266,15 @@ class ExactIHVP(InverseHessianVectorProduct):
         inv_hessian
             A tensor with the resulting inverse hessian matrix
         """
+        processed_dataset = self.backend.map_dataset(
+            dataset,
+            self.model.process_batch_for_loss_fn,
+        )
         hessian = self.backend.compute_hessian(
             self.model.model,
             self.model.weights,
             self.model.loss_function,
-            dataset,
+            processed_dataset,
             self.model.nb_params
         )
         return self.backend.pinv(hessian)
