@@ -178,8 +178,8 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights: List[torch.nn.Parameter],
         loss_function: Callable,
         inputs: torch.Tensor,
-        targets: torch.Tensor,
-        sample_weight: Optional[torch.Tensor] = None,
+        targets: Any,
+        sample_weight: Optional[Any] = None,
     ) -> torch.Tensor:
         """Compute the Jacobian with a per-sample backward loop."""
         batch_size = inputs.shape[0]
@@ -292,8 +292,8 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         model: nn.Module,
         loss_function: Callable,
         inputs: torch.Tensor,
-        targets: torch.Tensor,
-        sample_weight: Optional[torch.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> torch.Tensor:
         """Compute the loss for a batch of samples."""
         predictions = model(inputs)
@@ -310,11 +310,15 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights: List[torch.nn.Parameter],
         loss_function: Callable,
         inputs: torch.Tensor,
-        targets: torch.Tensor,
-        sample_weight: Optional[torch.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> torch.Tensor:
         """Compute the Jacobian of the loss with respect to weights."""
-        if self._get_parameter_names_for_weights(model, weights) is None:
+        use_loop = self._get_parameter_names_for_weights(model, weights) is None
+        use_loop = use_loop or not isinstance(targets, torch.Tensor)
+        use_loop = use_loop or (sample_weight is not None and not isinstance(sample_weight, torch.Tensor))
+
+        if use_loop:
             jacobian = self._compute_jacobian_loop(
                 model,
                 weights,
@@ -355,8 +359,8 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights: List[torch.nn.Parameter],
         loss_function: Callable,
         inputs: torch.Tensor,
-        targets: torch.Tensor,
-        sample_weight: Optional[torch.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> torch.Tensor:
         """Compute the gradient of the loss with respect to weights."""
         model.zero_grad()
@@ -751,8 +755,16 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 return obj
             if isinstance(obj, torch.Tensor):
                 return obj.to(device)
+            if isinstance(obj, dict):
+                return {key: _move_to_device(value) for key, value in obj.items()}
             if isinstance(obj, (list, tuple)):
                 return type(obj)(_move_to_device(o) for o in obj)
+            move_method = getattr(obj, "to", None)
+            if callable(move_method):
+                try:
+                    return move_method(device=device)
+                except TypeError:
+                    return move_method(device)
             return obj
 
         # Decide whether to unpack based on map_fn signature (TF-like behavior)
@@ -812,6 +824,11 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         def _extract_first_tensor(item):
             if isinstance(item, torch.Tensor):
                 return item
+            if isinstance(item, dict):
+                for sub_item in item.values():
+                    tensor = _extract_first_tensor(sub_item)
+                    if tensor is not None:
+                        return tensor
             if isinstance(item, (list, tuple)):
                 for sub_item in item:
                     tensor = _extract_first_tensor(sub_item)
@@ -1168,21 +1185,38 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         nb_elt = 0
 
         for batch in dataset:
+            if not isinstance(batch, (list, tuple)) or len(batch) < 2:
+                raise ValueError(
+                    "PyTorch Hessian computation expects batches as (inputs, targets[, sample_weight])."
+                )
+
             inputs, targets = batch[0], batch[1]
+            sample_weight = batch[2] if len(batch) >= 3 else None
             # Ensure data is on same device/dtype as the model weights
             if isinstance(inputs, torch.Tensor):
                 inputs = inputs.to(device=device, dtype=dtype)
             if isinstance(targets, torch.Tensor):
                 targets = targets.to(device=device, dtype=dtype)
+            if isinstance(sample_weight, torch.Tensor):
+                sample_weight = sample_weight.to(device=device, dtype=dtype)
+
+            if not isinstance(inputs, torch.Tensor):
+                raise ValueError("PyTorch Hessian computation currently requires tensor model inputs.")
             batch_size = inputs.shape[0]
 
             for i in range(batch_size):
                 model.zero_grad()
                 input_sample = inputs[i:i+1]
                 target_sample = targets[i:i+1]
+                sample_weight_sample = None if sample_weight is None else sample_weight[i:i+1]
 
-                predictions = model(input_sample)
-                loss = loss_function(predictions, target_sample).sum()
+                loss = self.compute_loss(
+                    model,
+                    loss_function,
+                    input_sample,
+                    target_sample,
+                    sample_weight_sample,
+                ).sum()
 
                 # Compute gradients
                 grads = torch.autograd.grad(loss, weights, create_graph=True)

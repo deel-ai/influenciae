@@ -346,8 +346,8 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         model: Model,
         loss_function: LossFunction,
         inputs: Tensor,
-        targets: Tensor,
-        sample_weight: Optional[Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> Tensor:
         """
         Compute the loss for a batch of samples.
@@ -378,8 +378,8 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         weights: List[WeightVariable],
         loss_function: LossFunction,
         inputs: Tensor,
-        targets: Tensor,
-        sample_weight: Optional[Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> Tensor:
         """
         Compute the Jacobian of the loss with respect to weights.
@@ -412,8 +412,8 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         weights: List[WeightVariable],
         loss_function: LossFunction,
         inputs: Tensor,
-        targets: Tensor,
-        sample_weight: Optional[Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> Tensor:
         """
         Compute the gradient of the loss with respect to weights.

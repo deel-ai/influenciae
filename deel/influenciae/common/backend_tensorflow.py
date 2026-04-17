@@ -208,8 +208,8 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         model: tf.keras.Model,
         loss_function: Callable,
         inputs: tf.Tensor,
-        targets: tf.Tensor,
-        sample_weight: Optional[tf.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> tf.Tensor:
         """Compute the loss for a batch of samples."""
         predictions = model(inputs)
@@ -223,12 +223,12 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights: List[tf.Variable],
         loss_function: Callable,
         inputs: tf.Tensor,
-        targets: tf.Tensor,
-        sample_weight: Optional[tf.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> tf.Tensor:
         """Compute the Jacobian of the loss with respect to weights."""
         watched_weights = self.normalize_weights_to_watch(weights)
-        batch_size = tf.shape(targets)[0]
+        batch_size = tf.shape(inputs)[0]
 
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(watched_weights)
@@ -254,8 +254,8 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         weights: List[tf.Variable],
         loss_function: Callable,
         inputs: tf.Tensor,
-        targets: tf.Tensor,
-        sample_weight: Optional[tf.Tensor] = None
+        targets: Any,
+        sample_weight: Optional[Any] = None
     ) -> tf.Tensor:
         """Compute the gradient of the loss with respect to weights."""
         watched_weights = self.normalize_weights_to_watch(weights)
