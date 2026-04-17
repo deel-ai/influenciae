@@ -51,6 +51,7 @@ class BaseNearestNeighbors:
         k: int,
         query_batch_size: int,
         d_type: Optional[Any] = None,
+        payload_dtype: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING
     ) -> None:
         """
@@ -70,6 +71,8 @@ class BaseNearestNeighbors:
             An integer for the query's batch size
         d_type
             The dataset's element's data-type. If None, will be inferred.
+        payload_dtype
+            Optional dtype used for stored payloads when it differs from the score dtype.
         order
             Either descending or ascending for the top or bottom results as per the similarity metric
         """
@@ -169,6 +172,16 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             return tuple(first_spec["shape"][1:])
         return ()
 
+    def _infer_batch_dtype_from_spec(self, element_spec: Any) -> Optional[Any]:
+        """Infer payload dtype from a dataset element specification."""
+        first_spec = self._get_first_element(element_spec)
+        first_spec = self._get_first_element(first_spec)
+        if hasattr(first_spec, "dtype"):
+            return first_spec.dtype
+        if isinstance(first_spec, dict) and "dtype" in first_spec:
+            return first_spec["dtype"]
+        return None
+
     def _infer_batch_shape_from_dataset(self, dataset: Any) -> Tuple[int, ...]:
         """Infer batch sample shape by peeking at the first dataset element."""
         for item in dataset:
@@ -176,6 +189,14 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             first_tensor = self._get_first_element(first_tensor)
             return tuple(self.backend.tensor_shape(first_tensor)[1:])
         return ()
+
+    def _infer_batch_dtype_from_dataset(self, dataset: Any) -> Optional[Any]:
+        """Infer payload dtype by peeking at the first dataset element."""
+        for item in dataset:
+            first_tensor = self._get_first_element(item)
+            first_tensor = self._get_first_element(first_tensor)
+            return getattr(first_tensor, "dtype", None)
+        return None
 
     def _extract_batch_samples_and_ihvp(self, batch_data: Any) -> Tuple[Any, Any]:
         """Extract sample tensors and IHVP values from a dataset batch entry."""
@@ -206,6 +227,7 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         k: int,
         query_batch_size: int,
         d_type: Optional[Any] = None,
+        payload_dtype: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING
         ) -> None:
         """
@@ -225,6 +247,8 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
             An integer for the query's batch size
         d_type
             The dataset's element's data-type. If None, will be inferred from the backend's default.
+        payload_dtype
+            Optional dtype used for stored payloads when it differs from the score dtype.
         order
             Either descending or ascending for the top or bottom results as per the similarity metric
         """
@@ -233,20 +257,28 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
 
         element_spec = self.backend.get_dataset_element_spec(self.dataset)
         batch_shape = self._infer_batch_shape_from_spec(element_spec)
+        inferred_payload_dtype = self._infer_batch_dtype_from_spec(element_spec)
 
         if not batch_shape:
             if self.dataset is None:
                 raise ValueError("Nearest neighbors dataset is not initialized.")
             batch_shape = self._infer_batch_shape_from_dataset(self.dataset)
 
+        if inferred_payload_dtype is None:
+            inferred_payload_dtype = self._infer_batch_dtype_from_dataset(self.dataset)
+
         # Use backend default dtype if not provided
         if d_type is None:
             d_type = self.backend.float32_dtype()
+        if payload_dtype is None:
+            payload_dtype = inferred_payload_dtype if inferred_payload_dtype is not None else d_type
 
         self.batched_sorted_dict = BatchSort(
             batch_shape,
             (query_batch_size, k),
             dtype=d_type,
+            batch_dtype=payload_dtype,
+            value_dtype=d_type,
             order=order,
             backend=self.backend
         )
@@ -296,10 +328,10 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         else:
             init_values = tf.fill((batch_size, k), float('inf'))
 
-        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=batched_sorted_dict.dtype)
+        init_samples = tf.zeros((batch_size, k) + batch_shape, dtype=batched_sorted_dict.batch_dtype)
 
         # Cast to the appropriate dtype
-        init_values = tf.cast(init_values, batched_sorted_dict.dtype)
+        init_values = tf.cast(init_values, batched_sorted_dict.value_dtype)
 
         def reduce_func(state, batch_data):
             best_values, best_samples = state

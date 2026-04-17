@@ -58,12 +58,16 @@ class BatchSort:
         batch_shape: Tuple[int, ...],
         k_shape: Tuple[int, ...],
         dtype: Optional[Any] = None,
+        batch_dtype: Optional[Any] = None,
+        value_dtype: Optional[Any] = None,
         order: ORDER = ORDER.DESCENDING,
         backend: Optional[Union[BaseBackend, Framework]] = None,
         device: Optional[Any] = None
     ):
         self._backend = self._resolve_backend(backend, dtype)
-        self._dtype = self._backend.float32_dtype() if dtype is None else dtype
+        default_dtype = self._backend.float32_dtype() if dtype is None else dtype
+        self._batch_dtype = default_dtype if batch_dtype is None else batch_dtype
+        self._value_dtype = default_dtype if value_dtype is None else value_dtype
 
         self.k = k_shape[1]
         self.order = order
@@ -75,7 +79,7 @@ class BatchSort:
         self._shape = shape
         self._k_shape = k_shape
 
-        self._best_batch = self._backend.zeros(shape, dtype=self._dtype)
+        self._best_batch = self._backend.zeros(shape, dtype=self._batch_dtype)
         self._best_values = self._initialize_best_values(k_shape)
 
         if device is not None and self._backend.framework == Framework.PYTORCH:
@@ -112,7 +116,7 @@ class BatchSort:
 
     def _initialize_best_values(self, k_shape: Tuple[int, ...]) -> Any:
         """Initialize score storage according to sort order."""
-        values = self._backend.ones(k_shape, dtype=self._dtype)
+        values = self._backend.ones(k_shape, dtype=self._value_dtype)
         if self.order == ORDER.DESCENDING:
             return values * (-np.inf)
         return values * np.inf
@@ -129,8 +133,18 @@ class BatchSort:
 
     @property
     def dtype(self) -> Any:
-        """Return the dtype used for stored values."""
-        return self._dtype
+        """Return the dtype used for stored scores."""
+        return self._value_dtype
+
+    @property
+    def batch_dtype(self) -> Any:
+        """Return the dtype used for stored payloads."""
+        return self._batch_dtype
+
+    @property
+    def value_dtype(self) -> Any:
+        """Return the dtype used for stored scores."""
+        return self._value_dtype
 
     def add_all(self, batch_key: Any, batch_values: Any) -> None:
         """
