@@ -538,6 +538,85 @@ def test_compute_influence_values_for_dataset_to_evaluate_and_save_load():
         assert_close(loaded_matrix, gt_inf_values, epsilon=5e-4)
 
 
+def _make_small_linear_case():
+    """Build a tiny linear regression case for hook tests."""
+    model = nn.Sequential(nn.Linear(2, 1))
+    with torch.no_grad():
+        model[0].weight.copy_(torch.tensor([[0.7, -0.4]], dtype=torch.float32))
+        model[0].bias.copy_(torch.tensor([0.2], dtype=torch.float32))
+
+    inputs = torch.tensor(
+        [[0.0, 1.0], [1.0, 2.0], [2.0, 1.0], [3.0, 0.0]],
+        dtype=torch.float32,
+    )
+    targets = torch.tensor([[0.1], [0.5], [1.2], [1.6]], dtype=torch.float32)
+    loader = build_loader(inputs, targets, batch_size=2)
+    influence_model = InfluenceModel(model, start_layer=-1, loss_function=nn.MSELoss(reduction="none"))
+    calculator = FirstOrderInfluenceCalculator(
+        influence_model,
+        loader,
+        ExactIHVP(influence_model, loader),
+        n_samples_for_hessian=4,
+        shuffle_buffer_size=4,
+    )
+    return loader, calculator
+
+
+def test_evaluation_representation_provider_overrides_query_gradients():
+    """Custom evaluation representations should override the default query Jacobian path."""
+    set_seed(123)
+    loader, calculator = _make_small_linear_case()
+
+    def zero_provider(model, batch):
+        return torch.zeros((batch[0].shape[0], model.nb_params), dtype=batch[0].dtype)
+
+    inf_ds = calculator.estimate_influence_values_in_batches(
+        loader,
+        loader,
+        evaluation_representation_provider=zero_provider,
+    )
+    influence_matrix = extract_nested_influence_matrix(inf_ds)
+    assert torch.allclose(influence_matrix, torch.zeros_like(influence_matrix))
+
+
+def test_training_payload_extractor_controls_top_k_payloads():
+    """Top-k should return payload tensors produced by the custom extractor."""
+    set_seed(123)
+    loader, calculator = _make_small_linear_case()
+
+    top_k_ds = calculator.top_k(
+        loader,
+        loader,
+        k=1,
+        training_payload_extractor=lambda batch: batch[0][:, 0].round().to(dtype=torch.int64),
+    )
+
+    payload_batches = []
+    for _, _, training_payload in top_k_ds:
+        payload_batches.append(training_payload)
+    payloads = torch.cat(payload_batches, dim=0)
+
+    assert payloads.dtype == torch.int64
+    assert payloads.ndim == 2
+    assert set(payloads.reshape(-1).tolist()).issubset({0, 1, 2, 3})
+
+
+def test_default_influence_scores_keep_full_training_batches():
+    """Influence score datasets should preserve the full training batch payload by default."""
+    set_seed(123)
+    loader, calculator = _make_small_linear_case()
+
+    inf_ds = calculator.estimate_influence_values_in_batches(loader, loader)
+    _, score_ds = next(iter(inf_ds))
+    train_batch, influence_values = next(iter(score_ds))
+
+    assert isinstance(train_batch, tuple)
+    assert len(train_batch) == 2
+    assert train_batch[0].shape == (2, 2)
+    assert train_batch[1].shape == (2, 1)
+    assert influence_values.shape == (2, 2)
+
+
 @pytest.mark.parametrize("order", [ORDER.ASCENDING, ORDER.DESCENDING])
 def test_top_k_dataset(order):
     """Test top_k dataset output against analytical top-k values/samples."""

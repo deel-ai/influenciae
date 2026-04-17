@@ -7,6 +7,7 @@ Tests for the BatchSort class with PyTorch backend.
 """
 import pytest
 import torch
+import torch.nn as nn
 
 
 pytestmark = pytest.mark.pytorch
@@ -153,3 +154,31 @@ def test_batched_sorted_dict_pytorch_reset(pytorch_backend):
     # After reset, all values should be zeros and -inf
     assert torch.all(key == 0)
     assert torch.all(vals == float('-inf'))
+
+
+def test_batch_sort_supports_distinct_payload_and_score_dtypes():
+    """BatchSort should keep integer payloads and floating-point scores separate."""
+    from deel.influenciae.common import get_backend_for_model
+    from deel.influenciae.utils.sorted_dict import BatchSort
+
+    backend = get_backend_for_model(nn.Linear(1, 1))
+    sorter = BatchSort(
+        batch_shape=(),
+        k_shape=(1, 2),
+        batch_dtype=torch.int64,
+        value_dtype=torch.float32,
+        backend=backend,
+    )
+    sorter.add_all(
+        torch.tensor([[3, 9]], dtype=torch.int64),
+        torch.tensor([[0.4, 0.8]], dtype=torch.float32),
+    )
+    best_payloads, best_values = sorter.get()
+
+    assert sorter.dtype == torch.float32
+    assert sorter.batch_dtype == torch.int64
+    assert sorter.value_dtype == torch.float32
+    assert best_payloads.dtype == torch.int64
+    assert best_values.dtype == torch.float32
+    assert best_payloads.shape == (1, 2)
+    assert best_values.shape == (1, 2)
