@@ -3,7 +3,18 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Helpers for resolving layer selections against backend naming conventions.
+Utilities for turning user-facing layer selectors into concrete model layers.
+
+Influence methods and curvature approximations sometimes need to restrict their
+work to a subset of a model's parameters. This module centralizes the
+translation from a high-level selector such as a layer name, a list of layer
+indices, or a custom predicate to the concrete layer objects, names, and layer
+indices expected by backend-specific influence utilities.
+
+The same abstraction is especially useful for structured models, such as
+object-detection architectures, where users often want to target only the
+prediction head or another semantically meaningful submodule rather than the
+entire network.
 """
 from dataclasses import dataclass
 from warnings import warn
@@ -12,6 +23,11 @@ from typing import Callable, List, Sequence, TypeAlias, Union
 from ..common.backend import BaseBackend
 from ..types import Layer, Model
 
+#: Select layers by backend-reported name, by their position in the backend's
+#: unique named-layer enumeration, or with a custom predicate receiving
+#: ``(layer_idx, layer_name, layer)``. High-level adapters can therefore expose
+#: friendly scopes while still resolving to the concrete layers expected by the
+#: influence core.
 LayerSelectionTypeAlias: TypeAlias = Union[
     str,
     Sequence[int],
@@ -21,7 +37,20 @@ LayerSelectionTypeAlias: TypeAlias = Union[
 
 @dataclass(frozen=True)
 class ResolvedLayerSelection:
-    """Concrete layer selection resolved against a model."""
+    """Concrete result of applying a layer selector to a specific model.
+
+    Attributes
+    ----------
+    layer_indices
+        Indices of the matched layers in the backend's unique named-layer
+        enumeration. The indices are not renumbered after filtering, so they
+        can be passed directly to K-FAC/EK-FAC utilities expecting target-layer
+        indices.
+    layer_names
+        Backend-reported names for the matched layers.
+    layers
+        Concrete layer objects matching the selector.
+    """
 
     layer_indices: List[int]
     layer_names: List[str]
@@ -37,11 +66,60 @@ def resolve_layer_selection(
     supported_only: bool = False,
 ) -> ResolvedLayerSelection:
     """
-    Resolve *selector* against the backend's named layers.
+    Resolve a user-facing layer selector against a model.
 
-    ``layer_indices`` always refer to the indices used internally by
-    :class:`~deel.influenciae.common.kfac_factors.LayerParameterMap`, i.e. the
-    enumeration of all named layers prior to filtering unsupported types.
+    Parameters
+    ----------
+    model
+        Model whose layers should be inspected.
+    backend
+        Backend abstraction used to enumerate layers and test whether a layer
+        is supported by factor-based approximations.
+    selector
+        Layer selection to resolve.
+
+        - ``str``: match a layer by backend-reported name. In
+          ``layer_collection="recursive"`` mode, descendants whose names start
+          with ``"<selector>."`` are also selected.
+        - ``Sequence[int]``: match layers by index in the backend's unique
+          named-layer enumeration.
+        - ``Callable[[int, str, Layer], bool]``: arbitrary predicate receiving
+          ``(layer_idx, layer_name, layer)`` and returning ``True`` for layers
+          to keep.
+    layer_collection
+        Controls how the backend enumerates layers. ``"top_level"`` keeps only
+        direct children, while ``"recursive"`` traverses nested submodules.
+    supported_only
+        When ``True``, keep only layers supported by K-FAC/EK-FAC in the
+        current backend, i.e. Linear/Dense and Conv2d layers.
+
+    Returns
+    -------
+    ResolvedLayerSelection
+        Concrete layer indices, names, and layer objects matching
+        ``selector``.
+
+    Warns
+    -----
+    RuntimeWarning
+        If no layers match the selector after applying the requested filters.
+
+    Notes
+    -----
+    ``layer_indices`` follow the same convention as
+    :class:`~deel.influenciae.common.kfac_factors.LayerParameterMap`: they are
+    computed from the backend's unique named-layer enumeration after
+    deduplicating repeated layer objects by identity and before any
+    ``supported_only`` filtering. Matched layers are therefore not renumbered.
+
+    Examples
+    --------
+    ``resolve_layer_selection(model, backend, "head", layer_collection="recursive")``
+    resolves the layer named ``"head"`` and, in recursive mode, all of its
+    descendants.
+
+    ``resolve_layer_selection(model, backend, [10, 11])`` selects two layers by
+    index.
     """
     if layer_collection not in ("top_level", "recursive"):
         raise ValueError("layer_collection must be either 'top_level' or 'recursive'.")
