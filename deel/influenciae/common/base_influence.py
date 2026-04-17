@@ -21,11 +21,12 @@ from .backend import BaseBackend
 from .evaluation import EvaluationRepresentationProvider
 from .payloads import TrainingPayloadExtractor, default_training_payload_extractor
 from .query_batching import PreconditioningMode, QueryBatchingConfig
+from ..utils.nearest_neighbors import LinearNearestNeighbors
 from ..utils.sorted_dict import BatchSort, ORDER
 from ..types import DType, DatasetLike, Tensor
 
 if TYPE_CHECKING:
-    from ..utils.nearest_neighbors import BaseNearestNeighbors, LinearNearestNeighbors
+    from ..utils.nearest_neighbors import BaseNearestNeighbors
 
 
 class CACHE(Enum):
