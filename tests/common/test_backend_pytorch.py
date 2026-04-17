@@ -1010,6 +1010,18 @@ def test_get_dataset_batch_size_and_cardinality(backend):
     assert backend.get_dataset_batch_size(loader) == 2
     assert backend.get_dataset_cardinality(loader) == 2
 
+
+def test_get_dataset_batch_size_from_dict_batches(backend):
+    """Batch size inference should recurse into dict-backed batches."""
+    loader = DataLoader([
+        {
+            "img": torch.randn(2, 3, 8, 8),
+            "labels": torch.randint(0, 3, (2, 4), dtype=torch.long),
+        }
+    ], batch_size=None)
+
+    assert backend.get_dataset_batch_size(loader) == 2
+
 def test_zip_batch_unbatch_take_dataset(backend):
     """Test zip, batch, unbatch and take operations."""
     d1 = [1, 2, 3]
@@ -1033,6 +1045,32 @@ def test_zip_batch_unbatch_take_dataset(backend):
 
     taken = backend.take_dataset(unbatched, 2)
     assert len(taken) == 2
+
+
+def test_batch_and_unbatch_dict_samples(backend):
+    """Lazy batching helpers should preserve dict-backed samples."""
+    samples = [
+        {
+            "img": torch.randn(3, 4, 4),
+            "labels": torch.tensor([1, 2], dtype=torch.long),
+        },
+        {
+            "img": torch.randn(3, 4, 4),
+            "labels": torch.tensor([3, 4], dtype=torch.long),
+        },
+    ]
+
+    batched = backend.batch_dataset(samples, batch_size=2)
+    first_batch = batched[0]
+    assert isinstance(first_batch, dict)
+    assert first_batch["img"].shape == (2, 3, 4, 4)
+    assert first_batch["labels"].shape == (2, 2)
+
+    unbatched = backend.unbatch_dataset(batched)
+    first_sample = unbatched[0]
+    assert isinstance(first_sample, dict)
+    assert first_sample["img"].shape == (3, 4, 4)
+    assert torch.equal(first_sample["labels"], samples[0]["labels"])
 
 def test_create_dataset_from_tensors(backend):
     """Test creating datasets from tensor inputs."""
