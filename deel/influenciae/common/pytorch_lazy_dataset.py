@@ -200,7 +200,23 @@ def _collate_elements(elements: List[Any]) -> Any:
     """Collate a list of values into a batched value."""
     if not elements:
         return elements
-    if isinstance(elements[0], torch.Tensor):
+    first = elements[0]
+    if isinstance(first, dict):
+        return {
+            key: _collate_elements([item[key] for item in elements])
+            for key in first
+        }
+    if isinstance(first, tuple):
+        return tuple(
+            _collate_elements([item[idx] for item in elements])
+            for idx in range(len(first))
+        )
+    if isinstance(first, list):
+        return [
+            _collate_elements([item[idx] for item in elements])
+            for idx in range(len(first))
+        ]
+    if isinstance(first, torch.Tensor):
         return torch.stack(elements)
     return elements
 
@@ -208,20 +224,8 @@ def _collate_elements(elements: List[Any]) -> Any:
 def _collate_batch_items(batch_items: List[Any]) -> Any:
     """Collate a list of dataset samples into one batch."""
     first = batch_items[0]
-    if isinstance(first, tuple):
-        return tuple(
-            _collate_elements([item[idx] for item in batch_items])
-            for idx in range(len(first))
-        )
-
-    if isinstance(first, list):
-        return [
-            _collate_elements([item[idx] for item in batch_items])
-            for idx in range(len(first))
-        ]
-
-    if isinstance(first, torch.Tensor):
-        return torch.stack(batch_items)
+    if isinstance(first, (dict, tuple, list, torch.Tensor)):
+        return _collate_elements(batch_items)
 
     return tuple(batch_items)
 
@@ -261,6 +265,11 @@ def _infer_batch_len(batch: Any) -> Optional[int]:
     if isinstance(batch, torch.Tensor):
         if batch.dim() > 0:
             batch_len = int(batch.shape[0])
+    elif isinstance(batch, dict) and batch:
+        for value in batch.values():
+            batch_len = _infer_batch_len(value)
+            if batch_len is not None:
+                break
     elif isinstance(batch, (list, tuple)) and len(batch) > 0:
         first = batch[0]
         if isinstance(first, torch.Tensor):
@@ -298,6 +307,14 @@ class UnbatchedDataset(LazyDataset):
             if isinstance(batch, list):
                 for idx in range(batch_len):
                     yield [item[idx] for item in batch]
+                continue
+
+            if isinstance(batch, dict):
+                for idx in range(batch_len):
+                    yield {
+                        key: value[idx] if hasattr(value, "__getitem__") else value
+                        for key, value in batch.items()
+                    }
                 continue
 
             if isinstance(batch, torch.Tensor):
