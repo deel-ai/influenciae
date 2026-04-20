@@ -1139,6 +1139,11 @@ class KroneckerFactors:
         use_true_fisher: bool = False,
     ) -> None:
         """PyTorch: standard forward + backward; hooks fire automatically."""
+        custom_forward_backward = getattr(model, "kfac_forward_backward", None)
+        if callable(custom_forward_backward):
+            custom_forward_backward(model_inp, y_true, sample_weight)
+            return
+
         predictions = model.model(model_inp)
         targets = y_true
         if use_true_fisher:
