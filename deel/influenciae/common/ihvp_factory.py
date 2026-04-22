@@ -209,6 +209,10 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
     ----------
     damping
         Tikhonov damping added to the Kronecker factors before inversion.
+        If ``None``, use the per-layer heuristic
+        ``0.1 * mean(kron(Lambda_G, Lambda_A))``.
+        This heuristic is inspired on the kronfluence library:
+        https://github.com/pomonam/kronfluence
     target_layers
         Optional list of layer indices to restrict K-FAC to.
     fisher_type
@@ -240,7 +244,7 @@ class KfacIHVPFactory(InverseHessianVectorProductFactory):
     """
     def __init__(
         self,
-        damping: float = 1e-4,
+        damping: Optional[float] = 1e-4,
         target_layers: Optional[list] = None,
         fisher_type: str = "empirical",
         module_partition_size: Optional[int] = None,
@@ -309,6 +313,10 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
     ----------
     damping
         Tikhonov damping added to the corrected eigenvalues before inversion.
+        If ``None``, use the per-layer heuristic
+        ``0.1 * mean(Lambda_corrected)``.
+        This heuristic is inspired on the kronfluence library:
+        https://github.com/pomonam/kronfluence
     target_layers
         Optional list of layer indices to restrict EK-FAC to.
     n_ekfac_samples
@@ -342,7 +350,7 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
     """
     def __init__(
         self,
-        damping: float = 1e-4,
+        damping: Optional[float] = 1e-4,
         target_layers: Optional[list] = None,
         n_ekfac_samples: Optional[int] = None,
         fisher_type: str = "empirical",

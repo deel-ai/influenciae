@@ -14,10 +14,28 @@ from typing import Any, Callable, List, Optional, Tuple, Union, cast
 
 from .backend import BaseBackend
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
-from .kfac_factors import LayerParameterMap, KroneckerFactors, EKFACFactors
+from .kfac_factors import (
+    LayerParameterMap,
+    KroneckerFactors,
+    EKFACFactors,
+    HEURISTIC_DAMPING_SCALE,
+)
 
 from ..types import DatasetLike, Model, Tensor, WeightVariable
 from ..utils.conjugate_gradients import conjugate_gradients_solve
+
+
+def _resolve_damping_tensor(
+    backend: BaseBackend,
+    damping: Optional[float],
+    eigenvalues: Tensor,
+) -> Tensor:
+    """Resolve explicit or heuristic damping in the eigenvalue dtype."""
+    dtype = backend.get_dtype(eigenvalues)
+    if damping is None:
+        scale = backend.cast(backend.constant(HEURISTIC_DAMPING_SCALE), dtype)
+        return scale * backend.reduce_mean(eigenvalues)
+    return backend.cast(backend.constant(damping), dtype)
 
 
 class InverseHessianVectorProduct(ABC):
@@ -913,6 +931,10 @@ class KfacIHVP(InverseHessianVectorProduct):
         A batched dataset for estimating the Kronecker factors.
     damping
         Tikhonov damping added to the Kronecker eigenvalues before inversion.
+        If ``None``, use the heuristic
+        ``HEURISTIC_DAMPING_SCALE * mean(kron(Lambda_G, Lambda_A))`` per layer.
+        This heuristic is inspired on the kronfluence library:
+        https://github.com/pomonam/kronfluence
     target_layers
         Optional list of layer indices to restrict K-FAC to.  ``None`` means
         all supported layers.
@@ -950,7 +972,7 @@ class KfacIHVP(InverseHessianVectorProduct):
         self,
         model: InfluenceModel,
         train_dataset: Any,
-        damping: float = 1e-4,
+        damping: Optional[float] = 1e-4,
         target_layers: Optional[List[int]] = None,
         fisher_type: str = "empirical",
         module_partition_size: Optional[int] = None,
@@ -1020,6 +1042,7 @@ class KfacIHVP(InverseHessianVectorProduct):
         self.Q_A = {}
         self.Q_G = {}
         self.kron_inv_eigs = {}
+        self.layer_damping = {}
         for info in self.layer_map.layers_info:
             idx = info.layer_idx
             if idx not in self.factors.A:
@@ -1045,10 +1068,13 @@ class KfacIHVP(InverseHessianVectorProduct):
 
             lam_g_for_outer = self.backend.cast(lam_g, self.backend.get_dtype(lam_a))
             kron_eigs = self.backend.reshape(self.backend.outer(lam_g_for_outer, lam_a), (-1,))
-            denom = self.backend.maximum(kron_eigs + damping, 1e-12)
+            damping_tensor = _resolve_damping_tensor(self.backend, self.damping, kron_eigs)
+            eps = self.backend.cast(self.backend.constant(1e-12), self.backend.get_dtype(kron_eigs))
+            denom = self.backend.maximum(kron_eigs + damping_tensor, eps)
 
             self.Q_A[idx] = q_a
             self.Q_G[idx] = q_g
+            self.layer_damping[idx] = damping_tensor
             self.kron_inv_eigs[idx] = 1.0 / denom
 
     def _symmetrize_factor(self, factor: Any) -> Any:
@@ -1256,6 +1282,10 @@ class EkfacIHVP(InverseHessianVectorProduct):
         A batched dataset for estimating the factors and corrected eigenvalues.
     damping
         Tikhonov damping added to the corrected eigenvalues before inversion.
+        If ``None``, use the heuristic
+        ``HEURISTIC_DAMPING_SCALE * mean(Lambda_corrected)`` per layer.
+        This heuristic is inspired on the kronfluence library:
+        https://github.com/pomonam/kronfluence
     target_layers
         Optional list of layer indices to restrict EK-FAC to.
     n_ekfac_samples
@@ -1295,7 +1325,7 @@ class EkfacIHVP(InverseHessianVectorProduct):
         self,
         model: InfluenceModel,
         train_dataset: Any,
-        damping: float = 1e-4,
+        damping: Optional[float] = 1e-4,
         target_layers: Optional[List[int]] = None,
         n_ekfac_samples: Optional[int] = None,
         fisher_type: str = "empirical",
@@ -1362,6 +1392,17 @@ class EkfacIHVP(InverseHessianVectorProduct):
             )
             if checkpoint_path is not None:
                 self.factors.save_to_dir(checkpoint_path)
+
+        self.layer_damping = {}
+        for info in self.layer_map.layers_info:
+            idx = info.layer_idx
+            if idx not in self.factors.Lambda_corrected:
+                continue
+            self.layer_damping[idx] = _resolve_damping_tensor(
+                self.backend,
+                self.damping,
+                self.factors.Lambda_corrected[idx],
+            )
 
     @property
     def supports_query_preconditioning(self) -> bool:
@@ -1475,11 +1516,7 @@ class EkfacIHVP(InverseHessianVectorProduct):
             # Lambda_corrected is stored as flatten((n_out, n_in_eff)) in both
             # frameworks (since it's computed from Q_G/Q_A-rotated quantities
             # that are framework-independent).
-            damping_tensor = backend.cast(
-                backend.constant(self.damping),
-                backend.get_dtype(lam_corr)
-            )
-            lam_damped = lam_corr + damping_tensor
+            lam_damped = lam_corr + self.layer_damping[idx]
 
             if backend.framework.value == "tensorflow":
                 # TF flat gradient is in (n_in_eff, n_out) row-major order

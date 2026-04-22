@@ -33,7 +33,12 @@ from deel.influenciae.common import (
     IHVPCalculator,
     KfacIHVPFactory,
 )
-from deel.influenciae.common.kfac_factors import LayerParameterMap, KroneckerFactors, EKFACFactors
+from deel.influenciae.common.kfac_factors import (
+    LayerParameterMap,
+    KroneckerFactors,
+    EKFACFactors,
+    HEURISTIC_DAMPING_SCALE,
+)
 
 
 pytestmark = pytest.mark.tensorflow
@@ -549,6 +554,46 @@ def test_kfac_ihvp_deterministic(seed):
     second_result = second._compute_ihvp_single_batch(batch).numpy()
     assert np.allclose(first_result, second_result, rtol=1e-10, atol=1e-12)
 
+
+def test_kfac_heuristic_damping_matches_kron_eigenvalue_mean(seed):
+    """K-FAC should resolve heuristic damping from each layer's Kronecker eigenvalues."""
+    model = _make_nonlinear_mlp(seed=seed)
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    train_ds = _make_dataset(n_samples=96, n_features=4, n_outputs=2, seed=2024, batch_size=16)
+    batch = next(iter(_make_dataset(n_samples=18, n_features=4, n_outputs=2, seed=2025, batch_size=6)))
+
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+    kfac_ihvp = KfacIHVP(
+        influence_model,
+        train_ds,
+        damping=None,
+        fisher_type="empirical",
+    )
+
+    result = kfac_ihvp._compute_ihvp_single_batch(batch).numpy()
+    assert np.all(np.isfinite(result))
+    assert np.median(np.linalg.norm(result, axis=0)) > 1e-10
+
+    for info in kfac_ihvp.layer_map.layers_info:
+        idx = info.layer_idx
+        if idx not in kfac_ihvp.kron_inv_eigs:
+            continue
+
+        a_factor = kfac_ihvp._symmetrize_factor(kfac_ihvp.factors.A[idx])
+        g_factor = kfac_ihvp._symmetrize_factor(kfac_ihvp.factors.G[idx])
+        lam_a, _ = kfac_ihvp.backend.eigh(kfac_ihvp.backend.cast(a_factor, kfac_ihvp.backend.float64_dtype()))
+        lam_g, _ = kfac_ihvp.backend.eigh(kfac_ihvp.backend.cast(g_factor, kfac_ihvp.backend.float64_dtype()))
+        lam_g_for_outer = kfac_ihvp.backend.cast(lam_g, kfac_ihvp.backend.get_dtype(lam_a))
+        kron_eigs = kfac_ihvp.backend.reshape(kfac_ihvp.backend.outer(lam_g_for_outer, lam_a), (-1,))
+        expected = HEURISTIC_DAMPING_SCALE * kfac_ihvp.backend.reduce_mean(kron_eigs)
+
+        assert np.isclose(
+            float(kfac_ihvp.layer_damping[idx].numpy()),
+            float(expected.numpy()),
+            rtol=1e-6,
+            atol=1e-10,
+        )
+
 def test_kfac_enum_from_string():
     """IHVPCalculator.from_string('kfac') should return Kfac enum."""
     calc = IHVPCalculator.from_string('kfac')
@@ -684,6 +729,36 @@ def test_ekfac_ihvp_deterministic(seed):
     first_result = first._compute_ihvp_single_batch(batch).numpy()
     second_result = second._compute_ihvp_single_batch(batch).numpy()
     assert np.allclose(first_result, second_result, rtol=1e-10, atol=1e-12)
+
+
+def test_ekfac_heuristic_damping_matches_corrected_eigenvalue_mean(seed):
+    """EK-FAC should resolve heuristic damping from each layer's corrected eigenvalues."""
+    model = _make_nonlinear_mlp(seed=seed)
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    train_ds = _make_dataset(n_samples=96, n_features=4, n_outputs=2, seed=2024, batch_size=16)
+    batch = next(iter(_make_dataset(n_samples=18, n_features=4, n_outputs=2, seed=2025, batch_size=6)))
+
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+    ekfac_ihvp = EkfacIHVP(
+        influence_model,
+        train_ds,
+        damping=None,
+        fisher_type="empirical",
+        n_ekfac_samples=96,
+    )
+
+    result = ekfac_ihvp._compute_ihvp_single_batch(batch).numpy()
+    assert np.all(np.isfinite(result))
+    assert np.median(np.linalg.norm(result, axis=0)) > 1e-10
+
+    for idx, lam_corr in ekfac_ihvp.factors.Lambda_corrected.items():
+        expected = HEURISTIC_DAMPING_SCALE * ekfac_ihvp.backend.reduce_mean(lam_corr)
+        assert np.isclose(
+            float(ekfac_ihvp.layer_damping[idx].numpy()),
+            float(expected.numpy()),
+            rtol=1e-6,
+            atol=1e-10,
+        )
 
 def test_ekfac_enum_from_string():
     """IHVPCalculator.from_string('ekfac') should return Ekfac enum."""

@@ -40,6 +40,7 @@ def _chunk_layer_infos(layer_infos: List["LayerInfo"], chunk_size: int) -> List[
 
 _FACTOR_CHECKPOINT_SCHEMA_VERSION = 1
 _FACTOR_CHECKPOINT_METADATA_FILE = "metadata.json"
+HEURISTIC_DAMPING_SCALE = 0.1
 
 
 def _shape_to_list(shape: Tuple[int, ...]) -> List[Optional[int]]:
