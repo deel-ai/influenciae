@@ -799,6 +799,10 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def save_dataset(self, dataset: Any, path: str) -> None:
         """Save a dataset to disk using torch.save."""
+        if os.path.isdir(path):
+            raise IsADirectoryError(
+                f"PyTorch dataset caching expects a file path, but got a directory: {path}"
+            )
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
 
         if hasattr(dataset, 'materialize'):
@@ -812,6 +816,10 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
     def load_dataset(self, path: str) -> Any:
         """Load a dataset from disk."""
+        if os.path.isdir(path):
+            raise IsADirectoryError(
+                f"PyTorch dataset loading expects a file path, but got a directory: {path}"
+            )
         if os.path.exists(path):
             return torch.load(path, weights_only=False)
         raise FileNotFoundError(f"The dataset path: {path} was not found")
