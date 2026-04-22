@@ -91,7 +91,7 @@ def resolve_layer_selection(
         direct children, while ``"recursive"`` traverses nested submodules.
     supported_only
         When ``True``, keep only layers supported by K-FAC/EK-FAC in the
-        current backend, i.e. Linear/Dense and Conv2d layers.
+        current backend, i.e. Linear/Dense and dense Conv2d layers.
 
     Returns
     -------
@@ -155,7 +155,7 @@ def resolve_layer_selection(
     for layer_idx, (layer_name, layer) in enumerate(unique_named_layers):
         if not _matches(layer_idx, layer_name, layer):
             continue
-        if supported_only and not (backend.is_linear_layer(layer) or backend.is_conv2d_layer(layer)):
+        if supported_only and not backend.is_kfac_supported_layer(layer):
             continue
         resolved_indices.append(layer_idx)
         resolved_names.append(layer_name)

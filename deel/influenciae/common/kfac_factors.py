@@ -282,8 +282,8 @@ class LayerParameterMap:
 
     This mirrors the ``ForwardOverBackwardHVP._weight_slices`` pattern but
     adds layer-level bookkeeping needed by K-FAC: the map only includes
-    *supported* (Linear / Conv2d) layers and records their position within the
-    complete flat gradient vector.
+    *supported* (Linear / dense Conv2d) layers and records their position
+    within the complete flat gradient vector.
 
     Parameters
     ----------
@@ -400,11 +400,11 @@ class LayerParameterMap:
 
             normalized_layer_name = str(layer_name) if layer_name else f"<layer_{layer_idx}>"
 
-            if not (backend.is_linear_layer(layer) or backend.is_conv2d_layer(layer)):
+            if not backend.is_kfac_supported_layer(layer):
                 if target_layers is not None:
                     warnings.warn(
                         f"Layer {layer_idx} ('{normalized_layer_name}', {type(layer).__name__}) "
-                        f"is not a Linear/Dense or Conv2d layer and will be skipped by K-FAC.",
+                        f"is not a K-FAC-supported Linear/Dense or dense Conv2d layer and will be skipped by K-FAC.",
                         stacklevel=2,
                     )
                 continue
@@ -446,7 +446,7 @@ class LayerParameterMap:
 
         if not self.layers_info:
             warnings.warn(
-                "No supported layers (Linear/Dense, Conv2d) found for K-FAC. "
+                "No supported layers (Linear/Dense, dense Conv2d) found for K-FAC. "
                 "The IHVP will fall back to a zero approximation.",
                 stacklevel=2,
             )

@@ -1756,6 +1756,36 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
             ``tf.keras.layers.Conv2D`` (TensorFlow).
         """
 
+    def is_kfac_supported_layer(self, layer: Any) -> bool:
+        """
+        Return whether *layer* is supported by K-FAC/EK-FAC.
+
+        The current factorization supports fully-connected / dense layers and
+        only dense 2-D convolutions. Grouped or depthwise convolutions are
+        intentionally excluded because their parameter layout does not match the
+        dense-convolution Kronecker factorization used by the current
+        implementation.
+
+        Parameters
+        ----------
+        layer
+            A framework-specific layer object.
+
+        Returns
+        -------
+        is_supported
+            ``True`` for ``Linear`` / ``Dense`` layers and for ``Conv2d`` /
+            ``Conv2D`` layers whose ``groups`` attribute is ``1``.
+        """
+        if self.is_linear_layer(layer):
+            return True
+        if not self.is_conv2d_layer(layer):
+            return False
+        try:
+            return int(getattr(layer, "groups", 1)) == 1
+        except (TypeError, ValueError):
+            return False
+
     @abstractmethod
     def get_layer_weight_and_bias(self, layer: Any) -> Tuple[Any, Optional[Any]]:
         """

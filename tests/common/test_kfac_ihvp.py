@@ -268,16 +268,16 @@ def test_warns_on_unsupported_target_layer(seed):
     all_indices = list(range(len(all_layers)))
     unsupported_indices = [
         i for i, layer in enumerate(all_layers)
-        if not backend.is_linear_layer(layer) and not backend.is_conv2d_layer(layer)
+        if not backend.is_kfac_supported_layer(layer)
     ]
     supported_indices = [
         i for i, layer in enumerate(all_layers)
-        if backend.is_linear_layer(layer) or backend.is_conv2d_layer(layer)
+        if backend.is_kfac_supported_layer(layer)
     ]
 
     assert unsupported_indices
 
-    with pytest.warns(UserWarning, match="not a Linear/Dense"):
+    with pytest.warns(UserWarning, match="not a K-FAC-supported"):
         layer_map = LayerParameterMap(influence_model, backend, target_layers=all_indices)
 
     assert layer_map.n_supported_layers == len(supported_indices)

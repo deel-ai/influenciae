@@ -383,8 +383,17 @@ def test_is_linear_layer(backend):
 def test_is_conv2d_layer(backend):
     """Conv2d layers should be detected by the backend."""
     assert backend.is_conv2d_layer(nn.Conv2d(3, 16, 3))
+    assert backend.is_conv2d_layer(nn.Conv2d(16, 16, 3, groups=16))
     assert not backend.is_conv2d_layer(nn.Linear(3, 2))
     assert not backend.is_conv2d_layer(nn.LayerNorm(3))
+
+
+def test_is_kfac_supported_layer_excludes_grouped_conv2d(backend):
+    """K-FAC should skip grouped/depthwise convolutions."""
+    assert backend.is_kfac_supported_layer(nn.Linear(3, 2))
+    assert backend.is_kfac_supported_layer(nn.Conv2d(3, 16, 3))
+    assert not backend.is_kfac_supported_layer(nn.Conv2d(16, 16, 3, groups=4))
+    assert not backend.is_kfac_supported_layer(nn.Conv2d(16, 16, 3, groups=16))
 
 
 def test_get_layer_weight_and_bias_linear_no_bias(backend):
@@ -1001,6 +1010,18 @@ def test_cache_save_load_dataset(backend, tmp_path):
 
     assert len(loaded) == 2
     assert torch.equal(loaded[0], torch.tensor([1.0]))
+
+
+def test_save_load_dataset_rejects_directory_paths(backend, tmp_path):
+    """PyTorch dataset save/load helpers should require file paths."""
+    dataset = [torch.tensor([1.0])]
+    directory_path = str(tmp_path)
+
+    with pytest.raises(IsADirectoryError, match="expects a file path"):
+        backend.save_dataset(dataset, directory_path)
+
+    with pytest.raises(IsADirectoryError, match="expects a file path"):
+        backend.load_dataset(directory_path)
 
 def test_get_dataset_batch_size_and_cardinality(backend):
     """Test dataset batch size and cardinality helpers."""

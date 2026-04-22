@@ -241,20 +241,47 @@ def test_warns_on_unsupported_target_layer(seed):
     all_indices = list(range(len(all_layers)))
     unsupported_indices = [
         i for i, layer in enumerate(all_layers)
-        if not backend.is_linear_layer(layer) and not backend.is_conv2d_layer(layer)
+        if not backend.is_kfac_supported_layer(layer)
     ]
     supported_indices = [
         i for i, layer in enumerate(all_layers)
-        if backend.is_linear_layer(layer) or backend.is_conv2d_layer(layer)
+        if backend.is_kfac_supported_layer(layer)
     ]
 
     assert unsupported_indices
 
-    with pytest.warns(UserWarning, match="not a Linear/Dense"):
+    with pytest.warns(UserWarning, match="not a K-FAC-supported"):
         layer_map = LayerParameterMap(influence_model, backend, target_layers=all_indices)
 
     assert layer_map.n_supported_layers == len(supported_indices)
     assert {info.layer_idx for info in layer_map.layers_info} == set(supported_indices)
+
+
+def test_grouped_conv2d_is_skipped_by_layer_map(seed):
+    """Grouped/depthwise convs should be excluded from the K-FAC layer map."""
+    torch.manual_seed(seed)
+    model = nn.Sequential(
+        nn.Conv2d(4, 4, kernel_size=3, padding=1, groups=4, bias=False, dtype=torch.float64),
+        nn.Conv2d(4, 8, kernel_size=1, bias=False, dtype=torch.float64),
+    )
+    loss_fn = nn.MSELoss(reduction="none")
+    influence_model = InfluenceModel(model, start_layer=0, last_layer=-1, loss_function=loss_fn)
+    backend = influence_model.backend
+
+    grouped_index = next(
+        idx for idx, layer in enumerate(backend.get_layers(model))
+        if isinstance(layer, nn.Conv2d) and layer.groups > 1
+    )
+    dense_index = next(
+        idx for idx, layer in enumerate(backend.get_layers(model))
+        if isinstance(layer, nn.Conv2d) and layer.groups == 1
+    )
+
+    with pytest.warns(UserWarning, match="not a K-FAC-supported"):
+        layer_map = LayerParameterMap(influence_model, backend, target_layers=[grouped_index, dense_index])
+
+    assert layer_map.n_supported_layers == 1
+    assert [info.layer_idx for info in layer_map.layers_info] == [dense_index]
 
 def test_recursive_collection_tracks_nested_supported_layers(seed):
     """Recursive collection should include supported nested layers."""

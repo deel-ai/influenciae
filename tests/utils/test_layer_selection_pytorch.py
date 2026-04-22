@@ -53,3 +53,24 @@ def test_resolve_layer_selection_warns_when_no_layers_match():
     assert resolved.layer_indices == []
     assert resolved.layer_names == []
     assert resolved.layers == []
+
+
+def test_resolve_layer_selection_supported_only_skips_grouped_conv2d():
+    """supported_only should drop grouped/depthwise convs from K-FAC layer selection."""
+    model = nn.Sequential(
+        nn.Conv2d(4, 4, kernel_size=3, padding=1, groups=4),
+        nn.Conv2d(4, 8, kernel_size=1),
+    )
+
+    backend = get_backend_for_model(model)
+    resolved = resolve_layer_selection(
+        model,
+        backend,
+        selector=lambda layer_idx, layer_name, layer: True,
+        layer_collection="recursive",
+        supported_only=True,
+    )
+
+    assert resolved.layer_names == ["1"]
+    assert resolved.layer_indices == [1]
+    assert len(resolved.layers) == 1
