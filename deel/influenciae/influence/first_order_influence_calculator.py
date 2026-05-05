@@ -9,6 +9,17 @@ sample and the original model's), Cook's distance (or influence values, a measur
 the model's reliance on the specific sample), both for individual points and whole
 groups of data-points.
 
+This module also supports **query-side preconditioning**, which applies the
+inverse-hessian-vector product to evaluation (query) gradients rather than
+training gradients.  When combined with an
+:class:`~deel.influenciae.common.evaluation.EvaluationRepresentationProvider`,
+the query-batched methods can score evaluation batches whose preprocessing
+differs from the model's default loss path -- for example, object-detection
+batches that require a custom per-sample objective and structured unpacking.
+See :class:`EvaluationRepresentationProvider` and
+:class:`ObjectiveEvaluationRepresentationProvider` in
+:mod:`deel.influenciae.common.evaluation` for details.
+
 Disclaimer: This implements only a first order approximation of the influence function,
 which does not take into account the pairwise interactions of data-points inside groups.
 For a more precise (but much more computationally expensive) alternative, please refer
@@ -265,6 +276,44 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             return tuple(batch)
         return (batch,)
 
+    def _reshape_jacobian_to_batch_matrix(self, jacobian: Tensor) -> Tensor:
+        """Flatten a per-sample jacobian tensor while preserving its leading batch axis."""
+        backend = self._backend
+        return backend.reshape(jacobian, (backend.get_batch_size(jacobian), -1))
+
+    def _query_rep_batch_size(self, query_rep: Union[Tensor, LowRankGradient]) -> int:
+        """Infer the number of query rows represented by a query-side payload."""
+        backend = self._backend
+        if isinstance(query_rep, LowRankGradient):
+            first_value = next(iter(query_rep.module_values.values()))
+            if isinstance(first_value, tuple):
+                left, right = first_value
+                if query_rep.is_global:
+                    return int(backend.tensor_shape(right)[-1])
+                return int(backend.get_batch_size(left))
+            return int(backend.get_batch_size(first_value))
+        return int(backend.get_batch_size(query_rep))
+
+    def _get_sliceable_batch_size(self, batch: Tuple[Any, ...]) -> int:
+        """Return batch size for tensor-aligned batches used by row partitioning."""
+        first = batch[0]
+        if not hasattr(first, "shape"):
+            raise ValueError(
+                "score_data_partitions > 1 requires tensor-aligned batches. "
+                f"Got {type(first)!r}; use score_data_partitions=1 for structured batches."
+            )
+        batch_size = first.shape[0]
+        if batch_size is None:
+            runtime_batch_size = self._backend.get_batch_size(first)
+            try:
+                batch_size = int(runtime_batch_size)
+            except TypeError:
+                raise ValueError(
+                    "score_data_partitions requires a statically known batch dimension."
+                )
+
+        return int(batch_size)
+
     def _slice_batch_rows(self, batch: Tuple[Any, ...], start: int, end: int) -> Tuple[Any, ...]:
         """Slice one contiguous row range from a batched sample tuple."""
         return tuple(tensor[start:end] for tensor in batch)
@@ -278,15 +327,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         if num_partitions <= 1:
             return [batch]
 
-        batch_size = batch[0].shape[0]
-        if batch_size is None:
-            runtime_batch_size = self._backend.get_batch_size(batch[0])
-            try:
-                batch_size = int(runtime_batch_size)
-            except TypeError as exc:
-                raise ValueError(
-                    "score_data_partitions requires a statically known batch dimension."
-                ) from exc
+        batch_size = self._get_sliceable_batch_size(batch)
 
         if batch_size <= 1:
             return [batch]
@@ -398,6 +439,15 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             A tuple of tensors representing one batch of test samples.
         config
             Query batching configuration.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to a custom
+            tensor representation used for scoring instead of the default
+            ``_preprocess_samples`` path.  This is the main extension point
+            for structured tasks such as object detection, where the
+            evaluation batch must be scored through a task-specific
+            objective.  Any callable satisfying the
+            :class:`~deel.influenciae.common.evaluation.EvaluationRepresentationProvider`
+            protocol is accepted.
 
         Returns
         -------
@@ -407,10 +457,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         """
         backend = self._backend
         # Compute per-sample gradients: (batch, nb_params)
-        query_grads = backend.reshape(
-            self._get_evaluation_representation(query_batch, evaluation_representation_provider),
-            (backend.get_batch_size(query_batch[0]), -1)
-        )
+        query_repr = self._get_evaluation_representation(query_batch, evaluation_representation_provider)
+        query_grads = self._reshape_jacobian_to_batch_matrix(query_repr)
 
         # Apply IHVP to query gradients if supported
         if self.ihvp_calculator.supports_query_preconditioning:
@@ -442,9 +490,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
     def _compute_train_ihvp_norms(self, train_batch: Tuple[Tensor, ...]) -> Tensor:
         """Compute train-side IHVP norms used by RelatIF normalization."""
-        train_grads = self._backend.reshape(
-            self.model.batch_jacobian_tensor(train_batch),
-            (self._backend.get_batch_size(train_batch[0]), -1)
+        train_grads = self._reshape_jacobian_to_batch_matrix(
+            self.model.batch_jacobian_tensor(train_batch)
         )
         train_ihvp = self.ihvp_calculator.precondition_gradient(train_grads)
         norms = self._backend.norm(train_ihvp, axis=0)
@@ -499,9 +546,8 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     ) -> Tensor:
         """Compute unnormalized scores for one full training batch."""
         backend = self._backend
-        train_grads = backend.reshape(
-            self.model.batch_jacobian_tensor(train_batch),
-            (backend.get_batch_size(train_batch[0]), -1)
+        train_grads = self._reshape_jacobian_to_batch_matrix(
+            self.model.batch_jacobian_tensor(train_batch)
         )
 
         if isinstance(query_rep, LowRankGradient):
@@ -616,6 +662,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     ) -> List[Tuple[Tuple[Any, ...], DatasetLike]]:
         """Build per-original-query-batch score datasets for one accumulated group."""
         backend = self._backend
+        query_batch_sizes = [self._query_rep_batch_size(query_rep) for query_rep in query_reps]
         merged_rep = self._merge_query_representations(query_reps)
 
         if backend.framework.value == "tensorflow" and config.score_data_partitions > 1:
@@ -633,8 +680,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
             outputs = []
             row_start = 0
-            for query_batch in query_batches:
-                batch_size = int(backend.get_batch_size(query_batch[0]))
+            for query_batch, batch_size in zip(query_batches, query_batch_sizes):
                 row_end = row_start + batch_size
                 if len(query_batches) == 1:
                     batch_scores_ds = self._materialize_entries_dataset(full_scores_entries)
@@ -663,8 +709,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         outputs = []
         row_start = 0
-        for query_batch in query_batches:
-            batch_size = int(backend.get_batch_size(query_batch[0]))
+        for query_batch, batch_size in zip(query_batches, query_batch_sizes):
             row_end = row_start + batch_size
             if len(query_batches) == 1:
                 batch_scores_ds = full_scores_ds
@@ -711,6 +756,16 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
             Optional :class:`QueryBatchingConfig`.  If ``None``, a default
             configuration is used with dense query gradients and no score
             partitioning.
+        evaluation_representation_provider
+            Optional callable mapping ``(self.model, batch)`` to the
+            representation used when preconditioning evaluation batches.
+            When ``None``, the default ``_preprocess_samples`` path is used.
+            See :class:`~deel.influenciae.common.evaluation.EvaluationRepresentationProvider`.
+        training_payload_extractor
+            Optional callable used to extract the payload returned alongside
+            influence scores for each training batch.  When ``None``, the
+            default extractor is used.
+            See :class:`~deel.influenciae.common.payloads.TrainingPayloadExtractor`.
         device
             Optional device hint forwarded to backend dataset mapping helpers
             when supported.
@@ -859,8 +914,9 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
     ) -> List[Tuple[Tuple[Any, ...], Tensor, Tensor]]:
         """Compute top-k results for one accumulated query group."""
         backend = self._backend
+        query_batch_sizes = [self._query_rep_batch_size(query_rep) for query_rep in query_reps]
         merged_rep = self._merge_query_representations(query_reps)
-        total_queries = sum(int(backend.get_batch_size(query_batch[0])) for query_batch in query_batches)
+        total_queries = sum(query_batch_sizes)
         sample_shape, inferred_payload_dtype = self._infer_training_payload_shape_and_dtype(
             train_set,
             training_payload_extractor,
@@ -895,8 +951,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
 
         outputs = []
         row_start = 0
-        for query_batch in query_batches:
-            batch_size = int(backend.get_batch_size(query_batch[0]))
+        for query_batch, batch_size in zip(query_batches, query_batch_sizes):
             row_end = row_start + batch_size
             outputs.append((
                 query_batch,

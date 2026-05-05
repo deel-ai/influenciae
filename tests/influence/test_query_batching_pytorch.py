@@ -68,6 +68,60 @@ def _make_factorized_calc(ihvp_cls, normalize=False):
     return calc, train_loader, test_loader
 
 
+def _process_dict_batch(batch):
+    """Map one dict-style batch to the standard (inputs, targets, sample_weight) tuple."""
+    if isinstance(batch, (list, tuple)) and len(batch) == 1 and isinstance(batch[0], dict):
+        batch = batch[0]
+    return batch["x"], batch["y"], None
+
+
+def _dict_training_payload(batch):
+    """Use stable sample ids as top-k payloads for dict-batch tests."""
+    if isinstance(batch, (list, tuple)) and len(batch) == 1 and isinstance(batch[0], dict):
+        batch = batch[0]
+    return batch["sample_id"]
+
+
+def _make_dict_rows(x, y, sample_id_offset=0):
+    """Build a list-backed dict dataset collated by PyTorch's default collate."""
+    return [
+        {
+            "x": x[index],
+            "y": y[index],
+            "sample_id": torch.tensor(sample_id_offset + index, dtype=torch.long),
+        }
+        for index in range(x.shape[0])
+    ]
+
+
+def _make_dict_calc(normalize=False):
+    """Build a tiny linear regression setup whose loaders yield dict batches."""
+    set_seed(0)
+    model = nn.Sequential(nn.Linear(4, 2, bias=False))
+    loss_fn = nn.MSELoss(reduction="none")
+    influence_model = InfluenceModel(
+        model,
+        start_layer=-1,
+        loss_function=loss_fn,
+        process_batch_for_loss_fn=_process_dict_batch,
+    )
+
+    torch.manual_seed(5)
+    x_train = torch.randn(20, 4)
+    y_train = torch.randn(20, 2)
+    x_test = torch.randn(6, 4)
+    y_test = torch.randn(6, 2)
+
+    train_loader = DataLoader(_make_dict_rows(x_train, y_train, sample_id_offset=100), batch_size=5)
+    test_loader = DataLoader(_make_dict_rows(x_test, y_test, sample_id_offset=200), batch_size=3)
+
+    ihvp = ExactIHVP(influence_model, train_loader)
+    calc = FirstOrderInfluenceCalculator(
+        influence_model, train_loader, ihvp, normalize=normalize
+    )
+    return calc, train_loader, test_loader
+
+
 # ---------------------------------------------------------------------------
 # supports_query_preconditioning
 # ---------------------------------------------------------------------------
@@ -109,6 +163,27 @@ def _collect_standard_scores(calc, test_loader, train_loader):
             row_scores.append(scores.detach().numpy())
         all_scores.append(np.concatenate(row_scores, axis=1))
     return np.concatenate(all_scores, axis=0)
+
+
+def _collect_dict_standard_scores(calc, test_loader, train_loader):
+    """Collect full train-side scores when data loaders yield dict batches."""
+    inf_vect_ds = calc.compute_influence_vector(train_loader)
+    all_scores = []
+    for test_batch in test_loader:
+        test_tuple = (test_batch,)
+        preproc = calc._preprocess_samples(test_tuple)
+        row_scores = []
+        for item in inf_vect_ds:
+            inf_vect = item[-1]
+            scores = calc._estimate_influence_value_from_influence_vector(preproc, inf_vect)
+            row_scores.append(scores.detach().numpy())
+        all_scores.append(np.concatenate(row_scores, axis=1))
+    return np.concatenate(all_scores, axis=0)
+
+
+def _collect_dict_train_ids(train_loader):
+    """Collect stable sample ids from a dict-batch train loader."""
+    return torch.cat([batch["sample_id"] for batch in train_loader], dim=0).numpy()
 
 
 def _collect_query_batched_scores(calc, test_loader, train_loader, config=None):
@@ -230,6 +305,50 @@ def test_public_top_k_query_mode_matches_full_matrix():
     values, samples = _collect_top_k_query_mode(calc, test_loader, train_loader, k=3)
     np.testing.assert_allclose(values, expected_values, atol=_ATOL)
     np.testing.assert_allclose(samples, expected_samples, atol=_ATOL)
+
+
+def test_query_batched_supports_dict_batches():
+    """Query-side scoring should support structured batches processed by adapters."""
+    calc, train_loader, test_loader = _make_dict_calc(normalize=False)
+    standard = _collect_dict_standard_scores(calc, test_loader, train_loader)
+    query_batched = _collect_query_batched_scores(calc, test_loader, train_loader)
+    np.testing.assert_allclose(query_batched, standard, atol=_ATOL)
+
+
+def test_public_top_k_query_mode_supports_dict_batches():
+    """Top-k query mode should use custom payloads for structured batches."""
+    calc, train_loader, test_loader = _make_dict_calc(normalize=False)
+    full_scores = _collect_dict_standard_scores(calc, test_loader, train_loader)
+    train_ids = _collect_dict_train_ids(train_loader)
+
+    indices = np.argsort(-full_scores, axis=1)[:, :3]
+    expected_values = np.take_along_axis(full_scores, indices, axis=1)
+    expected_samples = train_ids[indices]
+
+    values = []
+    samples = []
+    top_k_ds = calc.top_k(
+        test_loader,
+        train_loader,
+        k=3,
+        order=ORDER.DESCENDING,
+        preconditioning_mode=PreconditioningMode.QUERY,
+        training_payload_extractor=_dict_training_payload,
+    )
+    for _query_batch, influence_values, training_samples in top_k_ds:
+        values.append(influence_values.detach().numpy())
+        samples.append(training_samples.detach().numpy())
+
+    np.testing.assert_allclose(np.concatenate(values, axis=0), expected_values, atol=_ATOL)
+    np.testing.assert_array_equal(np.concatenate(samples, axis=0), expected_samples)
+
+
+def test_query_batched_dict_batches_reject_data_partitioning():
+    """Raw row partitioning is intentionally limited to tensor-aligned batches."""
+    calc, train_loader, test_loader = _make_dict_calc(normalize=False)
+    config = QueryBatchingConfig(score_data_partitions=2)
+    with pytest.raises(ValueError, match="score_data_partitions > 1 requires tensor-aligned batches"):
+        _collect_query_batched_scores(calc, test_loader, train_loader, config)
 
 
 def test_public_query_mode_rejects_train_side_vector_args():
