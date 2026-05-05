@@ -11,6 +11,17 @@ their child classes (i.e. all the different techniques to compute a notion of in
 It provides optimized implementations for some methods following the assumption that
 the computation can be written as a matrix-vector product with a matrix that can be
 (pre)-computed and remains unchanged throughout the computation.
+
+Evaluation representation hook
+------------------------------
+The :meth:`BaseInfluenceCalculator._get_evaluation_representation` method acts as
+a dispatch point that determines how an evaluation (query) batch is converted into
+the tensor representation used for scoring.  By default it falls through to the
+subclass-specific :meth:`_preprocess_samples`; when an
+:class:`~.evaluation.EvaluationRepresentationProvider` is supplied, it delegates
+to the provider instead.  This allows structured tasks -- such as object detection
+-- to inject a custom per-sample objective without modifying the core influence
+math.
 """
 from abc import abstractmethod
 from enum import Enum

@@ -106,6 +106,20 @@ the norm of the train-side IHVP vectors rather than the query-side preconditione
 - Global low-rank representations are materialized back to dense when multiple query batches are
   accumulated together, because their SVD factors are batch-local.
 
+## Custom evaluation representations
+
+The query-batched methods (`estimate_influence_values_query_batched`, `_top_k_query_mode`)
+accept an optional `evaluation_representation_provider` argument.  When supplied, the
+provider replaces the default `_preprocess_samples` gradient computation so that
+evaluation batches can be scored through a task-specific objective.
+
+This is particularly useful for structured tasks such as object detection, where a
+packed batch must first be unpacked and then differentiated through a detection-specific
+loss rather than the model's training loss.
+
+See [Custom Evaluation Representations](../evaluation_representation.md) for the protocol
+definition, the built-in `ObjectiveEvaluationRepresentationProvider`, and a usage example.
+
 ## Notes
 
 - `load_influence_vector_path`, `save_influence_vector_path`, and non-default influence-vector cache

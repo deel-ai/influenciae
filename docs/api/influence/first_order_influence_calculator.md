@@ -37,6 +37,20 @@ the number of query points is much smaller than the number of training points.
 See [Query batching](query_batching.md) for the supported IHVP implementations, available
 configuration options, and usage examples.
 
+## Custom Evaluation Representations
+
+When evaluation batches need to be scored through a different objective than the model's
+training loss -- for example, a detection-specific objective in object detection --
+you can pass an `evaluation_representation_provider` to any scoring method
+(`estimate_influence_values_in_batches`, `top_k`, or the query-batched variants).
+
+This provider replaces the default `_preprocess_samples` gradient computation with
+a user-supplied callable, keeping the core influence math unchanged.
+
+See [Custom Evaluation Representations](../evaluation_representation.md) for the
+protocol definition, the built-in `ObjectiveEvaluationRepresentationProvider`, and
+a usage example.
+
 ## Reusing K-FAC / EK-FAC factors
 
 You can cache K-FAC/EK-FAC factors to disk and reuse them across runs by passing an IHVP factory:

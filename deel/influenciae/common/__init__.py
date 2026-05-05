@@ -3,7 +3,33 @@
 # CRIAQ and ANITI - https://www.deel.ai/
 # =====================================================================================
 """
-Common classes and methods
+Common classes and methods shared across all influence calculator families.
+
+Eagerly imported
+~~~~~~~~~~~~~~~~
+- :class:`BaseBackend`, :func:`get_backend`, :func:`detect_framework`, and
+  other backend utilities from :mod:`.backend`.
+- :class:`BaseInfluenceModel`, :class:`InfluenceModel`,
+  :class:`TensorFlowInfluenceModel`, :class:`PyTorchInfluenceModel`, and
+  :func:`default_process_batch` from :mod:`.model_wrappers`.
+- :class:`EvaluationRepresentationProvider` and
+  :class:`ObjectiveEvaluationRepresentationProvider` from
+  :mod:`.evaluation` -- the hook for injecting custom evaluation
+  representations (e.g. for object detection).
+- :class:`TrainingPayloadExtractor` and
+  :func:`default_training_payload_extractor` from :mod:`.payloads`.
+
+Lazily imported
+~~~~~~~~~~~~~~~
+- :class:`BaseInfluenceCalculator`, :class:`SelfInfluenceCalculator` from
+  :mod:`.base_influence`.
+- IHVP implementations and factories (``ExactIHVP``, ``KfacIHVP``,
+  ``EkfacIHVP``, ``ConjugateGradientDescentIHVP``, ``LissaIHVP``,
+  ``ForwardOverBackwardHVP``, ``ExactIHVPFactory``, ``KfacIHVPFactory``,
+  ``EkfacIHVPFactory``, etc.) from :mod:`.inverse_hessian_vector_product`
+  and :mod:`.ihvp_factory`.
+- K-FAC / EK-FAC data structures (``LayerParameterMap``,
+  ``KroneckerFactors``, ``EKFACFactors``) from :mod:`.kfac_factors`.
 """
 
 import importlib
