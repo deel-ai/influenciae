@@ -51,6 +51,16 @@ See [Custom Evaluation Representations](../evaluation_representation.md) for the
 protocol definition, the built-in `ObjectiveEvaluationRepresentationProvider`, and
 a usage example.
 
+## Training Payloads
+
+When influence methods return training-side outputs, the `training_payload_extractor`
+argument controls which batched payload is returned next to the scores.  The default
+payload is the first element of the training batch, usually the model input tensor.
+
+Pass a custom extractor when you want outputs to contain stable sample ids or compact
+metadata instead of raw inputs.  See [Training Payloads](../training_payloads.md) for
+the protocol definition and usage examples.
+
 ## Reusing K-FAC / EK-FAC factors
 
 You can cache K-FAC/EK-FAC factors to disk and reuse them across runs by passing an IHVP factory:

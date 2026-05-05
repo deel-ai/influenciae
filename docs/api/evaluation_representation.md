@@ -141,6 +141,19 @@ calculator.estimate_influence_values_in_batches(
 )
 ```
 
+## Related: training payloads
+
+Evaluation representation providers control the query-side representation used
+for scoring.  Training payload extractors control the training-side value that is
+returned next to those scores.
+
+These hooks are independent and can be combined in the same call.  For example,
+an object-detection workflow may use an `evaluation_representation_provider` to
+differentiate a detection-specific query objective and a `training_payload_extractor`
+to return stable training sample ids.
+
+See [Training Payloads](training_payloads.md) for the training-side hook.
+
 ## API reference
 
 {{deel.influenciae.common.evaluation}}

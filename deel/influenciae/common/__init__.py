@@ -17,7 +17,8 @@ Eagerly imported
   :mod:`.evaluation` -- the hook for injecting custom evaluation
   representations (e.g. for object detection).
 - :class:`TrainingPayloadExtractor` and
-  :func:`default_training_payload_extractor` from :mod:`.payloads`.
+  :func:`default_training_payload_extractor` from :mod:`.payloads` -- the hook
+  for customizing the training-side payload returned with influence scores.
 
 Lazily imported
 ~~~~~~~~~~~~~~~

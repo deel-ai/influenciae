@@ -120,6 +120,16 @@ loss rather than the model's training loss.
 See [Custom Evaluation Representations](../evaluation_representation.md) for the protocol
 definition, the built-in `ObjectiveEvaluationRepresentationProvider`, and a usage example.
 
+## Training payloads
+
+Query-batched score outputs also accept `training_payload_extractor`.  The extractor
+does not affect query preconditioning or score computation; it only controls the
+training-side payload returned alongside each score block or top-k result.
+
+This is useful when query batching is used on large structured datasets, where returning
+sample ids is more practical than returning raw training inputs.  See
+[Training Payloads](../training_payloads.md) for the protocol definition and examples.
+
 ## Notes
 
 - `load_influence_vector_path`, `save_influence_vector_path`, and non-default influence-vector cache

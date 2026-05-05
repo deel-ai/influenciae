@@ -774,7 +774,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         -------
         influence_value_dataset
             Dataset-like iterable containing ``(query_batch, scores_dataset)``
-            pairs, where ``scores_dataset`` yields ``(train_batch, scores)``
+            pairs, where ``scores_dataset`` yields ``(training_payload, scores)``
             tuples and ``scores`` has shape ``(n_query, n_train_batch)``.
 
         Raises

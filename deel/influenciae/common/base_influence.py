@@ -585,7 +585,7 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
             A dataset containing the tuple: (samples_to_evaluate, dataset).
 
             - samples_to_evaluate: The batch of sample to evaluate.
-            - dataset: Dataset containing tuples of batch of the training dataset and their influence score.
+            - dataset: Dataset containing tuples of training payloads and their influence score.
         """
         preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
         if preconditioning_mode == PreconditioningMode.QUERY:
@@ -738,11 +738,11 @@ class BaseInfluenceCalculator(SelfInfluenceCalculator):
         Returns
         -------
         top_k_dataset
-            A dataset containing the tuple (samples_to_evaluate, influence_values, training_samples).
+            A dataset containing the tuple (samples_to_evaluate, influence_values, training_payloads).
 
             - samples_to_evaluate: Top-k samples to evaluate.
             - influence_values: Top-k influence values for each sample to evaluate.
-            - training_samples: Top-k training sample for each sample to evaluate.
+            - training_payloads: Top-k training payloads for each sample to evaluate.
         """
         preconditioning_mode = self._resolve_preconditioning_mode(preconditioning_mode)
         if preconditioning_mode == PreconditioningMode.QUERY:
