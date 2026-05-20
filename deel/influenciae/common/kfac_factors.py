@@ -832,8 +832,11 @@ class KroneckerFactors:
 
         # --- Register hooks -----------------------------------------------
         handles = []
-        activations: Dict[int, Tensor] = {}
-        grad_outputs: Dict[int, Tensor] = {}
+        # Store one entry per hook invocation. Shared layers can be called
+        # multiple times during a single forward pass, so overwriting by layer
+        # index would pair unrelated activations and gradients.
+        activations: Dict[int, List[Tensor]] = {}
+        grad_outputs: Dict[int, List[Tensor]] = {}
 
         for info in layer_infos:
             idx = info.layer_idx
@@ -843,13 +846,13 @@ class KroneckerFactors:
                 a = inp if not isinstance(inp, tuple) else inp[0]
                 if self.offload_activations_to_cpu:
                     a = backend.to_cpu(a)
-                activations[_idx] = a
+                activations.setdefault(_idx, []).append(a)
 
             def _bwd_hook(layer, grad_inp, grad_out, _idx=idx):
                 g = grad_out if not isinstance(grad_out, tuple) else grad_out[0]
                 if self.offload_activations_to_cpu:
                     g = backend.to_cpu(g)
-                grad_outputs[_idx] = g
+                grad_outputs.setdefault(_idx, []).append(g)
 
             handles.append(backend.register_forward_hook(info.layer, _fwd_hook))
             handles.append(backend.register_backward_hook(info.layer, _bwd_hook))
@@ -921,31 +924,39 @@ class KroneckerFactors:
                         if idx not in activations or idx not in grad_outputs:
                             continue
 
-                        a = activations[idx]
-                        g = grad_outputs[idx]
-
-                        if self.offload_activations_to_cpu:
-                            a = backend.to_device(a, reference=device_reference)
-                            g = backend.to_device(g, reference=device_reference)
-
-                        a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
-
-                        a_rows = _to_int(backend.get_batch_size(a_mat))
-                        g_rows = _to_int(backend.get_batch_size(g_mat))
-                        if a_rows != g_rows:
+                        a_list = activations[idx]
+                        g_list = grad_outputs[idx]
+                        if len(a_list) != len(g_list):
                             raise ValueError(
-                                f"Activation/gradient row mismatch for layer {idx}: "
-                                f"{a_rows} vs {g_rows}."
+                                f"Activation/gradient capture count mismatch for layer {idx}: "
+                                f"{len(a_list)} vs {len(g_list)}."
                             )
 
-                        n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+                        # Backward hooks run in reverse execution order, so
+                        # reverse gradients to align with forward activations.
+                        for a, g in zip(a_list, reversed(g_list)):
+                            if self.offload_activations_to_cpu:
+                                a = backend.to_device(a, reference=device_reference)
+                                g = backend.to_device(g, reference=device_reference)
 
-                        if idx not in a_sums:
-                            a_sums[idx] = backend.matmul(backend.transpose(a_mat), a_mat)
-                            g_sums[idx] = backend.matmul(backend.transpose(g_mat), g_mat)
-                        else:
-                            a_sums[idx] = a_sums[idx] + backend.matmul(backend.transpose(a_mat), a_mat)
-                            g_sums[idx] = g_sums[idx] + backend.matmul(backend.transpose(g_mat), g_mat)
+                            a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
+
+                            a_rows = _to_int(backend.get_batch_size(a_mat))
+                            g_rows = _to_int(backend.get_batch_size(g_mat))
+                            if a_rows != g_rows:
+                                raise ValueError(
+                                    f"Activation/gradient row mismatch for layer {idx}: "
+                                    f"{a_rows} vs {g_rows}."
+                                )
+
+                            n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+
+                            if idx not in a_sums:
+                                a_sums[idx] = backend.matmul(backend.transpose(a_mat), a_mat)
+                                g_sums[idx] = backend.matmul(backend.transpose(g_mat), g_mat)
+                            else:
+                                a_sums[idx] = a_sums[idx] + backend.matmul(backend.transpose(a_mat), a_mat)
+                                g_sums[idx] = g_sums[idx] + backend.matmul(backend.transpose(g_mat), g_mat)
 
                     partition_batch_count += 1
                     if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
@@ -1009,8 +1020,8 @@ class KroneckerFactors:
         model_inp: Tensor,
         y_true: Tensor,
         sample_weight: Optional[Tensor],
-        activations: Dict[int, Tensor],
-        grad_outputs: Dict[int, Tensor],
+        activations: Dict[int, List[Tensor]],
+        grad_outputs: Dict[int, List[Tensor]],
         layer_infos: Optional[List[LayerInfo]] = None,
     ) -> None:
         """Run forward + backward to populate hook-captured activations and gradients.
@@ -1165,7 +1176,7 @@ class KroneckerFactors:
         model_inp: Any,
         y_true: Any,
         sample_weight: Optional[Any],
-        grad_outputs: Dict[int, Any],
+        grad_outputs: Dict[int, List[Any]],
         layer_infos: List[LayerInfo],
         use_true_fisher: bool = False,
     ) -> None:
@@ -1203,6 +1214,8 @@ class KroneckerFactors:
 
                     def _record_and_watch(*a, _idx=idx, _orig_fn=_orig, _tape=tape, **kw):
                         out = _orig_fn(*a, **kw)
+                        # TODO(shared-layer-tf): keep all outputs here and
+                        # compute one gradient per output for reused layers.
                         layer_outputs[_idx] = out
                         _tape.watch(out)
                         return out
@@ -1240,11 +1253,13 @@ class KroneckerFactors:
                 try:
                     g = tape.gradient(total_loss, layer_outputs[idx])
                     if g is not None:
-                        grad_outputs[idx] = g
                         # Fire backward hooks
                         hooks = getattr(info.layer, '_kfac_backward_hooks', [])
-                        for hook in hooks:
-                            hook(info.layer, None, (g,))
+                        if hooks:
+                            for hook in hooks:
+                                hook(info.layer, None, (g,))
+                        else:
+                            grad_outputs.setdefault(idx, []).append(g)
                 except Exception:  # pylint: disable=broad-except
                     pass
             del tape
@@ -1729,8 +1744,9 @@ class EKFACFactors(KroneckerFactors):
 
         # Register hooks (same as factor computation)
         handles = []
-        activations: Dict[int, Tensor] = {}
-        grad_outputs_captured: Dict[int, Tensor] = {}
+        # Keep every hook invocation so reused layers contribute all calls.
+        activations: Dict[int, List[Tensor]] = {}
+        grad_outputs_captured: Dict[int, List[Tensor]] = {}
 
         for info in layer_infos:
             idx = info.layer_idx
@@ -1739,13 +1755,13 @@ class EKFACFactors(KroneckerFactors):
                 a = inp if not isinstance(inp, tuple) else inp[0]
                 if self.offload_activations_to_cpu:
                     a = backend.to_cpu(a)
-                activations[_idx] = a
+                activations.setdefault(_idx, []).append(a)
 
             def _bwd_hook(layer, grad_inp, grad_out, _idx=idx):
                 g = grad_out if not isinstance(grad_out, tuple) else grad_out[0]
                 if self.offload_activations_to_cpu:
                     g = backend.to_cpu(g)
-                grad_outputs_captured[_idx] = g
+                grad_outputs_captured.setdefault(_idx, []).append(g)
 
             handles.append(backend.register_forward_hook(info.layer, _fwd_hook))
             handles.append(backend.register_backward_hook(info.layer, _bwd_hook))
@@ -1817,44 +1833,53 @@ class EKFACFactors(KroneckerFactors):
                         if idx not in self.Q_A:
                             continue
 
-                        a = activations[idx]
-                        g = grad_outputs_captured[idx]
-                        if self.offload_activations_to_cpu:
-                            a = backend.to_device(a, reference=device_reference)
-                            g = backend.to_device(g, reference=device_reference)
-
-                        a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
-
-                        a_rows = _to_int(backend.get_batch_size(a_mat))
-                        g_rows = _to_int(backend.get_batch_size(g_mat))
-                        if a_rows != g_rows:
+                        a_list = activations[idx]
+                        g_list = grad_outputs_captured[idx]
+                        if len(a_list) != len(g_list):
                             raise ValueError(
-                                f"Activation/gradient row mismatch for layer {idx}: "
-                                f"{a_rows} vs {g_rows}."
+                                f"Activation/gradient capture count mismatch for layer {idx}: "
+                                f"{len(a_list)} vs {len(g_list)}."
                             )
 
-                        n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+                        # Backward hooks run in reverse execution order, so
+                        # reverse gradients to align with forward activations.
+                        for a, g in zip(a_list, reversed(g_list)):
+                            if self.offload_activations_to_cpu:
+                                a = backend.to_device(a, reference=device_reference)
+                                g = backend.to_device(g, reference=device_reference)
 
-                        # Rotate into eigenbasis: (batch, n_in_eff) @ Q_A -> (batch, n_in_eff)
-                        a_rot = backend.matmul(a_mat, self.Q_A[idx])
-                        # (batch, n_out) @ Q_G -> (batch, n_out)
-                        g_rot = backend.matmul(g_mat, self.Q_G[idx])
+                            a_mat, g_mat = self._prepare_activation_gradient(info, a, g)
 
-                        # Corrected eigenvalue: E[ g_rot_i^2 * a_rot_j^2 ]
-                        # g_rot^2: (batch, n_out), a_rot^2: (batch, n_in_eff)
-                        # Outer per sample then average: (batch, n_out, 1) * (batch, 1, n_in_eff)
-                        # Sum across batch -> (n_out, n_in_eff)
-                        g_sq = backend.multiply(g_rot, g_rot)  # (batch, n_out)
-                        a_sq = backend.multiply(a_rot, a_rot)  # (batch, n_in_eff)
+                            a_rows = _to_int(backend.get_batch_size(a_mat))
+                            g_rows = _to_int(backend.get_batch_size(g_mat))
+                            if a_rows != g_rows:
+                                raise ValueError(
+                                    f"Activation/gradient row mismatch for layer {idx}: "
+                                    f"{a_rows} vs {g_rows}."
+                                )
 
-                        # Equivalent to summing per-sample outer products, but avoids
-                        # materializing a large 3-D tensor of shape
-                        # (batch, n_out, n_in_eff).
-                        batch_sum = backend.matmul(backend.transpose(g_sq), a_sq)
-                        if idx not in corrected_sums:
-                            corrected_sums[idx] = batch_sum
-                        else:
-                            corrected_sums[idx] = corrected_sums[idx] + batch_sum
+                            n_rows_per_layer[idx] = n_rows_per_layer.get(idx, 0) + a_rows
+
+                            # Rotate into eigenbasis: (batch, n_in_eff) @ Q_A -> (batch, n_in_eff)
+                            a_rot = backend.matmul(a_mat, self.Q_A[idx])
+                            # (batch, n_out) @ Q_G -> (batch, n_out)
+                            g_rot = backend.matmul(g_mat, self.Q_G[idx])
+
+                            # Corrected eigenvalue: E[ g_rot_i^2 * a_rot_j^2 ]
+                            # g_rot^2: (batch, n_out), a_rot^2: (batch, n_in_eff)
+                            # Outer per sample then average: (batch, n_out, 1) * (batch, 1, n_in_eff)
+                            # Sum across batch -> (n_out, n_in_eff)
+                            g_sq = backend.multiply(g_rot, g_rot)  # (batch, n_out)
+                            a_sq = backend.multiply(a_rot, a_rot)  # (batch, n_in_eff)
+
+                            # Equivalent to summing per-sample outer products, but avoids
+                            # materializing a large 3-D tensor of shape
+                            # (batch, n_out, n_in_eff).
+                            batch_sum = backend.matmul(backend.transpose(g_sq), a_sq)
+                            if idx not in corrected_sums:
+                                corrected_sums[idx] = batch_sum
+                            else:
+                                corrected_sums[idx] = corrected_sums[idx] + batch_sum
 
                     partition_batch_count += 1
                     if self.data_partition_size is not None and partition_batch_count >= self.data_partition_size:
