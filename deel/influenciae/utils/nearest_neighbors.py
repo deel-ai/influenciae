@@ -8,12 +8,20 @@ algorithm. It will prove itself useful for finding the top-k most influential
 examples of datasets, as implemented in the influence calculator interface.
 
 This module is backend-agnostic and supports both TensorFlow and PyTorch.
+
+The optional :class:`FaissNearestNeighbors` backend accelerates approximate
+nearest-neighbor search over large gradient indexes used by the TrackStar
+attribution pipeline. It becomes available when ``influenciae[faiss]`` is
+installed.
 """
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple, Union
 from warnings import warn
 
-from .._optional_imports import import_optional_module
+import numpy as np
+
+from .._optional_imports import import_optional_module, is_module_available
 from .sorted_dict import BatchSort, ORDER
 from ..common.backend import (
     BaseBackend,
@@ -402,3 +410,246 @@ class LinearNearestNeighbors(BaseNearestNeighbors):
         training_samples, influences_values = batched_sorted_dict.get()
 
         return influences_values, training_samples
+
+
+# ---------------------------------------------------------------------------
+# Optional FAISS-backed nearest neighbors
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FaissConfig:
+    """Configuration for the FAISS-backed nearest-neighbor index.
+
+    Parameters
+    ----------
+    factory_string
+        FAISS index factory string. Defaults to a flat inner-product index,
+        which mirrors ``LinearNearestNeighbors`` semantics but relies on
+        FAISS' vectorized implementation.
+    metric
+        Similarity metric. Either ``"inner_product"`` (default) or ``"l2"``.
+    use_gpu
+        Attempt to move the FAISS index to GPU when ``faiss-gpu`` is available.
+        Silently falls back to CPU otherwise.
+    normalize_queries
+        When ``True``, L2-normalize both index vectors and queries before
+        search. Combined with ``metric="inner_product"`` this yields cosine
+        similarity, which matches TrackStar's normalized-gradient scoring.
+    train_size
+        Optional maximum number of vectors used to train the index when the
+        factory string requires it (e.g. ``"IVF"``).
+    """
+
+    factory_string: str = "Flat"
+    metric: str = "inner_product"
+    use_gpu: bool = False
+    normalize_queries: bool = False
+    train_size: Optional[int] = None
+
+
+def is_faiss_available() -> bool:
+    """Return whether the optional FAISS dependency is installed."""
+    return is_module_available("faiss")
+
+
+class FaissNearestNeighbors(BaseNearestNeighbors):
+    """FAISS-accelerated nearest-neighbor index over stacked gradient vectors.
+
+    Unlike :class:`LinearNearestNeighbors`, this backend operates on a materialized
+    matrix of index vectors and returns their integer indices. It is designed for
+    the TrackStar scoring loop, where per-sample gradients (optionally
+    randomly projected) are already available as a dense NumPy matrix.
+
+    Instantiation lazily imports FAISS through
+    :func:`~deel.influenciae._optional_imports.import_optional_module` so
+    influenciae installs without the extra remain fully functional. Callers who
+    want a graceful fallback can use :func:`is_faiss_available` before
+    constructing this class.
+
+    Parameters
+    ----------
+    config
+        Optional configuration. Defaults to a flat inner-product index.
+    """
+
+    def __init__(self, config: Optional[FaissConfig] = None) -> None:
+        self._config = config or FaissConfig()
+        if self._config.metric not in ("inner_product", "l2"):
+            raise ValueError(
+                "FaissConfig.metric must be one of {'inner_product', 'l2'}, "
+                f"got {self._config.metric!r}."
+            )
+
+        # Lazy-load faiss so importing this module does not require the extra.
+        self._faiss = import_optional_module("faiss", extra="faiss")
+        self._index: Any = None
+        self._payload_indices: Optional[np.ndarray] = None
+        self._k: Optional[int] = None
+        self._order: ORDER = ORDER.DESCENDING
+        self._dim: Optional[int] = None
+
+    # ------------------------------------------------------------------
+    # BaseNearestNeighbors implementation
+    # ------------------------------------------------------------------
+
+    def build(  # type: ignore[override]
+        self,
+        dataset: Any,
+        dot_product_fun: Optional[Callable[[Any, Any], Any]] = None,
+        k: int = 10,
+        query_batch_size: Optional[int] = None,
+        d_type: Optional[Any] = None,
+        payload_dtype: Optional[Any] = None,
+        order: ORDER = ORDER.DESCENDING,
+    ) -> None:
+        """Build the FAISS index from a stacked gradient matrix.
+
+        Parameters
+        ----------
+        dataset
+            Either a 2-D NumPy matrix of shape ``(N, D)`` or a tuple
+            ``(indices, gradients)`` where ``gradients`` has shape ``(N, D)``
+            and ``indices`` has shape ``(N,)``.
+        dot_product_fun
+            Ignored; retained for API parity with :class:`BaseNearestNeighbors`.
+        k
+            Number of neighbors to return on each query.
+        query_batch_size
+            Ignored; retained for API parity.
+        d_type
+            Ignored; FAISS uses ``float32`` internally.
+        payload_dtype
+            Ignored; payloads are always returned as ``int64`` indices.
+        order
+            Sorting order. Only ``ORDER.DESCENDING`` is meaningful for inner
+            product similarity; ``ORDER.ASCENDING`` is honored for L2 metric.
+        """
+        del dot_product_fun, query_batch_size, d_type, payload_dtype  # unused
+
+        indices, gradients = self._unpack_dataset(dataset)
+        if gradients.ndim != 2:
+            raise ValueError(
+                "FaissNearestNeighbors expects 2-D gradient matrices, got shape "
+                f"{tuple(gradients.shape)}."
+            )
+        if gradients.shape[0] == 0:
+            raise ValueError("FaissNearestNeighbors received an empty gradient matrix.")
+
+        gradients_f32 = np.ascontiguousarray(gradients, dtype=np.float32)
+        if self._config.normalize_queries:
+            gradients_f32 = self._l2_normalize(gradients_f32)
+
+        self._dim = int(gradients_f32.shape[1])
+        self._k = int(k)
+        self._order = order
+        self._payload_indices = np.asarray(indices, dtype=np.int64).reshape(-1)
+        if self._payload_indices.shape[0] != gradients_f32.shape[0]:
+            raise ValueError(
+                "FaissNearestNeighbors payload indices and gradient rows have "
+                f"mismatched lengths: {self._payload_indices.shape[0]} vs {gradients_f32.shape[0]}."
+            )
+
+        metric_flag = (
+            self._faiss.METRIC_INNER_PRODUCT
+            if self._config.metric == "inner_product"
+            else self._faiss.METRIC_L2
+        )
+        index = self._faiss.index_factory(self._dim, self._config.factory_string, metric_flag)
+
+        if not index.is_trained:
+            training_vectors = gradients_f32
+            if self._config.train_size is not None and self._config.train_size < training_vectors.shape[0]:
+                rng = np.random.default_rng(0)
+                sampled_indices = rng.choice(
+                    training_vectors.shape[0],
+                    size=int(self._config.train_size),
+                    replace=False,
+                )
+                training_vectors = training_vectors[sampled_indices]
+            index.train(training_vectors)
+
+        index.add(gradients_f32)
+
+        if self._config.use_gpu:
+            try:
+                res = self._faiss.StandardGpuResources()
+                index = self._faiss.index_cpu_to_gpu(res, 0, index)
+            except (AttributeError, RuntimeError) as exc:
+                warn(
+                    f"FAISS GPU support requested but unavailable ({exc}); "
+                    "continuing with the CPU index.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+        self._index = index
+
+    def query(  # type: ignore[override]
+        self,
+        vector_to_find: Any,
+        batch_size: Optional[int] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return ``(scores, payload_indices)`` for each query row."""
+        del batch_size  # FAISS handles batching internally
+
+        if self._index is None or self._payload_indices is None or self._k is None:
+            raise ValueError(
+                "FaissNearestNeighbors index is not built. Call `build(...)` before querying."
+            )
+
+        query_matrix = np.asarray(vector_to_find, dtype=np.float32)
+        if query_matrix.ndim == 1:
+            query_matrix = query_matrix[np.newaxis, :]
+        if query_matrix.ndim != 2:
+            raise ValueError(
+                "FaissNearestNeighbors.query expects 1-D or 2-D queries, got shape "
+                f"{tuple(query_matrix.shape)}."
+            )
+        if query_matrix.shape[1] != self._dim:
+            raise ValueError(
+                "FaissNearestNeighbors query dimension mismatch: "
+                f"expected {self._dim}, got {query_matrix.shape[1]}."
+            )
+        if self._config.normalize_queries:
+            query_matrix = self._l2_normalize(query_matrix)
+
+        query_matrix = np.ascontiguousarray(query_matrix)
+        scores, positions = self._index.search(query_matrix, self._k)
+        payload = self._payload_indices[positions]
+
+        if self._config.metric == "l2" and self._order == ORDER.DESCENDING:
+            # FAISS returns ascending L2 distances by default. Flip to match
+            # descending-order calling conventions from BatchSort.
+            scores = scores[:, ::-1]
+            payload = payload[:, ::-1]
+
+        return scores, payload
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _unpack_dataset(dataset: Any) -> Tuple[np.ndarray, np.ndarray]:
+        """Return ``(indices, gradients)`` from the accepted dataset formats."""
+        if isinstance(dataset, tuple) and len(dataset) == 2:
+            indices, gradients = dataset
+        elif isinstance(dataset, np.ndarray):
+            gradients = dataset
+            indices = np.arange(gradients.shape[0], dtype=np.int64)
+        else:
+            raise TypeError(
+                "FaissNearestNeighbors.build accepts either a 2-D numpy array or a "
+                "(indices, gradients) tuple; got "
+                f"{type(dataset).__name__}."
+            )
+        return np.asarray(indices), np.asarray(gradients)
+
+    @staticmethod
+    def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
+        """Return an L2-row-normalized copy of *matrix*, guarding against zero rows."""
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        # Avoid division by zero for zero-gradient rows; they normalize to 0.
+        safe_norms = np.where(norms > 0, norms, 1.0)
+        return matrix / safe_norms

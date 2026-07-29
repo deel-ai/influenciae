@@ -39,6 +39,9 @@ tensorflow = [
 pytorch = [
     "torch>=2.0.0,<2.11.0",
 ]
+faiss = [
+    "faiss-cpu>=1.7.4",
+]
 # Install both backends
 all = [
     "tensorflow>=2.11.0,<2.21.0",
