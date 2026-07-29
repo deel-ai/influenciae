@@ -40,6 +40,25 @@ def test_loss_reduction():
     BaseInfluenceModel(model, loss_function=nn.CrossEntropyLoss(reduction='none'))
 
 
+def test_parameter_layout_and_component_jacobian_follow_named_parameter_order():
+    model = nn.Sequential(nn.Linear(2, 3), nn.Linear(3, 1))
+    influence_model = BaseInfluenceModel(model, loss_function=nn.MSELoss(reduction='none'))
+    batch = (torch.ones((4, 2)), torch.zeros((4, 1)))
+
+    components = influence_model.batch_jacobian_components_tensor(batch)
+
+    assert influence_model.parameter_layout.parameter_names == tuple(
+        name for name, _ in model.named_parameters()
+    )
+    assert tuple(component.shape for component in components) == tuple(
+        (4, *parameter.shape) for parameter in model.parameters()
+    )
+    torch.testing.assert_close(
+        influence_model.parameter_layout.flatten_components(components, influence_model.backend),
+        influence_model.batch_jacobian_tensor(batch),
+    )
+
+
 def test_loss_calculation():
     """Ensure the wrapper can properly compute the loss for PyTorch."""
     # Create a simple model: f(x) = x^2 + x

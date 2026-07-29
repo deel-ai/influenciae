@@ -136,6 +136,20 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 weights.extend(self.normalize_weights_to_watch(list(trainable_weights)))
         return weights
 
+    def get_parameter_names(
+        self,
+        model: tf.keras.Model,
+        weights: List[tf.Variable],
+    ) -> List[Optional[str]]:
+        """Resolve Keras paths while accounting for normalized variable wrappers."""
+        names_by_id = {}
+        for model_weight in model.trainable_weights:
+            normalized = self._extract_watch_tensor(model_weight)
+            if normalized is not None:
+                name = getattr(model_weight, "path", None) or getattr(model_weight, "name", None)
+                names_by_id[id(normalized)] = name
+        return [names_by_id.get(id(weight), getattr(weight, "name", None)) for weight in weights]
+
     def clone_model(self, model: tf.keras.Model) -> tf.keras.Model:
         """Clone a Keras model and copy its weights."""
         cloned_model = tf.keras.models.clone_model(model)

@@ -10,6 +10,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 from .._optional_imports import import_optional_attr, import_optional_module
 from .backend import BaseBackend, Framework, get_backend_for_model
+from .parameter_layout import ParameterLayout, build_parameter_layout
 from ..types import DatasetLike, Layer, LossFunction, Model, Tensor, WeightVariable
 
 # Type aliases
@@ -111,7 +112,11 @@ class BaseInfluenceModel:
         else:
             self.weights = weights_to_watch
 
-        self.nb_params = self.backend.get_num_params(self.weights)
+        parameter_names = self.backend.get_parameter_names(self.model, self.weights)
+        self.parameter_layout: ParameterLayout = build_parameter_layout(
+            self.weights, self.backend, parameter_names
+        )
+        self.nb_params = self.parameter_layout.total_size
 
     def _get_default_loss_function(self) -> LossFunction:
         """Get the default loss function for the framework."""
@@ -298,6 +303,10 @@ class BaseInfluenceModel:
             Matrix of the first-order partial derivative of the loss function wrt weights.
         """
         return self._compute_jacobian(batch)
+
+    def batch_jacobian_components_tensor(self, batch: Tuple[Any, ...]) -> Tuple[Tensor, ...]:
+        """Compute per-example loss Jacobians in native parameter shapes."""
+        return self.parameter_layout.split_flat(self._compute_jacobian(batch), self.backend)
 
     def batch_jacobian(self, dataset: DatasetLike) -> Tensor:
         """

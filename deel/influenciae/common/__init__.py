@@ -55,6 +55,7 @@ from .model_wrappers import (
 )
 from .evaluation import EvaluationRepresentationProvider, ObjectiveEvaluationRepresentationProvider
 from .payloads import TrainingPayloadExtractor, default_training_payload_extractor
+from .parameter_layout import ParameterLayout, ParameterLayoutEntry, build_parameter_layout
 
 _LAZY_ATTRS = {
     "SelfInfluenceCalculator": ".base_influence",

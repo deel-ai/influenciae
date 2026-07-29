@@ -153,18 +153,26 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Return weights unchanged for PyTorch autodiff."""
         return list(weights)
 
+    def get_parameter_names(
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+    ) -> List[Optional[str]]:
+        """Resolve fully qualified parameter names by object identity."""
+        parameter_names_by_id = {id(parameter): name for name, parameter in model.named_parameters()}
+        return [parameter_names_by_id.get(id(weight)) for weight in weights]
+
     def _get_parameter_names_for_weights(
         self,
         model: nn.Module,
         weights: List[torch.nn.Parameter],
     ) -> Optional[List[str]]:
         """Map watched weights to model parameter names for torch.func transforms."""
-        parameter_names_by_id = {id(parameter): name for name, parameter in model.named_parameters()}
+        resolved_names = self.get_parameter_names(model, weights)
         watched_parameter_names = []
         seen_names = set()
 
-        for weight in weights:
-            parameter_name = parameter_names_by_id.get(id(weight))
+        for parameter_name in resolved_names:
             if parameter_name is None or parameter_name in seen_names:
                 return None
             watched_parameter_names.append(parameter_name)

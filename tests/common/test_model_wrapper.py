@@ -41,6 +41,27 @@ def test_loss_reduction():
     BaseInfluenceModel(model, loss_function=CategoricalCrossentropy(reduction=Reduction.NONE))
     BaseInfluenceModel(model, loss_function=CosineSimilarity(reduction=Reduction.NONE))
 
+
+def test_parameter_layout_and_component_jacobian_follow_trainable_weight_order():
+    model = Sequential([Input((2,)), Dense(3), Dense(1)])
+    influence_model = BaseInfluenceModel(
+        model, loss_function=MeanSquaredError(reduction=Reduction.NONE)
+    )
+    batch = (tf.ones((4, 2)), tf.zeros((4, 1)))
+
+    components = influence_model.batch_jacobian_components_tensor(batch)
+
+    assert influence_model.parameter_layout.parameter_shapes == tuple(
+        tuple(weight.shape) for weight in model.trainable_weights
+    )
+    assert tuple(tuple(component.shape) for component in components) == tuple(
+        (4, *tuple(weight.shape)) for weight in model.trainable_weights
+    )
+    tf.debugging.assert_near(
+        influence_model.parameter_layout.flatten_components(components, influence_model.backend),
+        influence_model.batch_jacobian_tensor(batch),
+    )
+
 def test_loss_calculation():
     # Ensure the wrapper can properly compute the loss
 

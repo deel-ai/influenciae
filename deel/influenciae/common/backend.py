@@ -212,6 +212,15 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
             List of weight tensors.
         """
 
+    def get_parameter_names(
+        self,
+        model: Model,
+        weights: List[WeightVariable],
+    ) -> List[Optional[str]]:
+        """Resolve readable names without changing the watched-parameter order."""
+        del model
+        return [getattr(weight, "name", None) for weight in weights]
+
     @abstractmethod
     def clone_model(self, model: Model) -> Model:
         """
