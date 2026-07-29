@@ -17,6 +17,11 @@ from .projected_curvature import (
     inverse_sqrt_psd,
 )
 from .projection import ProjectionBlock, ProjectionTerm, TrackStarProjectionPlan
+from .trackstar_influence_calculator import (
+    TrackStarBuilder,
+    TrackStarInfluenceCalculator,
+    TrackStarTopKBatch,
+)
 
 __all__ = [
     "AutoMix",
@@ -29,7 +34,10 @@ __all__ = [
     "ProjectedGramAccumulator",
     "ProjectionBlock",
     "ProjectionTerm",
+    "TrackStarBuilder",
+    "TrackStarInfluenceCalculator",
     "TrackStarProjectionPlan",
+    "TrackStarTopKBatch",
     "VectorSearchResult",
     "build_projected_curvature",
     "extract_optimizer_second_moments",
