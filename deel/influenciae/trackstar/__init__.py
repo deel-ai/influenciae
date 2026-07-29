@@ -4,6 +4,7 @@
 # =====================================================================================
 """TrackStar attribution with structured projection and projected curvature."""
 
+from .index import ExactStreamingVectorIndex, VectorSearchResult
 from .optimizer_state import OptimizerSecondMoments, extract_optimizer_second_moments
 from .projected_curvature import (
     AutoMix,
@@ -19,6 +20,7 @@ from .projection import ProjectionBlock, ProjectionTerm, TrackStarProjectionPlan
 
 __all__ = [
     "AutoMix",
+    "ExactStreamingVectorIndex",
     "FixedMix",
     "GramSnapshot",
     "MixRule",
@@ -28,6 +30,7 @@ __all__ = [
     "ProjectionBlock",
     "ProjectionTerm",
     "TrackStarProjectionPlan",
+    "VectorSearchResult",
     "build_projected_curvature",
     "extract_optimizer_second_moments",
     "inverse_sqrt_psd",
