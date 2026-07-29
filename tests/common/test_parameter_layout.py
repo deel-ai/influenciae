@@ -6,6 +6,11 @@ import numpy as np
 import pytest
 
 from deel.influenciae.common.parameter_layout import ParameterLayout
+from deel.influenciae.trackstar.projection import (
+    ProjectionBlock,
+    ProjectionTerm,
+    TrackStarProjectionPlan,
+)
 
 
 pytestmark = pytest.mark.backend_agnostic
@@ -55,3 +60,19 @@ def test_layout_rejects_mismatched_shapes_and_widths():
         layout.flatten_components((np.ones((3, 4)), np.ones((3, 2))), _NumpyBackend())
     with pytest.raises(ValueError, match="number of parameter shapes"):
         ParameterLayout.from_shapes(((2,),), ("first", "extra"))
+
+
+def test_layout_satisfies_trackstar_projection_protocol():
+    layout = ParameterLayout.from_shapes(((2, 2),), ("weight",))
+    term = ProjectionTerm(
+        "weight",
+        (0,),
+        ((2, 2),),
+        (1, 1),
+        left_matrix=np.ones((1, 2)),
+        right_matrix=np.ones((2, 1)),
+    )
+
+    plan = TrackStarProjectionPlan.from_layout(layout, (ProjectionBlock("layer", (term,)),))
+
+    assert plan.parameter_shapes == layout.parameter_shapes

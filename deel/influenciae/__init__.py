@@ -25,7 +25,7 @@ __version__ = '0.3.0'
 # Lazy module loading to avoid ImportError when backends are not installed
 # Submodules are only loaded when actually accessed
 
-_SUBMODULES = ['influence', 'common', 'rps', 'trac_in', 'benchmark', 'plots']
+_SUBMODULES = ['influence', 'common', 'rps', 'trac_in', 'trackstar', 'benchmark', 'plots']
 
 def __getattr__(name):
     """Lazy import of submodules."""
@@ -55,5 +55,6 @@ if TYPE_CHECKING:
     from . import common
     from . import rps
     from . import trac_in
+    from . import trackstar
     from . import benchmark
     from . import plots
