@@ -150,6 +150,90 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
                 names_by_id[id(normalized)] = name
         return [names_by_id.get(id(weight), getattr(weight, "name", None)) for weight in weights]
 
+    @staticmethod
+    def _keras_optimizer_types() -> Tuple[type, ...]:
+        """Return available native Keras Adam and AdamW classes across supported releases."""
+        optimizer_types = []
+        namespaces = [tf.keras.optimizers]
+        for namespace_name in ("experimental", "legacy"):
+            try:
+                namespace = getattr(tf.keras.optimizers, namespace_name)
+            except (AttributeError, ImportError):
+                namespace = None
+            if namespace is not None:
+                namespaces.append(namespace)
+        for namespace in namespaces:
+            for class_name in ("Adam", "AdamW"):
+                try:
+                    optimizer_type = getattr(namespace, class_name)
+                except (AttributeError, ImportError):
+                    continue
+                if isinstance(optimizer_type, type) and optimizer_type not in optimizer_types:
+                    optimizer_types.append(optimizer_type)
+        return tuple(optimizer_types)
+
+    def get_optimizer_second_moment_tensors(
+        self,
+        optimizer: Any,
+        weights: List[tf.Variable],
+    ) -> List[tf.Tensor]:
+        """Extract native Adam/AdamW velocity slots without creating optimizer state."""
+        optimizer_types = self._keras_optimizer_types()
+        if not optimizer_types or not isinstance(optimizer, optimizer_types):
+            raise TypeError(
+                "TensorFlow optimizer second moments require a native Keras Adam or AdamW; "
+                f"got {type(optimizer).__name__}."
+            )
+
+        get_slot = getattr(optimizer, "get_slot", None)
+        if callable(get_slot):
+            moments = []
+            for index, weight in enumerate(weights):
+                moment = get_slot(weight, "v")
+                if moment is None:
+                    raise RuntimeError(
+                        f"Adam second-moment state is not initialized for watched parameter {index}."
+                    )
+                moments.append(moment)
+            return moments
+
+        velocities = getattr(optimizer, "_velocities", None)
+        if not velocities:
+            raise RuntimeError("Adam second-moment state is not initialized.")
+
+        index_by_key = getattr(optimizer, "_index_dict", {})
+        variable_key = getattr(optimizer, "_var_key", None)
+        tracked_variables = getattr(optimizer, "_trainable_variables", ())
+        moments = []
+        for index, weight in enumerate(weights):
+            velocity_index = None
+            if callable(variable_key):
+                try:
+                    velocity_index = index_by_key.get(variable_key(weight))
+                except (KeyError, TypeError, ValueError):
+                    velocity_index = None
+            if velocity_index is None:
+                weight_tensor = self._extract_watch_tensor(weight)
+                matching_indices = [
+                    tracked_index
+                    for tracked_index, tracked_weight in enumerate(tracked_variables)
+                    if tracked_weight is weight
+                    or self._extract_watch_tensor(tracked_weight) is weight_tensor
+                ]
+                if len(matching_indices) == 1:
+                    velocity_index = matching_indices[0]
+            if velocity_index is None or velocity_index >= len(velocities):
+                raise RuntimeError(
+                    f"Adam second-moment state is not initialized for watched parameter {index}."
+                )
+            moment = velocities[velocity_index]
+            if moment is None:
+                raise RuntimeError(
+                    f"Adam second-moment state is unavailable for watched parameter {index}."
+                )
+            moments.append(moment)
+        return moments
+
     def clone_model(self, model: tf.keras.Model) -> tf.keras.Model:
         """Clone a Keras model and copy its weights."""
         cloned_model = tf.keras.models.clone_model(model)

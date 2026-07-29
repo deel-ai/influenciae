@@ -221,6 +221,16 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         del model
         return [getattr(weight, "name", None) for weight in weights]
 
+    def get_optimizer_second_moment_tensors(
+        self,
+        optimizer: Any,
+        weights: List[WeightVariable],
+    ) -> List[Tensor]:
+        """Return raw Adam second moments in the exact supplied weight order."""
+        raise TypeError(
+            f"Optimizer-state extraction is not implemented for {type(optimizer).__name__}."
+        )
+
     @abstractmethod
     def clone_model(self, model: Model) -> Model:
         """

@@ -92,6 +92,8 @@ _TENSORFLOW_PATTERNS = [
     "rps/test_rps_lje.py",
     # TracIn tests
     "trac_in/test_tracin.py",
+    # TrackStar tests (TF version imports tensorflow at module scope)
+    "trackstar/test_optimizer_state.py",
     # Utils tests (TF-specific)
     "utils/test_nearest_neighbors.py",
     "utils/test_sorted_dict.py",
@@ -148,6 +150,7 @@ def pytest_ignore_collect(collection_path, config):
             "test_representer_point_l2.py", "test_rps_lje.py",
             "test_tracin.py",
             "test_nearest_neighbors.py", "test_sorted_dict.py",
+            "test_optimizer_state.py",
         ]
         for tf_file in tf_files:
             if path_str.endswith(tf_file):

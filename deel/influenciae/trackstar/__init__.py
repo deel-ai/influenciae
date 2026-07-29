@@ -4,6 +4,7 @@
 # =====================================================================================
 """TrackStar attribution with structured projection and projected curvature."""
 
+from .optimizer_state import OptimizerSecondMoments, extract_optimizer_second_moments
 from .projected_curvature import (
     AutoMix,
     FixedMix,
@@ -21,11 +22,13 @@ __all__ = [
     "FixedMix",
     "GramSnapshot",
     "MixRule",
+    "OptimizerSecondMoments",
     "ProjectedCurvature",
     "ProjectedGramAccumulator",
     "ProjectionBlock",
     "ProjectionTerm",
     "TrackStarProjectionPlan",
     "build_projected_curvature",
+    "extract_optimizer_second_moments",
     "inverse_sqrt_psd",
 ]

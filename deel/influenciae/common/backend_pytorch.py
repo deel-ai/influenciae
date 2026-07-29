@@ -162,6 +162,44 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         parameter_names_by_id = {id(parameter): name for name, parameter in model.named_parameters()}
         return [parameter_names_by_id.get(id(weight)) for weight in weights]
 
+    def get_optimizer_second_moment_tensors(
+        self,
+        optimizer: Any,
+        weights: List[torch.nn.Parameter],
+    ) -> List[torch.Tensor]:
+        """Extract native Adam/AdamW ``exp_avg_sq`` state by parameter identity."""
+        if not isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
+            raise TypeError(
+                "PyTorch optimizer second moments require torch.optim.Adam or AdamW; "
+                f"got {type(optimizer).__name__}."
+            )
+
+        optimizer_parameters = [
+            parameter
+            for group in optimizer.param_groups
+            for parameter in group["params"]
+        ]
+        moments = []
+        for index, weight in enumerate(weights):
+            if not isinstance(weight, torch.nn.Parameter):
+                raise TypeError(f"Watched weight {index} is not a torch.nn.Parameter.")
+            occurrences = sum(parameter is weight for parameter in optimizer_parameters)
+            if occurrences != 1:
+                detail = "absent from" if occurrences == 0 else "repeated in"
+                raise RuntimeError(
+                    f"Watched parameter {index} is {detail} the optimizer parameter groups."
+                )
+            state = optimizer.state.get(weight)
+            if not state or "exp_avg_sq" not in state:
+                raise RuntimeError(
+                    f"Adam second-moment state is not initialized for watched parameter {index}."
+                )
+            moment = state["exp_avg_sq"]
+            if not isinstance(moment, torch.Tensor):
+                raise TypeError(f"Second-moment state for watched parameter {index} is not a tensor.")
+            moments.append(moment)
+        return moments
+
     def _get_parameter_names_for_weights(
         self,
         model: nn.Module,
