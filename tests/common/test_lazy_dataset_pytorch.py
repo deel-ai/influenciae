@@ -206,6 +206,20 @@ def test_buffered_shuffle_dataset_invariants(lazy_module):
     assert len(values) == len(source)
     assert sorted(values) == source
 
+
+def test_buffered_shuffle_dataset_seed_is_reproducible_per_epoch(lazy_module):
+    """Seeded shuffles should match across runs without repeating each epoch."""
+    source = list(range(12))
+    first = lazy_module.BufferedShuffleDataset(source, buffer_size=12, seed=7)
+    second = lazy_module.BufferedShuffleDataset(source, buffer_size=12, seed=7)
+
+    first_epoch = list(first)
+    second_epoch = list(first)
+
+    assert first_epoch == list(second)
+    assert second_epoch == list(second)
+    assert first_epoch != second_epoch
+
 def test_buffered_shuffle_dataset_materializes_one_pass_iterator(lazy_module):
     """BufferedShuffleDataset should warn and support re-iteration."""
 

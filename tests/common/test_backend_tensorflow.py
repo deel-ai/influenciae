@@ -1349,3 +1349,87 @@ def test_einsum_three_operand(backend):
     # float32 multi-operand einsum: TF and NumPy may choose different contraction
     # orders, causing accumulation differences larger than single-op float32 epsilon.
     np.testing.assert_allclose(result.numpy(), expected, atol=5e-3)
+
+
+def test_compute_ggn_vector_product_is_true_weighted_ggn(backend):
+    """GGN should match J.T H_loss J and exclude nonlinear model curvature."""
+    model = Sequential([Input(shape=(1,)), Dense(1, use_bias=False, activation='tanh')])
+    model.layers[0].kernel.assign([[0.7]])
+    weights = backend.get_model_weights(model)
+    inputs = tf.constant([[1.0], [2.0]])
+    targets = tf.constant([[0.2], [-0.1]])
+    sample_weight = tf.constant([1.0, 3.0])
+    loss_fn = MeanSquaredError(reduction=Reduction.NONE)
+    tangent = [tf.ones_like(weights[0])]
+
+    ggn = backend.compute_ggn_vector_product(
+        model, weights, loss_fn, tangent, inputs, targets, sample_weight
+    )
+    outputs = tf.stop_gradient(model(inputs))
+    output_jacobian = inputs * (1.0 - tf.square(outputs))
+    expected = tf.reduce_sum(
+        sample_weight[:, None] * 2.0 * tf.square(output_jacobian)
+    ) / tf.cast(tf.shape(inputs)[0], tf.float32)
+
+    with tf.autodiff.ForwardAccumulator(weights, tangent) as accumulator:
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            tape.watch(weights)
+            predictions = model(inputs)
+            loss = tf.reduce_mean(sample_weight * loss_fn(targets, predictions))
+        gradient = tape.gradient(loss, weights)
+    full_hessian = tf.concat(
+        [tf.reshape(value, (-1,)) for value in accumulator.jvp(gradient)], axis=0
+    )
+    assert_allclose(ggn, tf.reshape(expected, (1,)))
+    assert not np.allclose(ggn.numpy(), full_hessian.numpy())
+
+
+def test_generalized_gauss_newton_operator_matmat_matches_matvecs():
+    """The public operator should use row-batched matrix right-hand sides."""
+    from deel.influenciae.common.ggn import GeneralizedGaussNewtonOperator
+    from deel.influenciae.common.model_wrappers import BaseInfluenceModel
+
+    model = Sequential([Input(shape=(1,)), Dense(1, use_bias=False, activation='tanh')])
+    influence_model = BaseInfluenceModel(
+        model, loss_function=MeanSquaredError(reduction=Reduction.NONE), weights_processed=True
+    )
+    batch = (tf.constant([[1.0], [2.0]]), tf.constant([[0.0], [0.5]]))
+    operator = GeneralizedGaussNewtonOperator(influence_model, batch)
+    vectors = tf.constant([[1.0], [-2.0], [0.5]])
+
+    actual = operator.matmat(vectors)
+    expected = tf.stack([operator.matvec(vector) for vector in tf.unstack(vectors)])
+    assert_allclose(actual, expected)
+
+
+def test_ggn_returns_zero_for_locally_linear_output_loss(backend):
+    """A valid zero output Hessian must not be treated as disconnection."""
+    model = Sequential([Input(shape=(1,)), Dense(1, use_bias=False)])
+    weights = backend.get_model_weights(model)
+    inputs = tf.constant([[1.0], [2.0]])
+    targets = tf.zeros_like(inputs)
+
+    def linear_loss(_targets, predictions):
+        return tf.reshape(predictions, (-1,))
+
+    actual = backend.compute_ggn_vector_product(
+        model,
+        weights,
+        linear_loss,
+        [tf.ones_like(weights[0])],
+        inputs,
+        targets,
+    )
+
+    np.testing.assert_allclose(actual.numpy(), np.zeros(1), atol=0.0)
+
+
+def test_seeded_shuffle_reproduces_distinct_epoch_orders(backend):
+    """Seeded TensorFlow shuffles should reproduce each reshuffled epoch."""
+    first = backend.shuffle_dataset(tf.data.Dataset.range(12), buffer_size=5, seed=17)
+    second = backend.shuffle_dataset(tf.data.Dataset.range(12), buffer_size=5, seed=17)
+    first_epochs = (list(first.as_numpy_iterator()), list(first.as_numpy_iterator()))
+    second_epochs = (list(second.as_numpy_iterator()), list(second.as_numpy_iterator()))
+
+    assert first_epochs == second_epochs
+    assert first_epochs[0] != first_epochs[1]

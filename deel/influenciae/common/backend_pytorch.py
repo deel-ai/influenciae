@@ -429,6 +429,142 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         return torch.cat(gradients)
 
+    @staticmethod
+    def _validate_ggn_arguments(
+        weights: List[torch.nn.Parameter],
+        tangents: List[torch.Tensor],
+        batch_reduction: str,
+    ) -> None:
+        if batch_reduction not in ('sum', 'mean'):
+            raise ValueError("batch_reduction must be either 'sum' or 'mean'.")
+        if not weights:
+            raise ValueError("GGN computation requires at least one watched weight.")
+        if len(tangents) != len(weights):
+            raise ValueError("GGN tangents must match the watched weights one-to-one.")
+        for index, (weight, tangent) in enumerate(zip(weights, tangents)):
+            if not isinstance(tangent, torch.Tensor):
+                raise TypeError(f"GGN tangent {index} is not a torch.Tensor.")
+            if tangent.shape != weight.shape:
+                raise ValueError(
+                    f"GGN tangent {index} must have shape {tuple(weight.shape)}; "
+                    f"got {tuple(tangent.shape)}."
+                )
+            if tangent.device != weight.device or tangent.dtype != weight.dtype:
+                raise ValueError(
+                    f"GGN tangent {index} must share the watched weight's dtype and device."
+                )
+
+    def compute_ggn_vector_product(  # pylint: disable=too-many-statements
+        self,
+        model: nn.Module,
+        weights: List[torch.nn.Parameter],
+        loss_function: Callable,
+        tangents: List[torch.Tensor],
+        inputs: torch.Tensor,
+        targets: Any,
+        sample_weight: Optional[Any] = None,
+        batch_reduction: str = 'mean',
+    ) -> torch.Tensor:
+        """Compute a true GGN-vector product with composable torch.func transforms."""
+        self._validate_ggn_arguments(weights, tangents, batch_reduction)
+        watched_names = self._get_parameter_names_for_weights(model, weights)
+        if watched_names is None:
+            raise ValueError("GGN watched weights must map to unique model parameters.")
+
+        base_parameters: Dict[str, torch.Tensor] = dict(model.named_parameters())
+        base_buffers: Dict[str, torch.Tensor] = dict(model.named_buffers())
+        watched_values = tuple(base_parameters[name] for name in watched_names)
+        tangent_values = tuple(tangents)
+
+        def model_output(watched_tensors):
+            parameters = dict(base_parameters)
+            parameters.update(zip(watched_names, watched_tensors))
+            output = torch.func.functional_call(model, (parameters, base_buffers), (inputs,))
+            if not isinstance(output, torch.Tensor):
+                raise TypeError("GGN currently requires a single tensor model output.")
+            if not output.is_floating_point():
+                raise TypeError("GGN model output must have a floating-point dtype.")
+            return output
+
+        def reduced_output_loss(output):
+            loss = loss_function(output, targets)
+            if sample_weight is not None:
+                weight = sample_weight
+                if not isinstance(weight, torch.Tensor):
+                    weight = torch.as_tensor(weight, dtype=loss.dtype, device=loss.device)
+                while weight.dim() < loss.dim():
+                    weight = weight.unsqueeze(-1)
+                loss = loss * weight
+            per_sample_loss = self.ensure_per_sample_loss(loss)
+            if batch_reduction == 'mean':
+                return per_sample_loss.mean()
+            return per_sample_loss.sum()
+
+        def live_autograd_fallback():
+            output = model(inputs)
+            if not isinstance(output, torch.Tensor):
+                raise TypeError("GGN currently requires a single tensor model output.")
+            if not output.is_floating_point():
+                raise TypeError("GGN model output must have a floating-point dtype.")
+
+            probe = torch.zeros_like(output, requires_grad=True)
+            model_vjp = torch.autograd.grad(
+                output,
+                weights,
+                grad_outputs=probe,
+                create_graph=True,
+                allow_unused=True,
+            )
+            missing = [index for index, value in enumerate(model_vjp) if value is None]
+            if missing:
+                raise ValueError(
+                    f"GGN model output is disconnected from watched weight(s): {missing}."
+                )
+            directional_scalar = sum(
+                ((value * tangent).sum() for value, tangent in zip(model_vjp, tangents)),
+                output.new_zeros(()),
+            )
+            output_tangent = torch.autograd.grad(
+                directional_scalar, probe, retain_graph=True
+            )[0]
+            output_gradient = torch.autograd.grad(
+                reduced_output_loss(output), output, create_graph=True
+            )[0]
+            curved_output = torch.autograd.grad(
+                output_gradient,
+                output,
+                grad_outputs=output_tangent,
+                retain_graph=True,
+            )[0]
+            result = torch.autograd.grad(
+                output, weights, grad_outputs=curved_output, allow_unused=True
+            )
+            missing = [index for index, value in enumerate(result) if value is None]
+            if missing:
+                raise ValueError(
+                    f"GGN output pullback is disconnected from watched weight(s): {missing}."
+                )
+            return tuple(value for value in result if value is not None)
+
+        try:
+            output, output_tangent = torch.func.jvp(
+                model_output, (watched_values,), (tangent_values,)
+            )
+            _, pullback = torch.func.vjp(model_output, watched_values)
+            _, curved_output = torch.func.jvp(
+                torch.func.grad(reduced_output_loss), (output,), (output_tangent,)
+            )
+            products = pullback(curved_output)[0]
+        except (AttributeError, NotImplementedError, RuntimeError) as transform_exc:
+            try:
+                products = live_autograd_fallback()
+            except Exception as fallback_exc:
+                raise fallback_exc from transform_exc
+
+        if len(products) != len(weights):
+            raise RuntimeError("GGN pullback did not return every watched parameter.")
+        return torch.cat([product.reshape(-1) for product in products]).detach()
+
     def concat(self, tensors: List[torch.Tensor], axis: int = 0) -> torch.Tensor:
         """Concatenate tensors along an axis."""
         return torch.cat(tensors, dim=axis)
@@ -953,13 +1089,18 @@ class PyTorchBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Unbatch a dataset."""
         return to_lazy_dataset(dataset).unbatch()
 
-    def shuffle_dataset(self, dataset: Any, buffer_size: int) -> Any:
+    def shuffle_dataset(
+        self,
+        dataset: Any,
+        buffer_size: int,
+        seed: Optional[int] = None,
+    ) -> Any:
         """
         Shuffle a dataset.
 
         For PyTorch, this uses a lazy finite-buffer shuffle.
         """
-        return to_lazy_dataset(dataset).shuffle(buffer_size)
+        return to_lazy_dataset(dataset).shuffle(buffer_size, seed=seed)
 
     def take_dataset(self, dataset: Any, count: int) -> Any:
         """Take a number of elements from a dataset."""

@@ -459,6 +459,25 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
+    def compute_ggn_vector_product(
+        self,
+        model: Model,
+        weights: List[WeightVariable],
+        loss_function: LossFunction,
+        tangents: List[Tensor],
+        inputs: Tensor,
+        targets: Any,
+        sample_weight: Optional[Any] = None,
+        batch_reduction: str = 'mean',
+    ) -> Tensor:
+        """Compute ``J.T @ H_loss @ J @ v`` in watched-weight order.
+
+        ``J`` is the Jacobian of the model outputs, not the Jacobian of the
+        parameter-space loss. Consequently this primitive is a true
+        generalized Gauss-Newton product and excludes model second derivatives.
+        """
+
+    @abstractmethod
     def concat(self, tensors: List[Tensor], axis: int = 0) -> Tensor:
         """Concatenate tensors along an axis."""
 
@@ -885,7 +904,12 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
         """
 
     @abstractmethod
-    def shuffle_dataset(self, dataset: DatasetLike, buffer_size: int) -> DatasetLike:
+    def shuffle_dataset(
+        self,
+        dataset: DatasetLike,
+        buffer_size: int,
+        seed: Optional[int] = None,
+    ) -> DatasetLike:
         """
         Shuffle a dataset.
 
@@ -895,6 +919,9 @@ class BaseBackend(ABC):  # pylint: disable=too-many-public-methods
             The dataset to shuffle.
         buffer_size
             The buffer size for shuffling.
+        seed
+            Optional local random seed. Re-iteration produces deterministic,
+            distinct epoch orders when a seed is supplied.
 
         Returns
         -------

@@ -103,9 +103,9 @@ class LazyDataset:
         """Unbatch dataset elements lazily."""
         return UnbatchedDataset(self)
 
-    def shuffle(self, buffer_size: int) -> "LazyDataset":
+    def shuffle(self, buffer_size: int, seed: Optional[int] = None) -> "LazyDataset":
         """Shuffle dataset lazily with a finite buffer."""
-        return BufferedShuffleDataset(self, buffer_size)
+        return BufferedShuffleDataset(self, buffer_size, seed=seed)
 
     def take(self, count: int) -> "LazyDataset":
         """Take the first `count` elements lazily."""
@@ -360,15 +360,25 @@ class TakenDataset(LazyDataset):
 class BufferedShuffleDataset(LazyDataset):
     """Lazy shuffle with bounded memory via a finite buffer."""
 
-    def __init__(self, source: DatasetLike, buffer_size: int):
+    def __init__(
+        self,
+        source: DatasetLike,
+        buffer_size: int,
+        seed: Optional[int] = None,
+    ):
         super().__init__()
         if buffer_size <= 0:
             raise ValueError("buffer_size must be > 0")
         self.source = ensure_reiterable(source, context="shuffle_dataset input")
         self.buffer_size = int(buffer_size)
+        self.seed = seed
+        self._epoch = 0
         self.batch_size = getattr(source, "batch_size", None)
 
     def _iter_impl(self) -> Iterator[Any]:
+        epoch = self._epoch
+        self._epoch += 1
+        rng = random.Random(None if self.seed is None else self.seed + epoch)
         source_iter = iter(self.source)
         buffer = []
 
@@ -382,11 +392,11 @@ class BufferedShuffleDataset(LazyDataset):
             return
 
         for item in source_iter:
-            swap_idx = random.randint(0, len(buffer) - 1)
+            swap_idx = rng.randint(0, len(buffer) - 1)
             yield buffer[swap_idx]
             buffer[swap_idx] = item
 
-        random.shuffle(buffer)
+        rng.shuffle(buffer)
         yield from buffer
 
     def __len__(self) -> int:

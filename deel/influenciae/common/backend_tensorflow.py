@@ -376,6 +376,75 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
 
         return gradients
 
+    def compute_ggn_vector_product(  # pylint: disable=too-many-branches
+        self,
+        model: tf.keras.Model,
+        weights: List[tf.Variable],
+        loss_function: Callable,
+        tangents: List[tf.Tensor],
+        inputs: tf.Tensor,
+        targets: Any,
+        sample_weight: Optional[Any] = None,
+        batch_reduction: str = 'mean',
+    ) -> tf.Tensor:
+        """Compute a true GGN-vector product using nested forward/reverse AD."""
+        if batch_reduction not in ('sum', 'mean'):
+            raise ValueError("batch_reduction must be either 'sum' or 'mean'.")
+        watched_weights = self.normalize_weights_to_watch(weights)
+        if not watched_weights:
+            raise ValueError("GGN computation requires at least one watched weight.")
+        if len(tangents) != len(watched_weights):
+            raise ValueError("GGN tangents must match the watched weights one-to-one.")
+
+        normalized_tangents = []
+        for index, (weight, tangent) in enumerate(zip(watched_weights, tangents)):
+            tangent = tf.convert_to_tensor(tangent)
+            if not weight.shape.is_compatible_with(tangent.shape):
+                raise ValueError(
+                    f"GGN tangent {index} must have shape {tuple(weight.shape)}; "
+                    f"got {tuple(tangent.shape)}."
+                )
+            if tangent.dtype != weight.dtype:
+                raise ValueError(f"GGN tangent {index} must share the watched weight's dtype.")
+            normalized_tangents.append(tangent)
+
+        with tf.autodiff.ForwardAccumulator(watched_weights, normalized_tangents) as model_acc:
+            with tf.GradientTape(watch_accessed_variables=False) as model_tape:
+                model_tape.watch(watched_weights)
+                predictions = model(inputs)
+        if not tf.is_tensor(predictions):
+            raise TypeError("GGN currently requires a single tensor model output.")
+        if not predictions.dtype.is_floating:
+            raise TypeError("GGN model output must have a floating-point dtype.")
+        output_tangent = model_acc.jvp(predictions)
+        if output_tangent is None:
+            raise ValueError("GGN model output is disconnected from all watched weights.")
+
+        with tf.autodiff.ForwardAccumulator(predictions, output_tangent) as loss_acc:
+            with tf.GradientTape(watch_accessed_variables=False) as loss_tape:
+                loss_tape.watch(predictions)
+                if sample_weight is None:
+                    loss = loss_function(targets, predictions)
+                else:
+                    loss = loss_function(targets, predictions, sample_weight)
+                per_sample_loss = self.ensure_per_sample_loss(loss)
+                if batch_reduction == 'mean':
+                    reduced_loss = tf.reduce_mean(per_sample_loss)
+                else:
+                    reduced_loss = tf.reduce_sum(per_sample_loss)
+            output_gradient = loss_tape.gradient(reduced_loss, predictions)
+        if output_gradient is None:
+            raise ValueError("GGN loss is disconnected from the model output.")
+        curved_output = loss_acc.jvp(output_gradient)
+        if curved_output is None:
+            curved_output = tf.zeros_like(predictions)
+
+        products = model_tape.gradient(
+            predictions, watched_weights, output_gradients=curved_output
+        )
+        self._raise_if_disconnected('compute_ggn_vector_product', products, watched_weights)
+        return tf.concat([tf.reshape(product, (-1,)) for product in products], axis=0)
+
     def concat(self, tensors: List[tf.Tensor], axis: int = 0) -> tf.Tensor:
         """Concatenate tensors along an axis."""
         return tf.concat(tensors, axis=axis)
@@ -840,9 +909,14 @@ class TensorFlowBackend(BaseBackend):  # pylint: disable=too-many-public-methods
         """Unbatch a dataset."""
         return dataset.unbatch()
 
-    def shuffle_dataset(self, dataset: tf.data.Dataset, buffer_size: int) -> tf.data.Dataset:
+    def shuffle_dataset(
+        self,
+        dataset: tf.data.Dataset,
+        buffer_size: int,
+        seed: Optional[int] = None,
+    ) -> tf.data.Dataset:
         """Shuffle a dataset."""
-        return dataset.shuffle(buffer_size)
+        return dataset.shuffle(buffer_size, seed=seed, reshuffle_each_iteration=True)
 
     def take_dataset(self, dataset: tf.data.Dataset, count: int) -> tf.data.Dataset:
         """Take a number of elements from a dataset."""

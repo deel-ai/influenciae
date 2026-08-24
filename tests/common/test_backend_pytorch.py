@@ -1510,3 +1510,112 @@ def test_einsum_three_operand(backend):
     assert result.shape == (2, 5)
     expected = np.einsum("qor,toi,qri->qt", left.numpy(), train.numpy(), right.numpy())
     np.testing.assert_allclose(result.numpy(), expected, atol=1e-5)
+
+
+def test_compute_ggn_vector_product_is_true_weighted_ggn(backend):
+    """GGN should match J.T H_loss J and exclude nonlinear model curvature."""
+    model = nn.Sequential(nn.Linear(1, 1, bias=False), nn.Tanh())
+    with torch.no_grad():
+        model[0].weight.fill_(0.7)
+    weights = backend.get_model_weights(model)
+    inputs = torch.tensor([[1.0], [2.0]])
+    targets = torch.tensor([[0.2], [-0.1]])
+    sample_weight = torch.tensor([[1.0], [3.0]])
+    loss_fn = nn.MSELoss(reduction='none')
+
+    ggn = backend.compute_ggn_vector_product(
+        model, weights, loss_fn, [torch.ones_like(weights[0])],
+        inputs, targets, sample_weight,
+    )
+    outputs = model(inputs).detach()
+    output_jacobian = inputs * (1.0 - outputs.square())
+    expected = (sample_weight * 2.0 * output_jacobian.square()).sum() / inputs.shape[0]
+
+    def reduced_loss(weight):
+        predictions = torch.tanh(inputs * weight)
+        return (sample_weight * (predictions - targets).square()).sum() / inputs.shape[0]
+
+    full_hessian = torch.autograd.functional.hessian(reduced_loss, weights[0]).reshape(-1)
+    assert_allclose(ggn, expected.reshape(1))
+    assert not torch.allclose(ggn, full_hessian)
+
+
+def test_generalized_gauss_newton_operator_matmat_matches_matvecs():
+    """The public operator should use row-batched matrix right-hand sides."""
+    from deel.influenciae.common.ggn import GeneralizedGaussNewtonOperator
+    from deel.influenciae.common.model_wrappers import BaseInfluenceModel
+
+    model = nn.Sequential(nn.Linear(1, 1, bias=False), nn.Tanh())
+    influence_model = BaseInfluenceModel(
+        model, loss_function=nn.MSELoss(reduction='none'), weights_processed=True
+    )
+    batch = (torch.tensor([[1.0], [2.0]]), torch.tensor([[0.0], [0.5]]))
+    operator = GeneralizedGaussNewtonOperator(influence_model, batch)
+    vectors = torch.tensor([[1.0], [-2.0], [0.5]])
+
+    actual = operator.matmat(vectors)
+    expected = torch.stack([operator.matvec(vector) for vector in vectors])
+    assert_allclose(actual, expected)
+
+
+def test_ggn_broadcasts_vector_sample_weights_over_outputs(backend):
+    """One sample weight must scale all output losses for that sample."""
+    model = nn.Sequential(nn.Linear(1, 3, bias=False))
+    weights = backend.get_model_weights(model)
+    inputs = torch.tensor([[1.0], [2.0]])
+    targets = torch.zeros(2, 3)
+    sample_weight = torch.tensor([1.0, 3.0])
+    tangent = torch.ones_like(weights[0])
+
+    actual = backend.compute_ggn_vector_product(
+        model,
+        weights,
+        nn.MSELoss(reduction="none"),
+        [tangent],
+        inputs,
+        targets,
+        sample_weight,
+    )
+
+    # Every output has derivative x and MSE curvature 2.
+    expected = torch.full((3,), (1.0 * 2.0 + 3.0 * 8.0) / 2.0)
+    torch.testing.assert_close(actual, expected)
+
+
+def test_ggn_returns_zero_for_locally_linear_output_loss(backend):
+    """A valid zero output Hessian must not be treated as disconnection."""
+    model = nn.Sequential(nn.Linear(1, 1, bias=False))
+    weights = backend.get_model_weights(model)
+    inputs = torch.tensor([[1.0], [2.0]])
+    targets = torch.zeros_like(inputs)
+
+    def linear_loss(predictions, _targets):
+        return predictions.reshape(predictions.shape[0], -1).sum(dim=1)
+
+    actual = backend.compute_ggn_vector_product(
+        model,
+        weights,
+        linear_loss,
+        [torch.ones_like(weights[0])],
+        inputs,
+        targets,
+    )
+
+    torch.testing.assert_close(actual, torch.zeros(1))
+
+
+def test_seeded_shuffle_is_epoch_deterministic_without_global_rng_side_effects(backend):
+    """A seed should reproduce epochs without consuming Python's global RNG."""
+    import random
+
+    random.seed(91)
+    expected_global = random.random()
+    random.seed(91)
+    first = backend.shuffle_dataset(list(range(12)), buffer_size=5, seed=17)
+    second = backend.shuffle_dataset(list(range(12)), buffer_size=5, seed=17)
+
+    first_epochs = (list(first), list(first))
+    second_epochs = (list(second), list(second))
+    assert first_epochs == second_epochs
+    assert first_epochs[0] != first_epochs[1]
+    assert random.random() == expected_global
