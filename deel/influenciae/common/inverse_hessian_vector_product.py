@@ -10,9 +10,14 @@ functions.
 from abc import ABC, abstractmethod
 from enum import Enum
 from argparse import ArgumentError
-from typing import Any, Callable, List, Optional, Tuple, Union, cast
+from dataclasses import dataclass
+from math import isfinite
+from numbers import Real
+from typing import Any, Callable, Iterator, List, Optional, Tuple, Union, cast
 
 from .backend import BaseBackend
+from .ekfac_operator import EKFACInverseOperator
+from .ggn import GeneralizedGaussNewtonOperator
 from .model_wrappers import BaseInfluenceModel, InfluenceModel
 from .kfac_factors import (
     LayerParameterMap,
@@ -36,6 +41,77 @@ def _resolve_damping_tensor(
         scale = backend.cast(backend.constant(HEURISTIC_DAMPING_SCALE), dtype)
         return scale * backend.reduce_mean(eigenvalues)
     return backend.cast(backend.constant(damping), dtype)
+
+
+@dataclass(frozen=True)
+class AstraConfig:
+    """Configuration for the ASTRA stochastic GGN solver."""
+
+    damping: float = 1e-4
+    preconditioner_damping: Optional[float] = None
+    n_iterations: int = 200
+    learning_rate: Union[float, Callable[[int], float]] = 1e-2
+    momentum: float = 0.0
+    ggn_batch_size: Optional[int] = None
+    ggn_shuffle_buffer_size: int = 10000
+    seed: int = 0
+    initialize_from_ekfac: bool = True
+    rhs_chunk_size: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.damping, Real)
+            or not isfinite(float(self.damping))
+            or self.damping <= 0
+        ):
+            raise ValueError("damping must be strictly positive.")
+        preconditioner_damping = (
+            self.damping
+            if self.preconditioner_damping is None
+            else self.preconditioner_damping
+        )
+        if (
+            not isinstance(preconditioner_damping, Real)
+            or not isfinite(float(preconditioner_damping))
+            or preconditioner_damping <= 0
+        ):
+            raise ValueError("preconditioner_damping must be strictly positive.")
+        object.__setattr__(self, "preconditioner_damping", float(preconditioner_damping))
+        object.__setattr__(self, "damping", float(self.damping))
+
+        if not isinstance(self.n_iterations, int) or self.n_iterations < 0:
+            raise ValueError("n_iterations must be a non-negative integer.")
+        if not callable(self.learning_rate):
+            if (
+                not isinstance(self.learning_rate, Real)
+                or not isfinite(float(self.learning_rate))
+                or self.learning_rate <= 0
+            ):
+                raise ValueError("learning_rate must be strictly positive or callable.")
+            object.__setattr__(self, "learning_rate", float(self.learning_rate))
+        if not isinstance(self.momentum, Real) or not 0 <= self.momentum < 1:
+            raise ValueError("momentum must be in [0, 1).")
+        object.__setattr__(self, "momentum", float(self.momentum))
+
+        for name in ("ggn_batch_size", "rhs_chunk_size"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, int) or value <= 0):
+                raise ValueError(f"{name} must be a strictly positive integer or None.")
+        if not isinstance(self.ggn_shuffle_buffer_size, int) or self.ggn_shuffle_buffer_size <= 0:
+            raise ValueError("ggn_shuffle_buffer_size must be a strictly positive integer.")
+        if not isinstance(self.seed, int):
+            raise ValueError("seed must be an integer.")
+
+    def learning_rate_at(self, step: int) -> float:
+        """Resolve and validate the learning rate for one solver step."""
+        value = self.learning_rate(step) if callable(self.learning_rate) else self.learning_rate
+        if (
+            not isinstance(value, Real)
+            or not isfinite(float(value))
+            or value <= 0
+        ):
+            raise ValueError(f"learning_rate at step {step} must be strictly positive; got {value!r}.")
+        return float(value)
 
 
 class InverseHessianVectorProduct(ABC):
@@ -1393,16 +1469,14 @@ class EkfacIHVP(InverseHessianVectorProduct):
             if checkpoint_path is not None:
                 self.factors.save_to_dir(checkpoint_path)
 
-        self.layer_damping = {}
-        for info in self.layer_map.layers_info:
-            idx = info.layer_idx
-            if idx not in self.factors.Lambda_corrected:
-                continue
-            self.layer_damping[idx] = _resolve_damping_tensor(
-                self.backend,
-                self.damping,
-                self.factors.Lambda_corrected[idx],
-            )
+        self.operator = EKFACInverseOperator(
+            model,
+            self.backend,
+            self.layer_map,
+            self.factors,
+            damping,
+        )
+        self.layer_damping = self.operator.layer_damping
 
     @property
     def supports_query_preconditioning(self) -> bool:
@@ -1436,24 +1510,7 @@ class EkfacIHVP(InverseHessianVectorProduct):
     def reshape_gradient_per_module(self, gradient: Any) -> Any:
         """Reshape flat gradients into EK-FAC module tensors."""
         grads = self.backend.reshape(gradient, (-1, self.model.nb_params))
-        batch_size = self.backend.get_batch_size(grads)
-
-        per_module: Any = {}
-        for info in self.layer_map.layers_info:
-            idx = info.layer_idx
-            if idx not in self.factors.Q_A or idx not in self.factors.Lambda_corrected:
-                continue
-
-            layer_slice = grads[:, info.flat_start:info.flat_end]
-            q_a = self.factors.Q_A[idx]
-            q_g = self.factors.Q_G[idx]
-            n_out = int(self.backend.tensor_shape(q_g)[0])
-            n_in_eff = int(self.backend.tensor_shape(q_a)[0])
-            if self.backend.framework.value == "tensorflow":
-                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_in_eff, n_out))
-            else:
-                per_module[idx] = self.backend.reshape(layer_slice, (batch_size, n_out, n_in_eff))
-        return per_module
+        return self.operator.reshape_per_module(grads)
 
     def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
         """
@@ -1487,98 +1544,7 @@ class EkfacIHVP(InverseHessianVectorProduct):
         else:
             grads = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
 
-        batch_size = self.backend.get_batch_size(grads)
-        backend = self.backend
-        result = backend.zeros_like(grads)
-
-        for info in self.layer_map.layers_info:
-            idx = info.layer_idx
-            if idx not in self.factors.Q_A or idx not in self.factors.Lambda_corrected:
-                continue
-
-            # Extract gradient slice
-            layer_grads = grads[:, info.flat_start:info.flat_end]
-
-            # Derive n_out and n_in_eff from the eigenvector matrices (always
-            # correctly dimensioned regardless of framework weight conventions).
-            q_a = self.factors.Q_A[idx]    # (n_in_eff, n_in_eff)
-            q_g = self.factors.Q_G[idx]    # (n_out, n_out)
-            lam_corr = self.factors.Lambda_corrected[idx]  # (n_out * n_in_eff,)
-
-            n_out = int(backend.tensor_shape(q_g)[0])
-            n_in_eff = int(backend.tensor_shape(q_a)[0])
-
-            q_g_t = backend.transpose(q_g)  # (n_out, n_out) — symmetric, but kept for clarity
-            q_a_t = backend.transpose(q_a)  # (n_in_eff, n_in_eff)
-
-            # Framework-aware reshape, rotate, divide, rotate-back, flatten.
-            #
-            # Lambda_corrected is stored as flatten((n_out, n_in_eff)) in both
-            # frameworks (since it's computed from Q_G/Q_A-rotated quantities
-            # that are framework-independent).
-            lam_damped = lam_corr + self.layer_damping[idx]
-
-            if backend.framework.value == "tensorflow":
-                # TF flat gradient is in (n_in_eff, n_out) row-major order
-                v_mat = backend.reshape(layer_grads, (batch_size, n_in_eff, n_out))
-
-                # Rotate: V'_tf = Q_A^T @ V_tf @ Q_G  ->  (batch, n_in_eff, n_out)
-                # This equals (Q_G^T @ V @ Q_A)^T = V'^T
-                v_rotated = backend.matmul(backend.matmul(q_a_t, v_mat), q_g)
-
-                # Lambda_corrected is flat (n_out * n_in_eff,) from (n_out, n_in_eff).
-                # V'_tf is flat (n_in_eff * n_out,) from (n_in_eff, n_out).
-                # Transpose Lambda: reshape to (n_out, n_in_eff), transpose to
-                # (n_in_eff, n_out), flatten to (n_in_eff * n_out,).
-                lam_mat = backend.reshape(lam_damped, (n_out, n_in_eff))
-                lam_tf = backend.reshape(
-                    backend.transpose(lam_mat),  # (n_in_eff, n_out) — 2-D transpose is fine
-                    (-1,)
-                )
-
-                v_rot_flat = backend.reshape(v_rotated, (batch_size, -1))
-                v_divided = v_rot_flat / backend.expand_dims(lam_tf, axis=0)
-
-                # Reshape back to (batch, n_in_eff, n_out)
-                v_div_mat = backend.reshape(v_divided, (batch_size, n_in_eff, n_out))
-
-                # Rotate back: Q_A @ V''_tf @ Q_G^T  ->  (batch, n_in_eff, n_out)
-                ihvp_layer = backend.matmul(backend.matmul(q_a, v_div_mat), q_g_t)
-            else:
-                # PyTorch flat gradient is in (n_out, n_in_eff) row-major order
-                v_mat = backend.reshape(layer_grads, (batch_size, n_out, n_in_eff))
-
-                # Rotate: V' = Q_G^T @ V @ Q_A  ->  (batch, n_out, n_in_eff)
-                v_rotated = backend.matmul(backend.matmul(q_g_t, v_mat), q_a)
-
-                # Flatten, divide by lambda, unflatten
-                v_rot_flat = backend.reshape(v_rotated, (batch_size, -1))
-                v_divided = v_rot_flat / backend.expand_dims(lam_damped, axis=0)
-                v_div_mat = backend.reshape(v_divided, (batch_size, n_out, n_in_eff))
-
-                # Rotate back: Q_G @ V'' @ Q_A^T  ->  (batch, n_out, n_in_eff)
-                ihvp_layer = backend.matmul(backend.matmul(q_g, v_div_mat), q_a_t)
-
-            # Flatten back to (batch, layer_params) in the framework's native order
-            ihvp_flat = backend.reshape(ihvp_layer, (batch_size, -1))
-
-            result = self._write_layer_slice(result, ihvp_flat, info.flat_start, info.flat_end)
-
-        return backend.transpose(result)
-
-    def _write_layer_slice(self, result: Any, values: Any, start: int, end: int) -> Any:
-        """Write *values* into columns [start:end] of *result*."""
-        backend = self.backend
-        nb_params = int(backend.tensor_shape(result)[1])
-
-        parts = []
-        if start > 0:
-            parts.append(result[:, :start])
-        parts.append(values)
-        if end < nb_params:
-            parts.append(result[:, end:])
-
-        return backend.concat(parts, axis=1)
+        return self.backend.transpose(self.operator.apply(grads))
 
     def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
         """HVP is not directly supported for EK-FAC; raises NotImplementedError."""
@@ -1586,6 +1552,218 @@ class EkfacIHVP(InverseHessianVectorProduct):
             "EK-FAC provides an approximate IHVP, not a direct HVP. "
             "Use compute_ihvp() instead."
         )
+
+
+class AstraIHVP(InverseHessianVectorProduct):
+    """ASTRA IHVP using stochastic GGN refinement with EK-FAC preconditioning."""
+
+    def __init__(  # pylint: disable=too-many-branches
+        self,
+        model: InfluenceModel,
+        train_dataset: Any,
+        config: Optional[AstraConfig] = None,
+        target_layers: Optional[List[int]] = None,
+        n_ekfac_samples: Optional[int] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
+        layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
+        ekfac_factors: Optional[EKFACFactors] = None,
+        curvature_batch_sampler: Optional[Callable[[int], Any]] = None,
+    ):
+        if train_dataset is None and curvature_batch_sampler is None:
+            raise ValueError("ASTRA requires a training dataset or curvature_batch_sampler.")
+        is_one_pass = train_dataset is not None and iter(train_dataset) is train_dataset
+        if (
+            is_one_pass
+            and (curvature_batch_sampler is None or ekfac_factors is None)
+        ):
+            raise ValueError(
+                "ASTRA requires a restartable training dataset; one-pass iterators are not supported."
+            )
+        if ekfac_factors is not None and (factors_path is not None or overwrite_factors):
+            raise ValueError(
+                "ekfac_factors cannot be combined with factors_path or overwrite_factors."
+            )
+
+        # A caller sampler with supplied factors must not consume its otherwise unused dataset.
+        super().__init__(model, None if is_one_pass else train_dataset)
+        if train_dataset is not None and not is_one_pass and self.cardinality == 0:
+            raise ValueError("ASTRA training dataset is empty.")
+        self.config = AstraConfig() if config is None else config
+        if not isinstance(self.config, AstraConfig):
+            raise TypeError("config must be an AstraConfig instance or None.")
+        self.layer_map = LayerParameterMap(
+            model, self.backend, target_layers, layer_collection=layer_collection
+        )
+
+        if ekfac_factors is not None:
+            self._validate_supplied_factors(ekfac_factors)
+            self.factors = ekfac_factors
+        else:
+            checkpoint_path = factors_path
+            should_load = (
+                checkpoint_path is not None
+                and not overwrite_factors
+                and EKFACFactors.checkpoint_exists(checkpoint_path)
+            )
+            if should_load:
+                self.factors = EKFACFactors.load_from_dir(
+                    model=model,
+                    backend=self.backend,
+                    layer_map=self.layer_map,
+                    path=cast(str, checkpoint_path),
+                    n_ekfac_samples=n_ekfac_samples,
+                    fisher_type=fisher_type,
+                    module_partition_size=module_partition_size,
+                    offload_activations_to_cpu=offload_activations_to_cpu,
+                    data_partition_size=data_partition_size,
+                    accumulator_offload_mode=accumulator_offload_mode,
+                    accumulator_offload_dir=accumulator_offload_dir,
+                    keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
+                )
+            else:
+                if train_dataset is None:
+                    raise ValueError("A training dataset is required to compute EK-FAC factors.")
+                self.factors = EKFACFactors(
+                    model,
+                    train_dataset,
+                    self.backend,
+                    self.layer_map,
+                    n_ekfac_samples=n_ekfac_samples,
+                    fisher_type=fisher_type,
+                    module_partition_size=module_partition_size,
+                    offload_activations_to_cpu=offload_activations_to_cpu,
+                    data_partition_size=data_partition_size,
+                    accumulator_offload_mode=accumulator_offload_mode,
+                    accumulator_offload_dir=accumulator_offload_dir,
+                    keep_accumulator_offload_artifacts=keep_accumulator_offload_artifacts,
+                )
+                if checkpoint_path is not None:
+                    self.factors.save_to_dir(checkpoint_path)
+
+        self.layer_map.validate_strict_coverage(model, self.factors)
+        self.operator = EKFACInverseOperator(
+            model,
+            self.backend,
+            self.layer_map,
+            self.factors,
+            self.config.preconditioner_damping,
+        )
+        self._curvature_batch_sampler = curvature_batch_sampler
+        self._curvature_dataset = None
+        if curvature_batch_sampler is None:
+            assert train_dataset is not None
+            batch_size = self.config.ggn_batch_size
+            if batch_size is None:
+                batch_size = self.backend.get_dataset_batch_size(train_dataset)
+            stream = self.backend.unbatch_dataset(train_dataset)
+            stream = self.backend.shuffle_dataset(
+                stream, self.config.ggn_shuffle_buffer_size, seed=self.config.seed
+            )
+            self._curvature_dataset = self.backend.batch_dataset(stream, batch_size)
+            if self.backend.framework.value == "tensorflow":
+                # Graph execution surfaces exhaustion as OutOfRangeError rather
+                # than Python StopIteration, so make the stream infinite first.
+                self._curvature_dataset = cast(Any, self._curvature_dataset).repeat()
+
+    def _validate_supplied_factors(self, factors: EKFACFactors) -> None:
+        if not isinstance(factors, EKFACFactors):
+            raise TypeError("ekfac_factors must be an EKFACFactors instance.")
+        if factors.backend.framework != self.backend.framework:
+            raise ValueError("Supplied EK-FAC factors use an incompatible backend.")
+        if factors.model.model is not self.model.model:
+            raise ValueError("Supplied EK-FAC factors belong to a different model.")
+        expected = [
+            (info.layer_idx, info.flat_start, info.flat_end, info.has_bias, tuple(info.weight_shape))
+            for info in self.layer_map.layers_info
+        ]
+        actual = [
+            (info.layer_idx, info.flat_start, info.flat_end, info.has_bias, tuple(info.weight_shape))
+            for info in factors.layer_map.layers_info
+        ]
+        if expected != actual or factors.layer_map.layer_collection != self.layer_map.layer_collection:
+            raise ValueError("Supplied EK-FAC factors use an incompatible layer map.")
+
+    @staticmethod
+    def _as_batch(batch: Any) -> Tuple[Any, ...]:
+        return tuple(batch) if isinstance(batch, (list, tuple)) else (batch,)
+
+    @property
+    def supports_query_preconditioning(self) -> bool:
+        return True
+
+    def reshape_gradient_per_module(self, gradient: Any) -> Any:
+        grads = self.backend.reshape(gradient, (-1, self.model.nb_params))
+        return self.operator.reshape_per_module(grads)
+
+    def _selected_batches(self) -> Iterator[Tuple[Any, ...]]:
+        if self._curvature_batch_sampler is not None:
+            for step in range(self.config.n_iterations):
+                yield self._as_batch(self._curvature_batch_sampler(step))
+            return
+        assert self._curvature_dataset is not None
+        iterator = iter(self._curvature_dataset)
+        for _ in range(self.config.n_iterations):
+            try:
+                batch = next(iterator)
+            except StopIteration:
+                iterator = iter(self._curvature_dataset)
+                try:
+                    batch = next(iterator)
+                except StopIteration as error:
+                    raise ValueError("ASTRA curvature dataset is empty.") from error
+            yield self._as_batch(batch)
+
+    def _compute_ihvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        if use_gradient:
+            rhs = self.backend.reshape(
+                self.model.batch_jacobian_tensor(group_batch), (-1, self.model.nb_params)
+            )
+        else:
+            rhs = self.backend.reshape(group_batch[0], (-1, self.model.nb_params))
+
+        static_row_count = self.backend.tensor_shape(rhs)[0]
+        if static_row_count == 0:
+            raise ValueError("ASTRA requires at least one right-hand-side vector.")
+        if static_row_count is None:
+            # tf.data traces batches with a dynamic leading dimension. Chunking is
+            # an optimization only, so keep the traced solve as one matrix RHS.
+            rhs_chunks = [rhs]
+        else:
+            row_count = int(static_row_count)
+            chunk_size = self.config.rhs_chunk_size or row_count
+            rhs_chunks = [
+                rhs[start:min(start + chunk_size, row_count)]
+                for start in range(0, row_count, chunk_size)
+            ]
+        if self.config.initialize_from_ekfac:
+            solutions = [self.operator.apply(chunk) for chunk in rhs_chunks]
+        else:
+            solutions = [self.backend.zeros_like(chunk) for chunk in rhs_chunks]
+        velocities = [self.backend.zeros_like(chunk) for chunk in rhs_chunks]
+
+        for step, batch in enumerate(self._selected_batches()):
+            ggn = GeneralizedGaussNewtonOperator(self.model, batch, "mean")
+            learning_rate = self.config.learning_rate_at(step)
+            for index, (chunk_rhs, solution) in enumerate(zip(rhs_chunks, solutions)):
+                residual = ggn.matmat(solution) + self.config.damping * solution - chunk_rhs
+                preconditioned = self.operator.apply(residual)
+                velocity = self.config.momentum * velocities[index] + preconditioned
+                velocities[index] = velocity
+                solutions[index] = solution - learning_rate * velocity
+
+        result = solutions[0] if len(solutions) == 1 else self.backend.concat(solutions, axis=0)
+        return self.backend.transpose(result)
+
+    def _compute_hvp_single_batch(self, group_batch: Tuple[Any, ...], use_gradient: bool = True) -> Any:
+        raise NotImplementedError("ASTRA provides an approximate IHVP, not a direct HVP.")
 
 
 class IHVPCalculator(Enum):
@@ -1597,6 +1775,7 @@ class IHVPCalculator(Enum):
     Lissa = LissaIHVP
     Kfac = KfacIHVP
     Ekfac = EkfacIHVP
+    Astra = AstraIHVP
 
     @staticmethod
     def from_string(ihvp_calculator: str) -> 'IHVPCalculator':
@@ -1607,14 +1786,14 @@ class IHVPCalculator(Enum):
         ----------
         ihvp_calculator
             String indicated the method use to compute the inverse hessian vector product,
-            e.g 'exact', 'cgd', 'kfac', or 'ekfac'.
+            e.g. 'exact', 'cgd', 'kfac', 'ekfac', or 'astra'.
 
         Returns
         -------
         ivhp_calculator
             IHVPCalculator object.
         """
-        valid = ['exact', 'cgd', 'lissa', 'kfac', 'ekfac']
+        valid = ['exact', 'cgd', 'lissa', 'kfac', 'ekfac', 'astra']
         assert ihvp_calculator in valid, (
             f"Only {valid} inverse hessian vector product calculators are supported."
         )
@@ -1626,5 +1805,7 @@ class IHVPCalculator(Enum):
             return IHVPCalculator.Kfac
         if ihvp_calculator == 'ekfac':
             return IHVPCalculator.Ekfac
+        if ihvp_calculator == 'astra':
+            return IHVPCalculator.Astra
 
         return IHVPCalculator.Cgd

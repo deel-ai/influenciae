@@ -9,7 +9,7 @@ the objects necessary for computing the different (I)HVPs in second order influe
 functions.
 """
 from abc import abstractmethod
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from .model_wrappers import InfluenceModel
 from .inverse_hessian_vector_product import (
@@ -19,7 +19,10 @@ from .inverse_hessian_vector_product import (
     LissaIHVP,
     KfacIHVP,
     EkfacIHVP,
+    AstraConfig,
+    AstraIHVP,
 )
+from .kfac_factors import EKFACFactors
 
 from ..types import DatasetLike, Model
 
@@ -411,4 +414,63 @@ class EkfacIHVPFactory(InverseHessianVectorProductFactory):
             keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
             factors_path=self.factors_path,
             overwrite_factors=self.overwrite_factors,
+        )
+
+
+class AstraIHVPFactory(InverseHessianVectorProductFactory):  # pylint: disable=too-many-instance-attributes
+    """Factory for ASTRA IHVP solvers and their EK-FAC factor options."""
+
+    def __init__(
+        self,
+        config: Optional[AstraConfig] = None,
+        target_layers: Optional[list] = None,
+        n_ekfac_samples: Optional[int] = None,
+        fisher_type: str = "empirical",
+        module_partition_size: Optional[int] = None,
+        offload_activations_to_cpu: bool = False,
+        data_partition_size: Optional[int] = None,
+        accumulator_offload_mode: str = "none",
+        accumulator_offload_dir: Optional[str] = None,
+        keep_accumulator_offload_artifacts: bool = False,
+        layer_collection: str = "top_level",
+        factors_path: Optional[str] = None,
+        overwrite_factors: bool = False,
+        ekfac_factors: Optional[EKFACFactors] = None,
+        curvature_batch_sampler: Optional[Callable[[int], Any]] = None,
+    ):
+        self.config = config
+        self.target_layers = target_layers
+        self.n_ekfac_samples = n_ekfac_samples
+        self.fisher_type = fisher_type
+        self.module_partition_size = module_partition_size
+        self.offload_activations_to_cpu = offload_activations_to_cpu
+        self.data_partition_size = data_partition_size
+        self.accumulator_offload_mode = accumulator_offload_mode
+        self.accumulator_offload_dir = accumulator_offload_dir
+        self.keep_accumulator_offload_artifacts = keep_accumulator_offload_artifacts
+        self.layer_collection = layer_collection
+        self.factors_path = factors_path
+        self.overwrite_factors = overwrite_factors
+        self.ekfac_factors = ekfac_factors
+        self.curvature_batch_sampler = curvature_batch_sampler
+
+    def build(self, model_influence: InfluenceModel, dataset: DatasetLike) -> InverseHessianVectorProduct:
+        return AstraIHVP(
+            model_influence,
+            dataset,
+            config=self.config,
+            target_layers=self.target_layers,
+            n_ekfac_samples=self.n_ekfac_samples,
+            fisher_type=self.fisher_type,
+            module_partition_size=self.module_partition_size,
+            offload_activations_to_cpu=self.offload_activations_to_cpu,
+            data_partition_size=self.data_partition_size,
+            accumulator_offload_mode=self.accumulator_offload_mode,
+            accumulator_offload_dir=self.accumulator_offload_dir,
+            keep_accumulator_offload_artifacts=self.keep_accumulator_offload_artifacts,
+            layer_collection=self.layer_collection,
+            factors_path=self.factors_path,
+            overwrite_factors=self.overwrite_factors,
+            ekfac_factors=self.ekfac_factors,
+            curvature_batch_sampler=self.curvature_batch_sampler,
         )

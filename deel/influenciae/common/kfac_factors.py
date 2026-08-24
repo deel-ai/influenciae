@@ -454,7 +454,137 @@ class LayerParameterMap:
 
     @property
     def n_supported_layers(self) -> int:
+        """Return the number of mapped K-FAC-supported layers."""
         return len(self.layers_info)
+
+    def validate_strict_coverage(
+        self,
+        model: BaseInfluenceModel,
+        factors: "EKFACFactors",
+    ) -> None:
+        """Validate complete, ordered model coverage by usable EK-FAC blocks.
+
+        This check is opt-in so the existing partial-layer K-FAC and EK-FAC
+        behavior remains permissive.
+        """
+        infos = self.layers_info
+        if not infos:
+            raise ValueError("Strict EK-FAC coverage requires at least one mapped layer.")
+
+        layout = model.parameter_layout
+        if layout.total_size != int(model.nb_params):
+            raise ValueError(
+                "Model parameter_layout total size does not match model.nb_params."
+            )
+
+        expected_start = 0
+        seen_layer_indices = set()
+        for info in infos:
+            idx = info.layer_idx
+            if idx in seen_layer_indices:
+                raise ValueError(f"Layer parameter map contains duplicate layer index {idx}.")
+            seen_layer_indices.add(idx)
+
+            if info.flat_start != expected_start:
+                if info.flat_start < expected_start:
+                    problem = "overlapping or out-of-order"
+                else:
+                    problem = "gapped or out-of-order"
+                raise ValueError(
+                    f"Layer parameter map has {problem} ranges before layer {idx}: "
+                    f"expected start {expected_start}, got {info.flat_start}."
+                )
+            if info.flat_end <= info.flat_start:
+                raise ValueError(f"Layer {idx} has an empty or reversed parameter range.")
+
+            covered_entries = [
+                entry
+                for entry in layout.entries
+                if entry.flat_start >= info.flat_start and entry.flat_end <= info.flat_end
+            ]
+            expected_entries = 2 if info.has_bias else 1
+            if (
+                len(covered_entries) != expected_entries
+                or not covered_entries
+                or covered_entries[0].flat_start != info.flat_start
+                or covered_entries[-1].flat_end != info.flat_end
+            ):
+                suffix = "weight and bias" if info.has_bias else "weight"
+                raise ValueError(
+                    f"Layer {idx} range must cover exactly its {suffix} parameters "
+                    "in native model order."
+                )
+            if tuple(covered_entries[0].shape) != tuple(info.weight_shape):
+                raise ValueError(
+                    f"Layer {idx} weight coverage is partial or misordered: expected "
+                    f"shape {info.weight_shape}, got {covered_entries[0].shape}."
+                )
+
+            _, n_out = self._validate_factor_block(info, factors)
+            if info.has_bias and tuple(covered_entries[1].shape) != (n_out,):
+                raise ValueError(
+                    f"Layer {idx} bias coverage is partial or misordered: expected "
+                    f"shape {(n_out,)}, got {covered_entries[1].shape}."
+                )
+
+            expected_start = info.flat_end
+
+        if expected_start != int(model.nb_params):
+            raise ValueError(
+                "Layer parameter map does not cover all model parameters: "
+                f"covered through {expected_start}, expected {int(model.nb_params)}."
+            )
+
+    def _validate_factor_block(
+        self,
+        info: LayerInfo,
+        factors: "EKFACFactors",
+    ) -> Tuple[int, int]:
+        """Validate one mapped layer's EK-FAC factor dimensions."""
+        idx = info.layer_idx
+        required_dicts = (
+            "A", "G", "Q_A", "Lambda_A", "Q_G", "Lambda_G", "Lambda_corrected"
+        )
+        missing = [name for name in required_dicts if idx not in getattr(factors, name, {})]
+        if missing:
+            raise ValueError(f"Incomplete EK-FAC factors for layer {idx}: missing {missing}.")
+
+        q_a_shape = self.backend.tensor_shape(factors.Q_A[idx])
+        q_g_shape = self.backend.tensor_shape(factors.Q_G[idx])
+        if (
+            len(q_a_shape) != 2
+            or q_a_shape[0] != q_a_shape[1]
+            or len(q_g_shape) != 2
+            or q_g_shape[0] != q_g_shape[1]
+        ):
+            raise ValueError(f"EK-FAC eigenvector factors for layer {idx} must be square.")
+
+        n_in_eff = int(q_a_shape[0])
+        n_out = int(q_g_shape[0])
+        expected_shapes = {
+            "A": (n_in_eff, n_in_eff),
+            "G": (n_out, n_out),
+            "Lambda_A": (n_in_eff,),
+            "Lambda_G": (n_out,),
+        }
+        mismatched = [
+            name
+            for name, expected_shape in expected_shapes.items()
+            if self.backend.tensor_shape(getattr(factors, name)[idx]) != expected_shape
+        ]
+        if mismatched:
+            raise ValueError(f"EK-FAC block size mismatch for layer {idx} in factors {mismatched}.")
+
+        block_size = n_in_eff * n_out
+        mapped_size = info.flat_end - info.flat_start
+        corrected_shape = self.backend.tensor_shape(factors.Lambda_corrected[idx])
+        corrected_size = int(np.prod(corrected_shape, dtype=np.int64))
+        if mapped_size != block_size or corrected_shape != (block_size,):
+            raise ValueError(
+                f"EK-FAC block size mismatch for layer {idx}: mapped {mapped_size}, "
+                f"eigenbasis {block_size}, corrected eigenvalues {corrected_size}."
+            )
+        return n_in_eff, n_out
 
 
 # ---------------------------------------------------------------------------

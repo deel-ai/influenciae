@@ -11,9 +11,13 @@ import pytest
 import tensorflow as tf
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 from tensorflow.keras.layers import Conv2D, Dense, GlobalAveragePooling2D, Input
 from tensorflow.keras.models import Sequential as TFSequential
 from tensorflow.keras.losses import MeanSquaredError, Reduction
+
+from deel.influenciae.common import AstraConfig, AstraIHVP, InfluenceModel
+from deel.influenciae.common.ggn import GeneralizedGaussNewtonOperator
 
 from ..utils_test import allclose, almost_equal
 
@@ -107,6 +111,74 @@ def _tf_to_pt_flat_parameter_index(tf_weights, pt_weights):
     if mapping.shape[0] != total_tf_params:
         raise AssertionError("Invalid TF/PT index mapping length")
     return mapping
+
+
+def test_astra_and_ggn_backend_parity():
+    """Aligned linear models should produce the same GGN and ASTRA solve."""
+    inputs_np = np.array([[1.0, -0.5], [0.25, 2.0], [-1.0, 1.5], [0.5, 0.75]])
+    targets_np = np.array([[0.5], [-1.0], [1.25], [0.0]])
+    weights_np = np.array([[0.3], [-0.2]])
+
+    tf_model = TFSequential([
+        Input(shape=(2,), dtype=tf.float64),
+        Dense(1, use_bias=False, dtype=tf.float64),
+    ])
+    tf_model.layers[0].set_weights([weights_np])
+    pt_model = nn.Sequential(nn.Linear(2, 1, bias=False, dtype=torch.float64))
+    with torch.no_grad():
+        pt_model[0].weight.copy_(torch.tensor(weights_np.T, dtype=torch.float64))
+
+    tf_inputs = tf.constant(inputs_np, dtype=tf.float64)
+    tf_targets = tf.constant(targets_np, dtype=tf.float64)
+    pt_inputs = torch.tensor(inputs_np, dtype=torch.float64)
+    pt_targets = torch.tensor(targets_np, dtype=torch.float64)
+    tf_dataset = tf.data.Dataset.from_tensor_slices((tf_inputs, tf_targets)).batch(2)
+    pt_dataset = DataLoader(TensorDataset(pt_inputs, pt_targets), batch_size=2)
+    tf_influence_model = InfluenceModel(
+        tf_model,
+        start_layer=0,
+        loss_function=MeanSquaredError(reduction=Reduction.NONE),
+    )
+    pt_influence_model = InfluenceModel(
+        pt_model,
+        start_layer=0,
+        loss_function=nn.MSELoss(reduction="none"),
+    )
+    tf_rhs = tf.constant([[0.4, -0.7]], dtype=tf.float64)
+    pt_rhs = torch.tensor([[0.4, -0.7]], dtype=torch.float64)
+
+    tf_ggn = GeneralizedGaussNewtonOperator(
+        tf_influence_model, (tf_inputs, tf_targets), "mean"
+    ).matmat(tf_rhs)
+    pt_ggn = GeneralizedGaussNewtonOperator(
+        pt_influence_model, (pt_inputs, pt_targets), "mean"
+    ).matmat(pt_rhs)
+    np.testing.assert_allclose(tf_ggn.numpy(), pt_ggn.detach().numpy(), atol=1e-10)
+
+    config = AstraConfig(
+        damping=0.2,
+        n_iterations=3,
+        learning_rate=0.05,
+        initialize_from_ekfac=True,
+    )
+    tf_astra = AstraIHVP(
+        tf_influence_model,
+        tf_dataset,
+        config=config,
+        curvature_batch_sampler=lambda _step: (tf_inputs, tf_targets),
+    )
+    pt_astra = AstraIHVP(
+        pt_influence_model,
+        pt_dataset,
+        config=config,
+        curvature_batch_sampler=lambda _step: (pt_inputs, pt_targets),
+    )
+
+    tf_solution = tf_astra.precondition_gradient(tf_rhs)
+    pt_solution = pt_astra.precondition_gradient(pt_rhs)
+    np.testing.assert_allclose(
+        tf_solution.numpy(), pt_solution.detach().numpy(), rtol=1e-8, atol=1e-8
+    )
 
 
 class SimpleLinearModelTF:

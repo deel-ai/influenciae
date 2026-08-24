@@ -37,6 +37,7 @@ from deel.influenciae.common.kfac_factors import (
     EKFACFactors,
     HEURISTIC_DAMPING_SCALE,
 )
+from deel.influenciae.common.ekfac_operator import EKFACInverseOperator
 
 
 pytestmark = pytest.mark.pytorch
@@ -363,6 +364,15 @@ def test_ekfac_query_preconditioning_module_shapes(seed):
     ekfac = EkfacIHVP(influence_model, train_loader, damping=1e-3, n_ekfac_samples=None)
     batch = next(iter(train_loader))
     _assert_query_module_shapes(ekfac, influence_model, batch)
+    ekfac.layer_map.validate_strict_coverage(influence_model, ekfac.factors)
+
+    grads = influence_model.batch_jacobian_tensor(tuple(batch)).reshape(batch[0].shape[0], -1)
+    assert isinstance(ekfac.operator, EKFACInverseOperator)
+    applied = ekfac.operator.apply(grads)
+    delegated = ekfac._compute_ihvp_single_batch((grads,), use_gradient=False).T
+    torch.testing.assert_close(applied, delegated, rtol=1e-12, atol=1e-12)
+    with pytest.raises(ValueError, match="must have shape"):
+        ekfac.operator.apply(grads[:, :-1])
 
 
 def test_kfac_matches_exact_on_linear_model(seed):
