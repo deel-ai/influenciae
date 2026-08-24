@@ -119,7 +119,7 @@ class BaseGroupInfluenceCalculator:
         if ihvp_calculator is IHVPCalculator.Exact:
             return ihvp_calculator.value(self.model, self.train_set)
 
-        if ihvp_calculator in (IHVPCalculator.Kfac, IHVPCalculator.Ekfac):
+        if ihvp_calculator in (IHVPCalculator.Kfac, IHVPCalculator.Ekfac, IHVPCalculator.Astra):
             # K-FAC and EK-FAC don't need an extractor layer; they operate on
             # the full model using hook-based per-layer factor computation.
             return ihvp_calculator.value(self.model, self.train_set)

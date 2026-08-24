@@ -11,7 +11,15 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from deel.influenciae.common import InfluenceModel, ExactIHVP, KfacIHVP, EkfacIHVP, CACHE
+from deel.influenciae.common import (
+    AstraConfig,
+    AstraIHVP,
+    CACHE,
+    EkfacIHVP,
+    ExactIHVP,
+    InfluenceModel,
+    KfacIHVP,
+)
 from deel.influenciae.common.query_batching import QueryBatchingConfig, PreconditioningMode
 from deel.influenciae.influence import FirstOrderInfluenceCalculator
 from deel.influenciae.utils.sorted_dict import ORDER
@@ -426,6 +434,43 @@ def test_factorized_query_batching_matches_standard_full_rank(ihvp_cls):
     calc, train_loader, test_loader = _make_factorized_calc(ihvp_cls, normalize=False)
     standard = _collect_standard_scores(calc, test_loader, train_loader)
     query_batched = _collect_query_batched_scores(calc, test_loader, train_loader)
+    np.testing.assert_allclose(query_batched, standard, atol=_ATOL)
+
+
+def test_astra_query_batching_matches_standard_full_rank():
+    """ASTRA should compose with both first-order preconditioning directions."""
+    set_seed(0)
+    model = nn.Sequential(nn.Linear(3, 2, bias=False))
+    influence_model = InfluenceModel(
+        model, start_layer=0, loss_function=nn.MSELoss(reduction="none")
+    )
+    x_train = torch.randn(8, 3)
+    y_train = torch.randn(8, 2)
+    x_test = torch.randn(2, 3)
+    y_test = torch.randn(2, 2)
+    train_loader = DataLoader(TensorDataset(x_train, y_train), batch_size=4)
+    test_loader = DataLoader(TensorDataset(x_test, y_test), batch_size=2)
+    ekfac = EkfacIHVP(influence_model, train_loader, damping=0.1)
+    astra = AstraIHVP(
+        influence_model,
+        train_loader,
+        config=AstraConfig(
+            damping=0.1,
+            n_iterations=2,
+            learning_rate=0.05,
+        ),
+        ekfac_factors=ekfac.factors,
+        curvature_batch_sampler=lambda _step: (x_train, y_train),
+    )
+    calculator = FirstOrderInfluenceCalculator(
+        influence_model, train_loader, astra
+    )
+
+    standard = _collect_standard_scores(calculator, test_loader, train_loader)
+    query_batched = _collect_query_batched_scores(
+        calculator, test_loader, train_loader
+    )
+
     np.testing.assert_allclose(query_batched, standard, atol=_ATOL)
 
 

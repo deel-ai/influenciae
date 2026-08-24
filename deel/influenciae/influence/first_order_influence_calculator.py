@@ -262,7 +262,7 @@ class FirstOrderInfluenceCalculator(BaseInfluenceCalculator, BaseGroupInfluenceC
         if not self.ihvp_calculator.supports_query_preconditioning:
             raise ValueError(
                 f"The IHVP calculator {type(self.ihvp_calculator).__name__} does not "
-                "support query-side preconditioning. Use ExactIHVP, KfacIHVP, or EkfacIHVP."
+                "support query-side preconditioning. Use ExactIHVP, KfacIHVP, EkfacIHVP, or AstraIHVP."
             )
         if config is None:
             config = QueryBatchingConfig()
