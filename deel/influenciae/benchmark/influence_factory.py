@@ -21,6 +21,8 @@ from ..common import (
     CGDIHVPFactory,
     LissaIHVPFactory,
 )
+from ..common.ihvp_factory import AstraIHVPFactory
+from ..common.inverse_hessian_vector_product import AstraIHVP
 from ..influence import FirstOrderInfluenceCalculator, ArnoldiInfluenceCalculator
 from ..rps import RepresenterPointLJE, RepresenterPointL2
 from ..trac_in import TracIn
@@ -85,14 +87,16 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
     """A factory for creating instances of FirstOrderInfluenceCalculator objects."""
 
     def __init__(self, ihvp_mode: str, start_layer: int = -1, dataset_hessian_size: int = -1, n_opt_iters: int = 100,
-                 feature_extractor: Any = -1, loss_function: Optional[Callable] = None):
+                 feature_extractor: Any = -1, loss_function: Optional[Callable] = None,
+                 astra_factory: Optional[AstraIHVPFactory] = None):
         self.start_layer = start_layer
         self.ihvp_mode = ihvp_mode
         self.n_opt_iters = n_opt_iters
         self.feature_extractor = feature_extractor
         self.dataset_hessian_size = dataset_hessian_size
         self.loss_function = loss_function
-        assert self.ihvp_mode in ['exact', 'cgd', 'lissa']
+        self.astra_factory = astra_factory or AstraIHVPFactory()
+        assert self.ihvp_mode in ['exact', 'cgd', 'lissa', 'astra']
 
     def build(self, training_dataset: DatasetLike, model: Any,
               train_info: Any = None) -> FirstOrderInfluenceCalculator:
@@ -103,7 +107,7 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
 
         dataset_hessian = _get_dataset_subset_for_hessian(training_dataset, self.dataset_hessian_size, model)
 
-        ihvp_calculator: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP]
+        ihvp_calculator: Union[ExactIHVP, ConjugateGradientDescentIHVP, LissaIHVP, AstraIHVP]
         if self.ihvp_mode == 'exact':
             ihvp_calculator = ExactIHVP(influence_model, dataset_hessian)
         elif self.ihvp_mode == 'cgd':
@@ -122,6 +126,8 @@ class FirstOrderFactory(InfluenceCalculatorFactory):
                 damping=1e-4,
                 scale=5.
             )
+        elif self.ihvp_mode == 'astra':
+            ihvp_calculator = self.astra_factory.build(influence_model, dataset_hessian)
         else:
             raise ValueError("unknown ihvp calculator=" + self.ihvp_mode)
 

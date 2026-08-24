@@ -3,10 +3,13 @@ from typing import Any, Optional, Tuple
 import numpy as np
 import pytest
 import torch
+import torch.nn as nn
 
-from torch.utils.data import TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
 
 from deel.influenciae.benchmark.base_benchmark import MislabelingDetectorEvaluator, BaseTrainingProcedure
+from deel.influenciae.benchmark.influence_factory import FirstOrderFactory
+from deel.influenciae.common import AstraConfig, AstraIHVP, AstraIHVPFactory
 
 
 pytestmark = pytest.mark.pytorch
@@ -81,3 +84,23 @@ def test_noise_pytorch(tmp_path):
     assert np.max(np.abs(curve - result[0][0])) < 1E-6
     assert np.max(np.abs(mean_curve - result[1])) < 1E-6
     assert np.max(np.abs(roc - result[2])) < 1E-6
+
+
+def test_first_order_factory_builds_astra():
+    """The benchmark factory should delegate ASTRA options to its IHVP factory."""
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Linear(2, 2))
+    inputs = torch.randn(6, 2)
+    targets = torch.tensor([0, 1, 0, 1, 0, 1])
+    dataset = DataLoader(TensorDataset(inputs, targets), batch_size=3)
+    astra_factory = AstraIHVPFactory(
+        config=AstraConfig(damping=0.1, n_iterations=0),
+    )
+
+    calculator = FirstOrderFactory(
+        "astra",
+        start_layer=0,
+        astra_factory=astra_factory,
+    ).build(dataset, model)
+
+    assert isinstance(calculator.ihvp_calculator, AstraIHVP)
